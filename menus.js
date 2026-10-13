@@ -72,8 +72,13 @@
     shell.innerHTML = mainMarkup;
     shell.removeAttribute("aria-busy");
     shell.querySelectorAll("button").forEach((button) => {
-      button.disabled = false;
+      button.disabled = !window.CruciataArt.realisticAssets.ready;
     });
+    window.CruciataArt.assetReady.then(() =>
+      shell.querySelectorAll(".menu-main-buttons button").forEach((button) => {
+        button.disabled = false;
+      }),
+    );
     bind("open-campaign", campaign);
     bind("open-quickmatch", slots);
     bind("resume-campaign", () => {
@@ -167,6 +172,14 @@
     const relief = `<g class="atlas-relief" clip-path="url(#atlas-land-clip)"><path d="M315 35Q283 140 333 255T325 475T294 685M334 45Q302 152 352 264T344 480T313 694M353 58Q320 165 369 278T362 496T331 710" fill="none" stroke="#4d4b3650" stroke-width="2"/><path d="M303 66l12-21 11 22M317 132l13-26 12 27M318 250l14-29 14 30M300 422l14-24 14 26M285 590l11-23 13 24" fill="#6a664355" stroke="#d3b87a55" stroke-width="2"/><path d="M288 60l11-18 13 21M302 125l12-22 13 25M304 242l12-24 13 28" fill="none" stroke="#e0c58a66"/></g>`;
     const water = `<defs><clipPath id="atlas-land-clip">${landMarkup}</clipPath><mask id="atlas-water-mask"><rect width="440" height="710" fill="white"/><g fill="black">${landMarkup}</g></mask><pattern id="atlas-water-pattern" width="72" height="44" patternUnits="userSpaceOnUse"><path class="atlas-wave" d="M-16 14Q0 5 16 14T48 14T80 14M-32 36Q-16 27 0 36T32 36T64 36T96 36" fill="none" stroke="#6aa3af" stroke-width="1" opacity=".3"/></pattern></defs><rect width="440" height="710" fill="url(#atlas-water-pattern)" mask="url(#atlas-water-mask)"/>`;
 
+    const art = window.CruciataArt;
+    const landTexture = art.realisticAssets.ready
+      ? art.materialTile(0, 128).toDataURL()
+      : "";
+    const waterTexture = art.realisticAssets.ready
+      ? art.materialTile(4, 128).toDataURL()
+      : "";
+    const materials = `<defs><pattern id="atlas-real-land" width="128" height="128" patternUnits="userSpaceOnUse"><rect width="128" height="128" fill="#899074"/>${landTexture ? `<image href="${landTexture}" width="128" height="128" opacity=".23"/>` : ""}</pattern><pattern id="atlas-real-water" width="128" height="128" patternUnits="userSpaceOnUse"><rect width="128" height="128" fill="#263f42"/>${waterTexture ? `<image href="${waterTexture}" width="128" height="128" opacity=".25"/>` : ""}</pattern></defs>`;
     let markers = locations
       .map((p, i) => {
         const [x, y] = atlasStops[i];
@@ -178,7 +191,7 @@
     frame(
       "The pilgrim's chronicle",
       "ITINERARIUM · 1097–1099",
-      `<div class="atlas-layout"><div class="atlas"><svg viewBox="0 0 440 710" role="img" aria-label="Eastern Mediterranean campaign atlas"><rect width="440" height="710" fill="#173642"/>${water}${landPolygons ? landPolygons.map((poly) => `<polygon points="${poly.map((p) => project(...p).join(",")).join(" ")}" fill="#9c8254"/>`).join("") : `<polygon points="${points} 440,710 440,0 0,0" fill="#9c8254"/>`}<polyline points="${points}" fill="none" stroke="#d8bd7d" stroke-width="2"/>${relief}<polyline class="atlas-surf" points="${points}" fill="none" stroke="#b0d5d5" stroke-width="5" opacity=".18"/><polyline points="${route}" fill="none" stroke="#e9d19e" stroke-width="2" stroke-dasharray="5 5"/>${
+      `<div class="atlas-layout"><div class="atlas"><svg viewBox="0 0 440 710" role="img" aria-label="Eastern Mediterranean campaign atlas">${materials}<rect width="440" height="710" fill="url(#atlas-real-water)"/>${water}${landPolygons ? landPolygons.map((poly) => `<polygon points="${poly.map((p) => project(...p).join(",")).join(" ")}" fill="url(#atlas-real-land)"/>`).join("") : `<polygon points="${points} 440,710 440,0 0,0" fill="url(#atlas-real-land)"/>`}<polyline points="${points}" fill="none" stroke="#d8bd7d" stroke-width="2"/>${relief}<polyline class="atlas-surf" points="${points}" fill="none" stroke="#b0d5d5" stroke-width="5" opacity=".18"/><polyline points="${route}" fill="none" stroke="#e9d19e" stroke-width="2" stroke-dasharray="5 5"/>${
         coastline
           ? coastline
               .filter((p) => p !== mappedCoast)

@@ -1,6 +1,8 @@
-# cruciata
+# cruciata - realism visual branch
 
-A static, stylized overhead RTS about a fictional pilgrim host during the First Crusade. Six campaign chapters combine settlement building, an escorted river crossing, a winter defense, village protection, wall breaches, and the occupation of Jerusalem. Original canvas artwork, Jerusalem Cross standards, mission briefings, Catholic imagery, and sourced Latin scripture establish the atmosphere.
+A static overhead RTS with an alternate realism presentation about a fictional pilgrim host during the First Crusade. Six campaign chapters combine settlement building, an escorted river crossing, a winter defense, village protection, wall breaches, and the occupation of Jerusalem. Original canvas artwork, Jerusalem Cross standards, mission briefings, Catholic imagery, and sourced Latin scripture establish the atmosphere.
+
+This is the alternative `realism` branch. [Compare it live](https://esak9781.github.io/cruciata/realism/) with the [main game](https://esak9781.github.io/cruciata/). Gameplay is shared; the presentation favors natural materials, detailed overhead assets, realistic proportions, and a restrained interface. Asset files and complete generation prompts are documented in [REALISM_ASSETS.md](REALISM_ASSETS.md).
 
 ## Run and deploy
 

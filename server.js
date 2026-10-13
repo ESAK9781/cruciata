@@ -44,6 +44,7 @@ http
           "fog.js",
           "audio.js",
           "CREDITS.md",
+          "REALISM_ASSETS.md",
         ].includes(relative)
       )
     ) {

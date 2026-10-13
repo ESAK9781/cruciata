@@ -11,6 +11,7 @@ const assets = [
   "audio.js",
   "fog.js",
   "CREDITS.md",
+  "REALISM_ASSETS.md",
   "game.js",
   "menus.js",
   "index.html",
@@ -60,6 +61,7 @@ for (const prefix of ["/", "/cruciata/"]) {
           ".ogg": "audio/ogg",
           ".mp3": "audio/mpeg",
           ".svg": "image/svg+xml",
+          ".png": "image/png",
         }[path.extname(file)] || "text/plain";
       response.writeHead(200, { "Content-Type": `${type}; charset=utf-8` });
       response.end(fs.readFileSync(path.join(output, file)));
