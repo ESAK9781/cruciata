@@ -1,18 +1,16 @@
-# cruciata - realism visual branch
+# cruciata
 
-A static overhead RTS with an alternate realism presentation about a fictional pilgrim host during the First Crusade. Six campaign chapters combine settlement building, an escorted river crossing, a winter defense, village protection, wall breaches, and the occupation of Jerusalem. Original canvas artwork, Jerusalem Cross standards, mission briefings, Catholic imagery, and sourced Latin scripture establish the atmosphere.
+A static overhead RTS with original procedural artwork about a fictional pilgrim host during the First Crusade. Six campaign chapters combine settlement building, an escorted river crossing, a winter defense, village protection, wall breaches, and the occupation of Jerusalem. Original canvas artwork, Jerusalem Cross standards, mission briefings, Catholic imagery, and sourced Latin scripture establish the atmosphere.
 
-This is the alternative `realism` branch. [Compare it live](https://esak9781.github.io/cruciata/realism/) with the [main game](https://esak9781.github.io/cruciata/). Gameplay is shared; the presentation favors natural materials, detailed overhead assets, realistic proportions, and a restrained interface. Asset files and complete generation prompts are documented in [REALISM_ASSETS.md](REALISM_ASSETS.md).
+The game uses its original procedural overhead artwork throughout.
 
 ## Run and deploy
 
 Play at [esak9781.github.io/cruciata](https://esak9781.github.io/cruciata/). Source: [ESAK9781/cruciata](https://github.com/ESAK9781/cruciata).
 
-An independent [realism visual branch](https://github.com/ESAK9781/cruciata/tree/realism) provides a [playable comparison](https://esak9781.github.io/cruciata/realism/). It uses detailed bitmap assets and natural materials while preserving the game rules. The normal site continues to use the main branch's presentation.
-
 Run `npm ci` and `npm start`, then open `http://localhost:3000`. Run `npm run build` to create the complete static site in `dist/`. Upload that folder to any static host; no backend, account, database, or external font is required. Paths also work under a GitHub Pages repository subpath.
 
-The included `.github/workflows/pages.yml` checks source, builds, and publishes `dist/`, including the separate realism comparison under `/realism/`. Browser tests run locally, outside the deployment workflow. In GitHub repository Settings / Pages, choose GitHub Actions as the source. The workflow runs on main/master/realism or manually.
+The included `.github/workflows/pages.yml` checks source, builds, and publishes `dist/`, Browser tests run locally, outside the deployment workflow. In GitHub repository Settings / Pages, choose GitHub Actions as the source. The workflow runs on main/master or manually.
 
 ## Campaign and quickmatch
 
@@ -32,7 +30,7 @@ Easy, Normal, and Hard change the enemy's planning interval, worker targets, sco
 - Rotate a gate before placing it with R or the Rotate gate button. Its footprint, preview, construction, and saved orientation turn together. Gates start closed and can be opened after construction.
 - Space selects soldiers; E selects villagers; V selects an idle villager; Q centers the settlement.
 - F then click orders a fighting advance. H holds. G scouts as a company, explores unknown land, and withdraws without fighting; manual movement, attack, hold, or deployment orders end auto scouting. B spends 30 faith to bless selected soldiers. T sets up or packs trebuchets. X cancels. Escape pauses or cancels an active command.
-- Ctrl+1 through Ctrl+9 save control groups; 1 through 9 recall them. Shift+1 through Shift+7 queue infantry, archers, cavalry, chaplains, villagers, standards, and trebuchets.
+- Ctrl+0 through Ctrl+9 save unit or building groups; Ctrl+Shift+number adds the selection to an existing group; 0 through 9 recall them. The numbered battlefield buttons also select groups. Groups are saved with each session. Shift+1 through Shift+7 queue infantry, archers, cavalry, chaplains, villagers, standards, and trebuchets.
 
 Plan a foundation through Build without selecting a villager; its cost is paid immediately. Right-click it with villagers to assign construction. Hold Shift while placing another foundation or commanding villagers to a project to queue construction behind their current project. Scaffolds, rising masonry, cranes, and material piles show progress. Completed depot builders automatically seek their depot's resource. Damage causes progressive cracks, roof breaches, smoke, fire, and rubble.
 
@@ -40,7 +38,7 @@ Curtain walls remain cheap and quick to build, but have 3200 health; gatehouses 
 
 Villagers harvest food, timber, gold, and stone, carry supplies, and credit them only at a suitable depot. Town centers accept all resources; mills accept food; lumber camps accept wood; mining camps accept gold and stone. Local depots shorten delivery trips. Grain fields hold 2400 food and support up to five workers inside their passable footprint. Deposits deplete. Clicking a patch shows its total and remaining stock; Clear patch assigns selected or idle villagers to remove an obstruction without recovering its resources.
 
-Houses provide twelve population and town centers thirty-two, up to 260 per army. Faster training and lower soldier costs support larger armies. Infantry protects the front; archers maintain distance; cavalry seeks vulnerable opponents; chaplains heal and retreat; standards strengthen nearby allies. Troops move independently and form into role-based arrival positions if the destination is safe. Combat takes priority over forming up.
+Houses provide twelve population and town centers thirty-two, up to 260 per army. Faster training and lower soldier costs support larger armies. Infantry protects the front; archers maintain distance; cavalry seeks vulnerable opponents; chaplains heal and retreat; standards strengthen nearby allies. Troops move independently and form into role-based arrival positions if the destination is safe. Combat takes priority over forming up. Select military units to choose Fight (pursue and attack), Hold (attack within range without independent movement), or Stand down (no independent movement or attacks). Stances persist across manual movement orders and saves.
 
 Select a barracks, stable, chapel, or siege workshop to see its training and unit-variation upgrades. Swordsmen become Templars and then Veteran Templars; other combat roles have corresponding two-stage variations. An upgrade improves every existing unit of that base type and every future recruit, adding 25 percent health and damage per rank. There is no resource trading or global generic research menu.
 
@@ -50,7 +48,7 @@ Curtain walls block passage and must be destroyed. Gatehouses can open or close 
 
 Campaign progress, preferences, and full active matches use browser local storage. Campaign and three quickmatch sessions are separate. Autosaves occur every twenty simulation seconds and when leaving a live game; the menu never replaces an existing battle with its preview. Saves are specific to the browser and website origin. Manual Save is available in the header. Version-two campaign checkpoints migrate on resume, preserving the company and stores while adding the enemy economy and finite fields; the old checkpoint remains as a backup.
 
-Four user-supplied MP3s play as a quiet shuffled background playlist independent of gameplay. Each track plays once per bag with no adjacent repeat across bags and gentle fades. Music and effects have separate persisted volume controls; Next track is available. Kenney CC0 recordings provide restrained combat, gathering, construction, and interface sounds. Playback starts after interaction and pauses while the tab is hidden. Original prompts remain in [MUSIC_PROMPTS.md](MUSIC_PROMPTS.md); sources and licenses are in [CREDITS.md](CREDITS.md).
+Four user-supplied MP3s play as a quiet shuffled background playlist independent of gameplay. Each track plays once per bag with no adjacent repeat across bags and gentle fades. Music and effects have separate persisted volume controls; Next track is available. Kenney CC0 recordings provide restrained combat, gathering, construction, and interface sounds. Playback starts after interaction and pauses while the tab is hidden. Original prompts remain in [MUSIC_PROMPTS.md](docs/MUSIC_PROMPTS.md); sources and licenses are in [CREDITS.md](docs/CREDITS.md).
 
 Units and structures use original overhead assets with ranked armor, shields, religious standards, worker tools, scaffolding, and damage states. Dense forest canopies cover their navigation exclusion area. Harvesting, construction, blessing, impact, and blood particles emphasize actions. Stylized battlefield casualties and heavier siege gore can be disabled in Settings. Game text cannot be accidentally highlighted; setup inputs remain editable.
 
@@ -60,11 +58,11 @@ Run `npm run check` and `npm test` after installing Chromium and Firefox with `n
 
 Diagnostic simulation controls are available only under `/?test`; production rejects their mutations. Visual-review screenshots are saved in `artifacts/`. Previous-version tests are archived there for reference; the active suite exercises the current rules.
 
-The `DEBUG_MODE` flag near the top of `game.js` is currently `true`. Debug in the header or F2 opens playtesting cheats: resources, 48 troops, healing, invulnerability, instant construction/training, map reveal, 4x speed, removal of enemy combat troops, and victory. Set the flag to `false` to remove the menu and disable cheats. Cinematics have been removed; campaign chapters use a short mission briefing. Enemy scouts avoid combat, and offensive companies wait at least five/four/three minutes on Easy/Normal/Hard before launching against discovered locations.
+The `DEBUG_MODE` flag near the top of `src/game.js` is currently `true`. Debug in the header or F2 opens playtesting cheats: resources, 48 troops, healing, invulnerability, instant construction/training, map reveal, 4x speed, removal of enemy combat troops, and victory. Set the flag to `false` to remove the menu and disable cheats. Cinematics have been removed; campaign chapters use a short mission briefing. Enemy scouts avoid combat, and offensive companies wait at least five/four/three minutes on Easy/Normal/Hard before launching against discovered locations.
 
 Every campaign can also end immediately through capital destruction: losing your town center is defeat; destroying the opposing capital or main citadel is victory regardless of secondary objectives. Neutral villages are protected from attacks and are claimed by bringing at least three soldiers close. Buildings without troop production cannot set rally points. Cancelled foundations vanish; destroyed buildings leave detailed rubble. Resources and rocks form clusters, exhausted patches disappear, and impassable rock masses break up open terrain. Roads connect actual settlements along passable routes. Water ripples animate along ocean shores and rivers, grass bends around moving troops, and mouse-wheel zoom preserves the ground under the cursor.
 
-Starting enemy troops and owned fortifications are grouped on the far side of each map. Coastal and bridge outposts begin neutral, with no faction vision. Either army can capture an uncontested site with three soldiers over eighteen seconds. Foundations can be planned anywhere already explored, but unfinished construction provides no vision.
+Starting enemy troops and owned fortifications are grouped on the far side of each map. Coastal and bridge outposts begin neutral, with no faction vision. Either army can capture an uncontested site with three soldiers over eighteen seconds. Foundations can be planned anywhere already explored, but unfinished construction provides no vision. Builders finish explicit Shift queues first, then automatically take nearby unfinished projects after completing a non-depot building. Wall ends can meet rocky terrain and shores.
 
 Starting structures are checked for overlapping footprints, map boundaries, and impassable ground before terrain resources are generated. Soldiers muster in spaced ranks just outside their settlement, facing toward the opponent; villagers also start on clear ground.
 
@@ -79,3 +77,23 @@ Archer arrows and trebuchet fire pass over walls; walls still block troop moveme
 Navigation uses the same six-pace collision radius as movement, a finer sixteen-pace grid, and exact obstacle-edge routes for narrow passages between grid points. Units finish corner waypoints before turning, so they do not cut into tight entrances.
 
 Golden grass grows in small meadow regions and bends around moving troops. River valleys add reeds, arid ground adds dry brush and dust, and winter patches react with disturbed snow. These effects do not block movement. Campaign victories return directly to the atlas, where the waving army standard advances toward the next chapter. Completion and unlocks are recorded separately from active battle checkpoints. Local tests run at reduced priority with an eight-second rest between cases; run only the relevant test files or use Playwright `--grep` for a focused batch.
+
+## Project layout
+
+- `src/`: browser simulation, rendering, navigation, audio, menus and styles.
+- `assets/`: overhead atlases, resource icons, music, effects and local geography.
+- `docs/`: asset credits and generation prompts.
+- `scripts/`: static build tool; `tests/`: focused local browser checks.
+- `index.html`: page entry; `server.js`: optional local development server.
+
+Opening `index.html` directly works. You can also use `npm start` or GitHub Pages. Campaign geography loads locally without a JSON fetch.
+
+Long winding rock barriers create passes and defensible approaches, with inaccessible interior holes filled in. Fortified cities have irregular curtains; some defenses join natural rock. Capturing settlements transfers their residents as villagers. Observation towers cost 35 wood, reveal terrain to 1100 range, and have no weapons. Defense towers retain their weapons. Build actions are grouped by purpose. Natural resource deposits hold three times the previous reserves; gathering speed is unchanged.
+
+Gates close automatically when a visible armed enemy comes within 145 world units. Gates that closed automatically reopen once threats leave 200 range; manually closed gates stay closed. Selected trebuchets show one combined reachable area, including minimum-range exclusions. Villagers receive spaced formation destinations for ordinary move commands.
+
+After a campaign victory, the atlas shows the army traveling toward the next chapter, with a red trail marking completed ground. Flags ripple along their fabric and coastline surf shares the battlefield wave calculation. Navigation updates resample changed footprints and reuse connectivity buffers; rock-rim geometry and fog image buffers are cached. Browser tests run serially with idle intervals to limit load.
+
+Navigation searches in live play run under a shared frame budget. Exact collision checks and narrow-gap routing are retained, with compact per-chunk edge caches and bounded pending searches. Connectivity updates use scanline flood filling, and wall corner checks exclude distant buildings before examining neighbors.
+
+Right-click a completed depot with villagers selected to gather the nearest explored resource it accepts and deliver there. Mining camps choose the nearest gold or stone patch. The chosen depot remains the delivery destination until it becomes unavailable; exhausted local clusters still cause workers to stop rather than cross the map.

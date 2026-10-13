@@ -36,7 +36,8 @@
       const sources = units
         .filter((u) => u.team === this.team && u.hp > 0)
         .map((u) => ({
-          ...u,
+          x: u.x,
+          y: u.y,
           vision:
             u.type === "worker"
               ? 310
@@ -49,48 +50,52 @@
       for (const b of buildings)
         if (b.team === this.team && b.hp > 0 && b.progress >= 1)
           sources.push({
-            ...b,
+            x: b.x,
+            y: b.y,
             vision:
-              b.kind === "tower"
-                ? 600
-                : b.kind === "towncenter"
-                  ? 520
-                  : b.kind === "farm"
-                    ? 180
-                    : 300,
+              b.kind === "watchtower"
+                ? 1100
+                : b.kind === "tower"
+                  ? 600
+                  : b.kind === "towncenter"
+                    ? 520
+                    : b.kind === "farm"
+                      ? 180
+                      : 300,
           });
       for (const p of sources) {
-        const minX = Math.max(0, Math.floor((p.x - p.vision) / this.cell));
-        const maxX = Math.min(
-          this.cols - 1,
-          Math.floor((p.x + p.vision) / this.cell),
-        );
-        const minY = Math.max(0, Math.floor((p.y - p.vision) / this.cell));
+        const minY = Math.max(0, Math.ceil((p.y - p.vision) / this.cell - 0.5));
         const maxY = Math.min(
           this.rows - 1,
-          Math.floor((p.y + p.vision) / this.cell),
+          Math.floor((p.y + p.vision) / this.cell - 0.5),
         );
-        for (let y = minY; y <= maxY; y++)
-          for (let x = minX; x <= maxX; x++) {
-            if (
-              Math.hypot(
-                (x + 0.5) * this.cell - p.x,
-                (y + 0.5) * this.cell - p.y,
-              ) > p.vision
-            )
-              continue;
-            const id = y * this.cols + x;
-            this.visible[id] = 1;
-            this.explored[id] = 1;
-          }
+        for (let y = minY; y <= maxY; y++) {
+          const dy = (y + 0.5) * this.cell - p.y;
+          const reach = Math.sqrt(Math.max(0, p.vision * p.vision - dy * dy));
+          const x0 = Math.max(0, Math.ceil((p.x - reach) / this.cell - 0.5));
+          const x1 = Math.min(
+            this.cols - 1,
+            Math.floor((p.x + reach) / this.cell - 0.5),
+          );
+          if (x0 > x1) continue;
+          const first = y * this.cols + x0,
+            last = y * this.cols + x1 + 1;
+          this.visible.fill(1, first, last);
+          this.explored.fill(1, first, last);
+        }
       }
       for (const b of buildings)
         if (this.sees(b)) this.known[b.id] = { ...b, queue: [], rally: null };
-      const pixels = this.context.createImageData(this.cols, this.rows);
+      if (!this.pixels) {
+        this.pixels = this.context.createImageData(this.cols, this.rows);
+        for (let i = 0; i < this.explored.length; i++) {
+          this.pixels.data[i * 4] = 8;
+          this.pixels.data[i * 4 + 1] = 16;
+          this.pixels.data[i * 4 + 2] = 23;
+        }
+      }
+      const pixels = this.pixels;
       for (let i = 0; i < this.explored.length; i++) {
-        pixels.data[i * 4] = 8;
-        pixels.data[i * 4 + 1] = 16;
-        pixels.data[i * 4 + 2] = 23;
         pixels.data[i * 4 + 3] = this.visible[i]
           ? 0
           : this.explored[i]

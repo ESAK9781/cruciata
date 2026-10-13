@@ -5,19 +5,7 @@ const http = require("node:http");
 
 const root = path.resolve(__dirname, "..");
 const output = path.join(root, "dist");
-const assets = [
-  ".nojekyll",
-  "artwork.js",
-  "audio.js",
-  "fog.js",
-  "CREDITS.md",
-  "REALISM_ASSETS.md",
-  "game.js",
-  "menus.js",
-  "index.html",
-  "navigation.js",
-  "style.css",
-];
+const assets = [".nojekyll", "index.html", "README.md"];
 function walk(folder, prefix = "") {
   return fs
     .readdirSync(folder, { withFileTypes: true })
@@ -27,7 +15,8 @@ function walk(folder, prefix = "") {
         : [prefix + e.name],
     );
 }
-assets.push(...walk(path.join(root, "assets"), "assets/"));
+for (const folder of ["src", "assets", "docs"])
+  assets.push(...walk(path.join(root, folder), folder + "/"));
 assets.sort();
 
 test("deployment contains only the exact static browser assets", async () => {

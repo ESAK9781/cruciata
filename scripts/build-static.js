@@ -1,26 +1,15 @@
 const fs = require("node:fs");
 const path = require("node:path");
-
-// Publish only browser assets, never development tools or test artifacts.
 const root = path.resolve(__dirname, "..");
-const output = path.join(root, "dist");
+const output = path.resolve(root, "dist");
+if (path.dirname(output) !== root || path.basename(output) !== "dist")
+  throw new Error("Invalid build target");
+fs.rmSync(output, { recursive: true, force: true });
 fs.mkdirSync(output, { recursive: true });
-for (const file of [
-  "index.html",
-  "style.css",
-  "game.js",
-  "menus.js",
-  "artwork.js",
-  "navigation.js",
-  "fog.js",
-  "audio.js",
-  "CREDITS.md",
-  "REALISM_ASSETS.md",
-  ".nojekyll",
-]) {
+for (const file of ["index.html", "README.md", ".nojekyll"])
   fs.copyFileSync(path.join(root, file), path.join(output, file));
-}
-fs.cpSync(path.join(root, "assets"), path.join(output, "assets"), {
-  recursive: true,
-});
-console.log("Static site ready in dist/ — no server or runtime dependencies.");
+for (const directory of ["src", "assets", "docs"])
+  fs.cpSync(path.join(root, directory), path.join(output, directory), {
+    recursive: true,
+  });
+console.log("Static site ready in dist/ - no runtime dependencies.");

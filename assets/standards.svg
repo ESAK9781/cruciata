@@ -1,8 +1,8 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 260 620">
   <defs><linearGradient id="cloth"><stop stop-color="#421d19"/><stop offset=".45" stop-color="#8b3529"/><stop offset=".7" stop-color="#59251d"/><stop offset="1" stop-color="#351c18"/></linearGradient><linearGradient id="green"><stop stop-color="#163729"/><stop offset=".5" stop-color="#28563d"/><stop offset="1" stop-color="#122d26"/></linearGradient></defs>
-  <path d="M47 55v440l75 50 75-50V55z" fill="url(#green)" stroke="#7a6842" stroke-width="2"/>
+  <path d="M47 55v440l75 50 75-50V55z" fill="url(#green)" stroke="#7a6842" stroke-width="2"><animate attributeName="d" dur="7s" repeatCount="indefinite" values="M47 55Q51 260 47 495l75 50 75-50Q193 260 197 55z;M47 55Q35 260 55 495l73 46 70-50Q205 260 197 55z;M47 55Q51 260 47 495l75 50 75-50Q193 260 197 55z"/></path>
   <path d="M177 166a37 37 0 1 0 0 65a30 30 0 1 1 0-65" fill="#b9a475"/>
-  <path d="M13 18v470l89 82 89-82V18z" fill="url(#cloth)" stroke="#b59157" stroke-width="3"/>
+  <path d="M13 18v470l89 82 89-82V18z" fill="url(#cloth)" stroke="#b59157" stroke-width="3"><animate attributeName="d" dur="6.5s" repeatCount="indefinite" values="M13 18Q20 252 13 488l89 82 89-82Q184 252 191 18z;M13 18Q3 252 22 488l82 77 86-83Q201 252 191 18z;M13 18Q20 252 13 488l89 82 89-82Q184 252 191 18z"/></path>
   <path d="M25 25v457l77 71 77-71V25z" fill="none" stroke="#ba995b" stroke-width="1"/>
   <path d="M102 120v150M27 195h150M77 120h50M77 270h50M27 170v50M177 170v50" fill="none" stroke="#c5aa71" stroke-width="12"/>
   <path d="M57 141v29M42 155h30M147 141v29M132 155h30M57 220v29M42 235h30M147 220v29M132 235h30" fill="none" stroke="#c5aa71" stroke-width="7"/>

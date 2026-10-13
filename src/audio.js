@@ -30,8 +30,14 @@
     deliver: ["handleCoins"],
     click: ["click_001"],
     siege: ["creak1"],
+    explosion: [
+      "explosionCrunch_000",
+      "explosionCrunch_001",
+      "lowFrequency_explosion_000",
+    ],
     arrow: ["knifeSlice2"],
   };
+  const voices = new Map();
   const cache = new Map(),
     last = new Map(),
     counts = new Map(),
@@ -146,6 +152,7 @@
         const a = new Audio(`assets/audio/${name}.ogg`);
         a.preload = "auto";
         cache.set(name, a);
+        voices.set(name, [a]);
       }
   window.CruciataAudio = {
     nextTrack() {
@@ -183,7 +190,15 @@
       const names = bank[kind] || bank.click,
         n = counts.get(kind) || 0;
       counts.set(kind, n + 1);
-      const a = cache.get(names[n % names.length]).cloneNode();
+      const name = names[n % names.length],
+        pool = voices.get(name);
+      let a = pool.find((voice) => !active.has(voice));
+      if (!a && pool.length < 2) {
+        a = cache.get(name).cloneNode();
+        pool.push(a);
+      }
+      if (!a) return;
+      a.currentTime = 0;
       a.baseVolume = Math.min(
         0.7,
         volume *
@@ -202,6 +217,10 @@
     status() {
       return {
         recordings: cache.size,
+        voices: [...voices.values()].reduce(
+          (sum, pool) => sum + pool.length,
+          0,
+        ),
         active: active.size,
         played,
         enabled,

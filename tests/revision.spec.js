@@ -1319,6 +1319,11 @@ test("campaign victory returns to the atlas, advances the army banner and surviv
     "data-next-level",
     "1",
   );
+  await expect(page.locator("#army-standard")).toHaveAttribute(
+    "data-transit",
+    "complete",
+    { timeout: 7000 },
+  );
   const banner = await page.locator("#army-standard").getAttribute("transform");
   const saved = await page.evaluate(() =>
     JSON.parse(localStorage.getItem("cruciata-campaign-v1")),
@@ -1332,7 +1337,7 @@ test("campaign victory returns to the atlas, advances the army banner and surviv
     "transform",
     banner,
   );
-  await expect(page.locator(".atlas-wave")).toBeAttached();
+  await expect(page.locator(".atlas-wave")).toHaveCount(5);
   await expect(page.locator(".atlas-relief")).toBeAttached();
   await page.locator("#chapter-1").click();
   await page.locator("#overlay button").click();
@@ -1801,6 +1806,9 @@ test("fortified cities defend locally and transfer their surviving garrison and 
     return cruciata.snapshot();
   });
   expect(after.cities.find((c) => c.id === before.city).captured).toBe(true);
+  expect(
+    after.units.filter((u) => u.city === before.city && u.type === "worker"),
+  ).toHaveLength(6);
   expect(
     before.guardIds.every(
       (id) => after.units.find((u) => u.id === id).team === 0,

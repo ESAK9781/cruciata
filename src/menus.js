@@ -71,14 +71,9 @@
     shell.hidden = false;
     shell.innerHTML = mainMarkup;
     shell.removeAttribute("aria-busy");
-    shell.querySelectorAll("button").forEach((button) => {
-      button.disabled = !window.CruciataArt.realisticAssets.ready;
-    });
-    window.CruciataArt.assetReady.then(() =>
-      shell.querySelectorAll(".menu-main-buttons button").forEach((button) => {
-        button.disabled = false;
-      }),
-    );
+    shell
+      .querySelectorAll("button")
+      .forEach((button) => (button.disabled = false));
     bind("open-campaign", campaign);
     bind("open-quickmatch", slots);
     bind("resume-campaign", () => {
@@ -95,16 +90,15 @@
     70 + (lon - 34) * 120 * Math.cos((34 * Math.PI) / 180),
     50 + (37 - lat) * 112,
   ];
-  let coastline = null,
-    landPolygons = null;
-  fetch("assets/maps/levant-coast.json")
-    .then((r) => r.json())
-    .then((data) => {
-      coastline = data.coast;
-      landPolygons = data.land;
-      if (document.getElementById("campaign-difficulty")) campaign();
-    })
-    .catch(() => {});
+  const coastline = window.CruciataCoast?.coast || null,
+    landPolygons = window.CruciataCoast?.land || null;
+  // The source geography is clipped at 37.5? E, inside this atlas viewport.
+  // Extend that artificial inland edge, without moving the actual coastline.
+  const projectLand = (lon, lat) => {
+    const point = project(lon, lat);
+    if (lon >= 37.5) point[0] = 441;
+    return point;
+  };
   const locations = [
     [35.96, 36.08],
     [36.12, 36.2],
@@ -121,7 +115,9 @@
     [220, 550],
     [202, 640],
   ];
+  let atlasAnimation = 0;
   function campaign() {
+    cancelAnimationFrame(atlasAnimation);
     const difficulty =
       document.getElementById("campaign-difficulty")?.value || "normal";
     const progress = game.campaign();
@@ -150,36 +146,22 @@
     const route = atlasStops.map((p) => p.join(",")).join(" ");
     const next = progress.activeLevel ?? progress.nextLevel;
     const here = atlasStops[next];
-    const before = atlasStops[Math.max(0, next - 1)];
-    const army =
-      progress.completed.length === 6 || progress.activeLevel !== null
-        ? [here[0] - 28, here[1] - 8]
-        : next === 0
-          ? [here[0] - 30, here[1] - 8]
-          : [
-              before[0] + (here[0] - before[0]) * 0.68,
-              before[1] + (here[1] - before[1]) * 0.68,
-            ];
+    const army = [...here];
     const landMarkup = landPolygons
       ? landPolygons
           .map(
             (poly) =>
-              `<polygon points="${poly.map((p) => project(...p).join(",")).join(" ")}"/>`,
+              `<polygon points="${poly.map((p) => projectLand(...p).join(",")).join(" ")}"/>`,
           )
           .join("")
       : `<polygon points="${points} 440,710 440,0 0,0"/>`;
-    const banner = `<g id="army-standard" data-next-level="${next}" transform="translate(${army.join(" ")})"><ellipse cx="3" cy="8" rx="12" ry="4" fill="#53412277"/><path d="M0 10V-37" stroke="#e3c881" stroke-width="2.5"/><g class="atlas-banner-cloth"><path d="M1-36L28-34L24-11L2-14Z" fill="#942e23" stroke="#e2c176"/><g transform="translate(14 -25) scale(.11)" fill="none" stroke="#ffe1a0" stroke-width="10"><path d="M-50 0H50M0-50V50M-50-10V10M50-10V10M-10-50H10M-10 50H10M-32-23V-41M-41-32H-23M32-23V-41M23-32H41M-32 23V41M-41 32H-23M32 23V41M23 32H41"/></g></g><title>Your army: ${progress.levels[next].name}</title></g>`;
+    const transit = game.consumeArmyTransit();
+    const banner = `<g id="army-standard" data-next-level="${next}" transform="translate(${army.join(" ")})"><ellipse cx="3" cy="0" rx="12" ry="4" fill="#53412277"/><path d="M0 0V-37" stroke="#e3c881" stroke-width="2.5"/><g class="atlas-banner-cloth"><path class="atlas-cloth-shape" d="M1-36L28-34L24-11L2-14Z" fill="#942e23" stroke="#e2c176"/><g transform="translate(14 -25) scale(.11)" fill="none" stroke="#ffe1a0" stroke-width="10"><path d="M-50 0H50M0-50V50M-50-10V10M50-10V10M-10-50H10M-10 50H10M-32-23V-41M-41-32H-23M32-23V-41M23-32H41M-32 23V41M-41 32H-23M32 23V41M23 32H41"/></g></g><title>Your army: ${progress.levels[next].name}</title></g>`;
     const relief = `<g class="atlas-relief" clip-path="url(#atlas-land-clip)"><path d="M315 35Q283 140 333 255T325 475T294 685M334 45Q302 152 352 264T344 480T313 694M353 58Q320 165 369 278T362 496T331 710" fill="none" stroke="#4d4b3650" stroke-width="2"/><path d="M303 66l12-21 11 22M317 132l13-26 12 27M318 250l14-29 14 30M300 422l14-24 14 26M285 590l11-23 13 24" fill="#6a664355" stroke="#d3b87a55" stroke-width="2"/><path d="M288 60l11-18 13 21M302 125l12-22 13 25M304 242l12-24 13 28" fill="none" stroke="#e0c58a66"/></g>`;
-    const water = `<defs><clipPath id="atlas-land-clip">${landMarkup}</clipPath><mask id="atlas-water-mask"><rect width="440" height="710" fill="white"/><g fill="black">${landMarkup}</g></mask><pattern id="atlas-water-pattern" width="72" height="44" patternUnits="userSpaceOnUse"><path class="atlas-wave" d="M-16 14Q0 5 16 14T48 14T80 14M-32 36Q-16 27 0 36T32 36T64 36T96 36" fill="none" stroke="#6aa3af" stroke-width="1" opacity=".3"/></pattern></defs><rect width="440" height="710" fill="url(#atlas-water-pattern)" mask="url(#atlas-water-mask)"/>`;
+    const water = `<defs><clipPath id="atlas-land-clip">${landMarkup}</clipPath><mask id="atlas-water-mask"><rect width="440" height="710" fill="white"/><g fill="black">${landMarkup}</g></mask></defs>`;
 
     const art = window.CruciataArt;
-    const landTexture = art.realisticAssets.ready
-      ? art.materialTile(0, 128).toDataURL()
-      : "";
-    const waterTexture = art.realisticAssets.ready
-      ? art.materialTile(4, 128).toDataURL()
-      : "";
-    const materials = `<defs><pattern id="atlas-real-land" width="128" height="128" patternUnits="userSpaceOnUse"><rect width="128" height="128" fill="#899074"/>${landTexture ? `<image href="${landTexture}" width="128" height="128" opacity=".23"/>` : ""}</pattern><pattern id="atlas-real-water" width="128" height="128" patternUnits="userSpaceOnUse"><rect width="128" height="128" fill="#263f42"/>${waterTexture ? `<image href="${waterTexture}" width="128" height="128" opacity=".25"/>` : ""}</pattern></defs>`;
+    const materials = `<defs><linearGradient id="atlas-real-land"><stop stop-color="#8a9170"/><stop offset="1" stop-color="#9b926c"/></linearGradient><linearGradient id="atlas-real-water"><stop stop-color="#234a55"/><stop offset="1" stop-color="#1c3e4c"/></linearGradient></defs>`;
     let markers = locations
       .map((p, i) => {
         const [x, y] = atlasStops[i];
@@ -191,7 +173,7 @@
     frame(
       "The pilgrim's chronicle",
       "ITINERARIUM · 1097–1099",
-      `<div class="atlas-layout"><div class="atlas"><svg viewBox="0 0 440 710" role="img" aria-label="Eastern Mediterranean campaign atlas">${materials}<rect width="440" height="710" fill="url(#atlas-real-water)"/>${water}${landPolygons ? landPolygons.map((poly) => `<polygon points="${poly.map((p) => project(...p).join(",")).join(" ")}" fill="url(#atlas-real-land)"/>`).join("") : `<polygon points="${points} 440,710 440,0 0,0" fill="url(#atlas-real-land)"/>`}<polyline points="${points}" fill="none" stroke="#d8bd7d" stroke-width="2"/>${relief}<polyline class="atlas-surf" points="${points}" fill="none" stroke="#b0d5d5" stroke-width="5" opacity=".18"/><polyline points="${route}" fill="none" stroke="#e9d19e" stroke-width="2" stroke-dasharray="5 5"/>${
+      `<div class="atlas-layout"><div class="atlas"><svg viewBox="0 0 440 710" role="img" aria-label="Eastern Mediterranean campaign atlas">${materials}<rect width="440" height="710" fill="url(#atlas-real-water)"/>${water}${landPolygons ? landPolygons.map((poly) => `<polygon points="${poly.map((p) => projectLand(...p).join(",")).join(" ")}" fill="url(#atlas-real-land)"/>`).join("") : `<polygon points="${points} 440,710 440,0 0,0" fill="url(#atlas-real-land)"/>`}<polyline points="${points}" fill="none" stroke="#d8bd7d" stroke-width="2"/>${relief}<polyline class="atlas-surf" points="${points}" fill="none" stroke="#b0d5d5" stroke-width="5" opacity=".18"/><polyline points="${route}" fill="none" stroke="#e9d19e" stroke-width="2" stroke-dasharray="5 5"/>${
         coastline
           ? coastline
               .filter((p) => p !== mappedCoast)
@@ -201,7 +183,7 @@
               )
               .join("")
           : ""
-      }${markers}${banner}<text x="16" y="310" class="sea-label" transform="rotate(-90 16 310)">MARE MEDITERRANEUM</text><text x="280" y="430" class="region-label">LEVANT</text></svg><small>Stylized campaign route; nearby locations are spaced for clarity.</small></div><div class="chapter-menu">${progress.lastVictory ? `<p class="campaign-victory"><strong>Chapter ${progress.lastVictory.level + 1} secured</strong><span>${progress.lastVictory.text}</span></p>` : ""}<label>Enemy command <select id="campaign-difficulty"><option value="easy">Easy · patient opponent</option><option value="normal" selected>Normal · balanced opponent</option><option value="hard">Hard · coordinated opponent</option></select></label>${progress.levels.map((l, i) => `<button id="chapter-${i}" ${i > progress.unlocked ? "disabled" : ""}><span class="chapter-index">${["I", "II", "III", "IV", "V", "VI"][i]}</span><span>${l.name}<small>${l.sub}</small></span><strong>${progress.completed.includes(i) ? "Completed" : i > progress.unlocked ? "Locked" : "Available"}</strong></button>`).join("")}<p class="fine-print">${progress.completed.length} / 6 chapters completed. Difficulty changes decisions and coordination; resources and unit rules stay equal.</p><button id="atlas-back">Back to main menu</button></div></div>`,
+      }${markers}<polyline id="completed-route" fill="none" stroke="#b92f27" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>${banner}<text x="16" y="310" class="sea-label" transform="rotate(-90 16 310)">MARE MEDITERRANEUM</text><text x="280" y="430" class="region-label">LEVANT</text></svg></div><div class="chapter-menu">${progress.lastVictory ? `<p class="campaign-victory"><strong>Chapter ${progress.lastVictory.level + 1} secured</strong><span>${progress.lastVictory.text}</span></p>` : ""}<label>Enemy command <select id="campaign-difficulty"><option value="easy">Easy · patient opponent</option><option value="normal" selected>Normal · balanced opponent</option><option value="hard">Hard · coordinated opponent</option></select></label>${progress.levels.map((l, i) => `<button id="chapter-${i}" ${i > progress.unlocked ? "disabled" : ""}><span class="chapter-index">${["I", "II", "III", "IV", "V", "VI"][i]}</span><span>${l.name}<small>${l.sub}</small></span><strong>${progress.completed.includes(i) ? "Completed" : i > progress.unlocked ? "Locked" : "Available"}</strong></button>`).join("")}<p class="fine-print">${progress.completed.length} / 6 chapters completed. Difficulty changes decisions and coordination; resources and unit rules stay equal.</p><button id="atlas-back">Back to main menu</button></div></div>`,
     );
     document.getElementById("campaign-difficulty").value = difficulty;
     progress.levels.forEach((l, i) =>
@@ -211,6 +193,79 @@
       }),
     );
     bind("atlas-back", main);
+    const standard = document.getElementById("army-standard"),
+      cloth = shell.querySelector(".atlas-cloth-shape"),
+      trail = document.getElementById("completed-route"),
+      surf = shell.querySelector(".atlas-surf"),
+      svg = surf.ownerSVGElement;
+    const bands = Array.from({ length: 5 }, (_, band) => {
+      const p = document.createElementNS(
+        "http://www.w3.org/2000/svg",
+        "polyline",
+      );
+      p.classList.add("atlas-wave", "atlas-lapping");
+      p.setAttribute("fill", "none");
+      p.setAttribute("stroke", "#dcf4e2");
+      p.setAttribute("mask", "url(#atlas-water-mask)");
+      svg.insertBefore(p, surf);
+      return p;
+    });
+    const shore = mappedCoast.map((p) => project(...p));
+    const start = performance.now(),
+      duration = 4500;
+    const from = transit === null ? army : [...atlasStops[transit]];
+    standard.dataset.transit = transit === null ? "complete" : "moving";
+    function animate(now) {
+      if (!standard.isConnected || shell.hidden) return;
+      const t = Math.min(1, (now - start) / duration),
+        ease = t * t * (3 - 2 * t),
+        time = now / 1000;
+      const position = from.map((v, i) => v + (army[i] - v) * ease);
+      standard.setAttribute("transform", `translate(${position.join(" ")})`);
+      if (t === 1) standard.dataset.transit = "complete";
+      const completedStops = atlasStops.slice(
+        0,
+        progress.completed.length === 6 ? 6 : next,
+      );
+      trail.setAttribute(
+        "points",
+        [...completedStops, position].map((p) => p.join(",")).join(" "),
+      );
+      const top = [],
+        bottom = [];
+      for (let i = 0; i <= 12; i++) {
+        const u = i / 12,
+          wave = Math.sin(time * 2.6 - u * 6) * 3 * u;
+        top.push([1 + u * 27, -36 + wave]);
+        bottom.unshift([1 + u * 25, -14 + wave + u * 2]);
+      }
+      const emblem = standard.querySelector(".atlas-banner-cloth g");
+      emblem.setAttribute(
+        "transform",
+        `translate(14 ${-25 + Math.sin(time * 2.6 - 3) * 1.5}) scale(.11)`,
+      );
+      cloth.setAttribute(
+        "d",
+        "M" + [...top, ...bottom].map((p) => p.join(",")).join("L") + "Z",
+      );
+      for (let band = 0; band < 5; band++) {
+        const wave = art.lappingWave(time, band, 0, 0.11);
+        bands[band].setAttribute(
+          "points",
+          shore
+            .map(([x, y]) =>
+              [x + art.lappingWave(time, band, y / 0.11, 0.11).offset, y].join(
+                ",",
+              ),
+            )
+            .join(" "),
+        );
+        bands[band].setAttribute("opacity", wave.opacity);
+        bands[band].setAttribute("stroke-width", Math.max(0.6, wave.width));
+      }
+      atlasAnimation = requestAnimationFrame(animate);
+    }
+    atlasAnimation = requestAnimationFrame(animate);
   }
   function slots() {
     frame(

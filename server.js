@@ -34,18 +34,9 @@ http
       !file.startsWith(root + path.sep) ||
       !(
         relative.startsWith("assets/") ||
-        [
-          "index.html",
-          "style.css",
-          "game.js",
-          "menus.js",
-          "artwork.js",
-          "navigation.js",
-          "fog.js",
-          "audio.js",
-          "CREDITS.md",
-          "REALISM_ASSETS.md",
-        ].includes(relative)
+        relative.startsWith("src/") ||
+        relative.startsWith("docs/") ||
+        ["index.html", "README.md"].includes(relative)
       )
     ) {
       res.writeHead(404);

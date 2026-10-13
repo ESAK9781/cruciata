@@ -435,6 +435,10 @@ test("walls block travel and gates open or close their passage", async ({
   await page.evaluate(() => cruciata.step(50));
   await clickWorld(page, b.x, b.y);
   await expect(page.locator("#gate-button")).toBeVisible();
+  // Newly built gates start closed; opening is an explicit player action.
+  expect(await page.evaluate((p) => cruciata.free(p), b)).toBe(false);
+  await page.locator("#gate-button").click();
+  await page.evaluate(() => cruciata.step(0.1));
   expect(await page.evaluate((p) => cruciata.free(p), b)).toBe(true);
   await page.locator("#gate-button").click();
   await page.evaluate(() => cruciata.step(0.1));

@@ -2,156 +2,14 @@
 (() => {
   "use strict";
   const C = {
-    red: "#8c3029",
-    green: "#345544",
-    cream: "#d9d0b9",
-    gold: "#b19a65",
-    stone: "#9d988b",
-    wall: "#bbb6a5",
-    wood: "#625443",
+    red: "#b73527",
+    green: "#197654",
+    cream: "#f2e1b7",
+    gold: "#edb442",
+    stone: "#aa9f80",
+    wall: "#d8c49a",
+    wood: "#776042",
   };
-  const realisticAssets = {
-    ready: false,
-    images: {},
-    bounds: {},
-    variants: {},
-  };
-  const materialCache = new Map();
-  const sheets = {
-    materials: [4, 2],
-    buildings: [4, 4],
-    units: [4, 3],
-    resources: [4, 2],
-  };
-  const assetReady = Promise.all(
-    Object.entries(sheets).map(
-      ([name, [cols, rows]]) =>
-        new Promise((resolve) => {
-          const image = new Image();
-          image.onload = () => {
-            realisticAssets.images[name] = image;
-            if (name !== "materials") {
-              const c = document.createElement("canvas");
-              c.width = image.width;
-              c.height = image.height;
-              const context = c.getContext("2d", { willReadFrequently: true });
-              context.drawImage(image, 0, 0);
-              const data = context.getImageData(0, 0, c.width, c.height).data,
-                bounds = [];
-              for (let i = 0; i < cols * rows; i++) {
-                const left = Math.round(((i % cols) * c.width) / cols),
-                  top = Math.round((Math.floor(i / cols) * c.height) / rows),
-                  right = Math.round((((i % cols) + 1) * c.width) / cols),
-                  bottom = Math.round(
-                    ((Math.floor(i / cols) + 1) * c.height) / rows,
-                  );
-                let minX = right,
-                  minY = bottom,
-                  maxX = left,
-                  maxY = top;
-                for (let y = top; y < bottom; y++)
-                  for (let x = left; x < right; x++)
-                    if (data[(y * c.width + x) * 4 + 3] > 35) {
-                      minX = Math.min(minX, x);
-                      minY = Math.min(minY, y);
-                      maxX = Math.max(maxX, x);
-                      maxY = Math.max(maxY, y);
-                    }
-                bounds.push(
-                  maxX > minX
-                    ? {
-                        x: minX,
-                        y: minY,
-                        w: maxX - minX + 1,
-                        h: maxY - minY + 1,
-                      }
-                    : { x: left, y: top, w: right - left, h: bottom - top },
-                );
-              }
-              realisticAssets.bounds[name] = bounds;
-              if (name === "units")
-                for (const team of [1, 3]) {
-                  const copy = document.createElement("canvas");
-                  copy.width = c.width;
-                  copy.height = c.height;
-                  const cg = copy.getContext("2d");
-                  const pixels = context.getImageData(0, 0, c.width, c.height);
-                  for (let i = 0; i < pixels.data.length; i += 4) {
-                    const r = pixels.data[i],
-                      g = pixels.data[i + 1],
-                      b = pixels.data[i + 2];
-                    if (r - g > 70 && r - b > 50 && g < 100 && b < 100) {
-                      const light = r / 180;
-                      const color = team === 1 ? [53, 88, 65] : [151, 117, 52];
-                      for (let k = 0; k < 3; k++)
-                        pixels.data[i + k] = Math.min(255, color[k] * light);
-                    }
-                  }
-                  cg.putImageData(pixels, 0, 0);
-                  realisticAssets.variants[team] = copy;
-                }
-            }
-            resolve(true);
-          };
-          image.onerror = () => resolve(false);
-          image.src =
-            "assets/realism/" +
-            (name === "buildings" ? "buildings-overhead" : name) +
-            ".png";
-        }),
-    ),
-  ).then((results) => {
-    realisticAssets.ready = results.every(Boolean);
-    materialCache.clear();
-    textureCache.clear();
-    return realisticAssets.ready;
-  });
-  function materialTile(index, size = 192) {
-    const key = index + ":" + size;
-    if (materialCache.has(key)) return materialCache.get(key);
-    const image = realisticAssets.images.materials;
-    if (!image) return null;
-    const c = document.createElement("canvas");
-    c.width = c.height = size;
-    const materialContext = c.getContext("2d");
-    if (index === 0) {
-      materialContext.fillStyle = "#768261";
-      materialContext.fillRect(0, 0, size, size);
-      materialContext.globalAlpha = 0.6;
-    }
-    materialContext.drawImage(
-      image,
-      ((index % 4) * image.width) / 4,
-      (Math.floor(index / 4) * image.height) / 2,
-      image.width / 4,
-      image.height / 2,
-      0,
-      0,
-      size,
-      size,
-    );
-    materialCache.set(key, c);
-    return c;
-  }
-  function realisticSprite(g, name, index, x, y, w, h, team = 0) {
-    const image =
-        (name === "units" && realisticAssets.variants[team]) ||
-        realisticAssets.images[name],
-      bounds = realisticAssets.bounds[name]?.[index];
-    if (!image || !bounds) return false;
-    g.drawImage(
-      image,
-      bounds.x,
-      bounds.y,
-      bounds.w,
-      bounds.h,
-      x - w / 2,
-      y - h / 2,
-      w,
-      h,
-    );
-    return true;
-  }
   function ellipse(g, x, y, rx, ry, color) {
     g.fillStyle = color;
     g.beginPath();
@@ -184,17 +42,6 @@
   function rect(g, x, y, w, h, fill, stroke) {
     g.fillStyle = fill;
     g.fillRect(x, y, w, h);
-    if (
-      realisticAssets.ready &&
-      typeof fill === "string" &&
-      [C.wood, "#a88350", "#826037", "#b78a4f", "#785035"].includes(fill)
-    ) {
-      g.save();
-      g.globalAlpha = 0.4;
-      g.fillStyle = g.createPattern(materialTile(7, 96), "repeat");
-      g.fillRect(x, y, w, h);
-      g.restore();
-    }
     if (stroke) {
       g.strokeStyle = stroke;
       g.lineWidth = 2;
@@ -345,350 +192,72 @@
         );
     }
   }
+  function lappingWave(time, band, along, scale = 1) {
+    const phase = (time * 9 + band * 38) % 190;
+    return {
+      offset:
+        (-190 + phase + Math.sin(along / 54 + time * 0.65 + band) * 4) * scale,
+      opacity: Math.sin((phase / 190) * Math.PI) * 0.28,
+      width: (0.7 + phase / 150) * scale,
+    };
+  }
   function banner(g, x, y, team, time) {
     line(
       g,
       [
-        [x, y],
-        [x + 20, y],
+        [x, y - 10],
+        [x, y + 25],
       ],
-      2,
-      "#564a30",
+      1.6,
+      "#695d43",
     );
-    const sway = Math.sin(time * 2 + x) * 1.8;
-    polygon(
-      g,
-      [
-        [x + 3, y],
-        [x + 19, y],
-        [x + 18 + sway, y + 19],
-        [x + 4 + sway, y + 15],
-      ],
+    ellipse(g, x, y - 11, 1.8, 1.8, "#b9a578");
+    const color =
       team === 3
         ? "#b18b3b"
         : team === 2
           ? "#9a917e"
           : team === 1
             ? C.green
-            : C.red,
-      "#dec9a288",
-    );
-    if (team === 0) cross(g, x + 11 + sway * 0.4, y + 8, 4, C.cream);
-    else if (team === 3) sigil(g, x + 11, y + 8, 4, team, C.cream);
+            : C.red;
+    const wave = (t) => Math.sin(time * 2.6 - t * 6 + x * 0.03) * 2.7 * t;
+    for (let i = 0; i < 10; i++) {
+      const a = i / 10,
+        b = (i + 1) / 10;
+      polygon(
+        g,
+        [
+          [x + 1 + a * 21, y - 8 + wave(a)],
+          [x + 1 + b * 21, y - 8 + wave(b)],
+          [x + 1 + b * 21, y + 9 + wave(b) - b * 2],
+          [x + 1 + a * 21, y + 9 + wave(a) - a * 2],
+        ],
+        color,
+      );
+      polygon(
+        g,
+        [
+          [x + 1 + a * 21, y - 8 + wave(a)],
+          [x + 1 + b * 21, y - 8 + wave(b)],
+          [x + 1 + b * 21, y + 9 + wave(b) - b * 2],
+          [x + 1 + a * 21, y + 9 + wave(a) - a * 2],
+        ],
+        `rgba(${Math.cos(time * 2.6 - a * 6) > 0 ? "255,239,209" : "0,0,0"},${Math.abs(Math.cos(time * 2.6 - a * 6)) * 0.14})`,
+      );
+    }
+    const cy = y + wave(0.5);
+    if (team === 0) cross(g, x + 11, cy, 4, C.cream);
+    else if (team === 3) sigil(g, x + 11, cy, 4, team, C.cream);
     else if (team === 1) {
       g.strokeStyle = C.cream;
-      g.lineWidth = 1.5;
+      g.lineWidth = 1.3;
       g.beginPath();
-      g.arc(x + 11, y + 8, 4, 0.7, 5.3);
+      g.arc(x + 11, cy, 4, 0.7, 5.3);
       g.stroke();
     }
   }
+
   function tree(g, x, y, scale = 1, palm = false) {
-    if (!realisticAssets.ready) return nativeTree(g, x, y, scale, palm);
-    realisticSprite(g, "resources", palm ? 2 : 0, x, y, 49 * scale, 49 * scale);
-  }
-  function resource(g, n, time) {
-    if (!realisticAssets.ready) return nativeResource(g, n, time);
-    if (n.remaining <= 0) return;
-    const index =
-      n.kind === "wood"
-        ? n.palm
-          ? 2
-          : n.snow
-            ? 1
-            : 0
-        : n.kind === "gold"
-          ? 5
-          : n.kind === "stone"
-            ? 4
-            : 6;
-    const size = n.kind === "wood" ? 76 : n.kind === "food" ? 58 : 64;
-    realisticSprite(g, "resources", index, n.x, n.y, size, size);
-    if (n.snow && n.kind === "wood") {
-      g.save();
-      g.globalAlpha = 0.2;
-      ellipse(g, n.x, n.y, 23, 24, "#e1e5df");
-      g.restore();
-    }
-  }
-  function unit(g, u, time, drawAngle = null) {
-    if (!realisticAssets.ready) return nativeUnit(g, u, time, drawAngle);
-    if (u.type === "trebuchet") {
-      g.save();
-      g.rotate((drawAngle ?? u.angle) + Math.PI / 2);
-      const deployed =
-        u.deployment === "deployed"
-          ? 1
-          : u.deployment === "setting-up"
-            ? 1 - u.deployTimer / 6
-            : u.deployment === "packing"
-              ? u.deployTimer / 4
-              : 0;
-      if (deployed < 1) {
-        g.save();
-        g.globalAlpha = 1 - deployed;
-        realisticSprite(g, "units", 8, 0, 0, 30, 45, u.team);
-        g.restore();
-      }
-      if (deployed > 0) {
-        g.save();
-        g.globalAlpha = deployed;
-        const image = realisticAssets.images.units,
-          b = realisticAssets.bounds.units[9];
-        g.drawImage(
-          image,
-          b.x,
-          b.y + b.h * 0.4,
-          b.w,
-          b.h * 0.6,
-          -15,
-          -6.4,
-          30,
-          38.4,
-        );
-        const firing =
-          u.strike > 0 ? Math.sin((1 - u.strike) * Math.PI) * 0.85 : 0;
-        g.translate(0, 9);
-        g.rotate(firing + (1 - deployed) * 1.3);
-        line(
-          g,
-          [
-            [1, 2],
-            [1, -33],
-          ],
-          4,
-          "#292a2422",
-        );
-        line(
-          g,
-          [
-            [0, 0],
-            [0, -33],
-          ],
-          3,
-          "#695747",
-        );
-        line(
-          g,
-          [
-            [-0.6, -1],
-            [-0.6, -32],
-          ],
-          0.7,
-          "#b8a084",
-        );
-        ellipse(g, 0, -33, 3, 4, "#4b4033");
-        g.restore();
-      }
-      g.restore();
-      return;
-    }
-    const index =
-      {
-        sword: 0,
-        archer: 1,
-        knight: 2,
-        worker: 3,
-        chaplain: 4,
-        standard: 5,
-        civilian: 6,
-        pilgrim: 7,
-        merchant: 7,
-      }[u.type] ?? 0;
-    const mounted = u.type === "knight",
-      w = mounted ? 26 : u.type === "standard" ? 26 : 18,
-      h = mounted ? 44 : u.type === "standard" ? 43 : 28;
-    g.save();
-    g.rotate((drawAngle ?? u.angle) + Math.PI / 2);
-    const bob = u.moving ? Math.sin(time * 9 + u.id) * 0.65 : 0;
-    realisticSprite(g, "units", index, 0, bob, w, h, u.team);
-    if (u.moving && !mounted)
-      for (const side of [-1, 1])
-        ellipse(
-          g,
-          side * 3,
-          10 + Math.sin(time * 10 + (side * Math.PI) / 2) * 1.8,
-          1.4,
-          2.5,
-          "#3f362b",
-        );
-    if (u.working) {
-      const swing = Math.sin((u.workPhase || time) * Math.PI * 2) * 0.6;
-      g.save();
-      g.translate(6, -5);
-      g.rotate(swing);
-      line(
-        g,
-        [
-          [0, 1],
-          [4, -12],
-        ],
-        1.2,
-        "#78644b",
-      );
-      if (["wood", "building"].includes(u.gatherSource))
-        polygon(
-          g,
-          [
-            [3, -13],
-            [8, -12],
-            [8, -8],
-            [4, -9],
-          ],
-          "#a6aaa4",
-        );
-      else if (["gold", "stone"].includes(u.gatherSource))
-        line(
-          g,
-          [
-            [-1, -11],
-            [9, -13],
-          ],
-          2,
-          "#b0b3aa",
-        );
-      else ellipse(g, 4, -10, 2.5, 2, "#c3a36b");
-      g.restore();
-    }
-    if (u.strike > 0 && u.type === "sword") {
-      g.save();
-      g.rotate(-0.35 + u.strike * 2);
-      line(
-        g,
-        [
-          [7, -2],
-          [9, -19],
-        ],
-        1.3,
-        "#c7ccc7",
-      );
-      g.restore();
-    }
-    if (u.type === "archer" && u.strike > 0)
-      line(
-        g,
-        [
-          [6, -9],
-          [6, -21],
-        ],
-        0.6,
-        "#c0ab7c",
-      );
-    g.restore();
-  }
-  function structure(g, b, time) {
-    if (!realisticAssets.ready || b.progress < 1 || b.kind === "wall")
-      return nativeStructure(g, b, time);
-    const index =
-      {
-        towncenter: 0,
-        barracks: 1,
-        stable: 2,
-        siegeworkshop: 3,
-        chapel: 4,
-        house: 5,
-        tower: 6,
-        gate: 7,
-        mill: 8,
-        lumbercamp: 9,
-        miningcamp: 10,
-        farm: 11,
-        fort: 12,
-      }[b.kind] ?? 15;
-    if (b.kind === "farm" && b.remaining <= 0)
-      return nativeStructure(g, b, time);
-    g.save();
-    g.translate(b.x, b.y);
-    let w = b.w,
-      h = b.h;
-    if (b.kind === "gate" && b.rotation === 90) {
-      g.rotate(Math.PI / 2);
-      [w, h] = [h, w];
-    }
-    if (b.hp <= 0) {
-      realisticSprite(g, "buildings", 13, 0, 0, w, h);
-      g.restore();
-      return;
-    }
-    realisticSprite(g, "buildings", index, 0, 0, w + 4, h + 4);
-    if (b.kind === "towncenter") {
-      const color =
-        b.team === 0
-          ? "#d7d0bb"
-          : b.team === 1
-            ? "#33513f"
-            : b.team === 3
-              ? "#a5874b"
-              : "#898473";
-      rect(g, -w * 0.13, -h * 0.34, w * 0.25, h * 0.39, color);
-      line(
-        g,
-        [
-          [-w * 0.1, -h * 0.31],
-          [-w * 0.1, h * 0.02],
-        ],
-        0.7,
-        "#4c493733",
-      );
-      sigil(
-        g,
-        -w * 0.005,
-        -h * 0.14,
-        w * 0.065,
-        b.team,
-        b.team === 0 ? C.red : C.cream,
-      );
-    }
-    if (b.kind !== "farm") banner(g, w * 0.22, -h * 0.18, b.team, time);
-    if (b.kind === "gate" && !b.closed) {
-      rect(g, -8, -h / 2, 16, h, "#756c5755");
-      line(
-        g,
-        [
-          [-11, -h / 2 + 3],
-          [-11, h / 2 - 3],
-        ],
-        2,
-        "#514a3e",
-      );
-    }
-    const damage = 1 - b.hp / b.maxHp;
-    if (damage > 0.18)
-      for (let i = 0; i < Math.ceil(damage * 9); i++) {
-        const x = Math.sin(b.id * 7 + i * 3) * w * 0.33,
-          y = Math.cos(b.id * 4 + i * 8) * h * 0.3;
-        line(
-          g,
-          [
-            [x - 4, y - 5],
-            [x, y],
-            [x - 2, y + 4],
-          ],
-          1,
-          "#332e27bb",
-        );
-      }
-    if (damage > 0.5)
-      for (let i = 0; i < 3; i++)
-        ellipse(
-          g,
-          w * 0.1 + i * 3,
-          -h * 0.15 - ((time * 9 + i * 7) % 18),
-          4 + i,
-          3 + i,
-          "#514d4666",
-        );
-    g.restore();
-  }
-  function ship(g, x, y, time, variant = 0) {
-    if (!realisticAssets.ready) return nativeShip(g, x, y, time, variant);
-    g.save();
-    g.translate(x + Math.sin(time * 0.35 + variant) * 1.5, y);
-    g.rotate(-0.06 + Math.sin(time * 0.25 + variant) * 0.015);
-    realisticSprite(g, "units", 11, 0, 0, 55, 145);
-    g.restore();
-  }
-  function nativeTree(g, x, y, scale = 1, palm = false) {
     g.save();
     g.translate(x, y);
     g.scale(scale, scale);
@@ -735,7 +304,7 @@
     }
     g.restore();
   }
-  function nativeResource(g, n, time) {
+  function resource(g, n, time) {
     if (n.remaining <= 0) return;
     g.save();
     g.translate(n.x, n.y);
@@ -924,7 +493,226 @@
     }
     g.restore();
   }
-  function nativeUnit(g, u, time, drawAngle = null) {
+  // Fallen equipment shares the living units' cloth, armor, and heraldry.
+  function corpse(g, u) {
+    g.save();
+    g.rotate((u.angle || 0) + Math.PI / 2 + 0.65);
+    g.scale(0.72, 0.72);
+    const civilian = u.type === "worker" || u.type === "civilian";
+    const color =
+      u.team === 1
+        ? C.green
+        : u.team === 3
+          ? "#ad873a"
+          : u.team === 2
+            ? "#b99b63"
+            : C.red;
+    const cloth =
+      u.type === "chaplain" && u.team !== 1
+        ? C.cream
+        : u.rank > 0 && u.team === 0
+          ? "#f0e5c9"
+          : color;
+    const trim = u.rank > 1 ? C.gold : "#d4d9cb";
+    if (u.type === "knight") {
+      ellipse(g, 8, 5, 13, 23, u.team === 1 ? "#7b6a4f" : "#bca681");
+      ellipse(g, 10, -19, 6, 10, "#ae9c78");
+      for (const [x, y, dx] of [
+        [-3, -8, -13],
+        [18, -9, 28],
+        [-2, 17, -12],
+        [17, 18, 28],
+      ]) {
+        line(
+          g,
+          [
+            [x, y],
+            [dx, y + 7],
+          ],
+          4,
+          "#69593e",
+        );
+        ellipse(g, dx, y + 8, 3, 2, "#403a30");
+      }
+      line(
+        g,
+        [
+          [9, 26],
+          [17, 34],
+        ],
+        3,
+        "#766246",
+      );
+      rect(g, 0, 0, 17, 17, cloth);
+      sigil(g, 8, 8, 4, u.team);
+      g.translate(-13, 5);
+    }
+    ellipse(g, 1, 8, 15, 10, "#211d172b");
+    line(
+      g,
+      [
+        [-3, 8],
+        [-10, 19],
+        [-16, 21],
+      ],
+      5,
+      "#5a513c",
+    );
+    line(
+      g,
+      [
+        [4, 8],
+        [11, 17],
+        [17, 15],
+      ],
+      5,
+      "#5a513c",
+    );
+    line(
+      g,
+      [
+        [-5, 0],
+        [-15, 5],
+        [-20, 1],
+      ],
+      5,
+      civilian ? "#bfa37d" : "#a8ad96",
+    );
+    line(
+      g,
+      [
+        [5, 0],
+        [14, -5],
+        [20, -1],
+      ],
+      5,
+      civilian ? "#bfa37d" : "#a8ad96",
+    );
+    ellipse(g, 0, 2, 8, 11, cloth);
+    if (!civilian) {
+      for (const x of [-6, 6])
+        for (let y = -4; y < 8; y += 3) ellipse(g, x, y, 0.8, 0.8, trim);
+      sigil(g, 0, 3, 3, u.team, u.rank > 0 && u.team === 0 ? C.red : C.cream);
+    } else if (u.team !== 2) sigil(g, 0, 4, 3, u.team, C.cream);
+    line(
+      g,
+      [
+        [-7, 8],
+        [7, 8],
+      ],
+      1.5,
+      "#65503a",
+    );
+    ellipse(
+      g,
+      -2,
+      -11,
+      5,
+      5,
+      civilian ? "#ceb18a" : u.type === "archer" ? "#847b50" : "#bfc7b5",
+    );
+    if (!civilian && !["archer", "chaplain"].includes(u.type)) {
+      line(
+        g,
+        [
+          [-3, -16],
+          [-1, -7],
+        ],
+        1.3,
+        "#687767",
+      );
+      ellipse(g, -22, 10, 6, 8, color);
+      sigil(g, -22, 10, 3, u.team);
+      line(
+        g,
+        [
+          [19, 7],
+          [27, -14],
+        ],
+        2,
+        "#eef0d8",
+      );
+      line(
+        g,
+        [
+          [18, 2],
+          [24, 5],
+        ],
+        2,
+        C.gold,
+      );
+    } else if (u.type === "archer") {
+      g.beginPath();
+      g.arc(23, 3, 13, -1.25, 1.25);
+      g.strokeStyle = "#835b35";
+      g.lineWidth = 2;
+      g.stroke();
+      line(
+        g,
+        [
+          [27, -9],
+          [27, 15],
+        ],
+        0.8,
+        "#d6c7a2",
+      );
+      rect(g, -14, -4, 4, 12, "#655038");
+      for (let i = 0; i < 3; i++)
+        line(
+          g,
+          [
+            [-14 + i, -7],
+            [-12 + i, 5],
+          ],
+          0.7,
+          "#ead7ad",
+        );
+    } else if (u.type === "chaplain") {
+      line(
+        g,
+        [
+          [18, 18],
+          [24, -19],
+        ],
+        2,
+        "#906e43",
+      );
+      cross(g, 24, -18, 5, C.gold);
+    } else {
+      line(
+        g,
+        [
+          [18, 16],
+          [25, -4],
+        ],
+        2,
+        "#80613c",
+      );
+      line(
+        g,
+        [
+          [20, -5],
+          [30, 0],
+        ],
+        3,
+        "#8f9987",
+      );
+    }
+    if (u.shattered) {
+      ellipse(g, 5, 8, 5, 3, "#79202b");
+      line(
+        g,
+        [
+          [12, 18],
+          [19, 22],
+        ],
+        3,
+        "#62221d",
+      );
+    }
+    g.restore();
+  }
+  function unit(g, u, time, drawAngle = null) {
     g.save();
     g.rotate(
       (drawAngle ??
@@ -1392,15 +1180,60 @@
     g.beginPath();
     points.forEach(([x, y], i) => (i ? g.lineTo(x, y) : g.moveTo(x, y)));
     g.stroke();
-    if (realisticAssets.ready) {
-      g.save();
-      g.globalAlpha = 0.28;
-      g.strokeStyle = g.createPattern(materialTile(5, 64), "repeat");
-      g.stroke();
-      g.restore();
-    }
   }
-  function nativeStructure(g, b, time) {
+  function structure(g, b, time) {
+    if (b.progress >= 1) {
+      if (b.kind === "watchtower" && b.hp > 0) {
+        g.save();
+        g.translate(b.x, b.y);
+        for (const dx of [-12, 12])
+          for (const dy of [-12, 12]) {
+            rect(g, dx - 2, dy - 2, 4, 4, "#a7916a", "#493c29");
+          }
+        rect(g, -14, -14, 28, 28, "#8c7752", "#493c29");
+        for (const y of [-10, -4, 2, 8])
+          line(
+            g,
+            [
+              [-13, y],
+              [13, y],
+            ],
+            0.7,
+            "#c7b89466",
+          );
+        line(
+          g,
+          [
+            [-8, 17],
+            [-8, 28],
+          ],
+          2,
+          "#8e7953",
+        );
+        line(
+          g,
+          [
+            [0, 17],
+            [0, 28],
+          ],
+          2,
+          "#8e7953",
+        );
+        for (const y of [18, 22, 26])
+          line(
+            g,
+            [
+              [-8, y],
+              [0, y],
+            ],
+            1,
+            "#b5a179",
+          );
+        banner(g, 9, -13, b.team, time);
+        g.restore();
+        return;
+      }
+    }
     g.save();
     g.translate(b.x, b.y);
     let w = b.w,
@@ -2340,13 +2173,6 @@
           : ["#628444", "#74984f", "#537337"];
     g.scale(scale, scale);
     rect(g, 0, 0, width, height, colors[0]);
-    if (realisticAssets.ready) {
-      g.fillStyle = g.createPattern(
-        materialTile(level === 2 ? 2 : level === 3 ? 3 : 0, 256),
-        "repeat",
-      );
-      g.fillRect(0, 0, width, height);
-    }
     for (let i = 0; i < 1600; i++)
       ellipse(
         g,
@@ -2382,15 +2208,9 @@
       sea.addColorStop(0.75, "#247584");
       sea.addColorStop(1, "#47958d");
       polygon(g, points, sea);
-      if (realisticAssets.ready) {
-        g.save();
-        g.globalAlpha = 0.35;
-        polygon(g, points, g.createPattern(materialTile(4, 192), "repeat"));
-        g.restore();
-      }
       const shore = [];
       for (let y = 0; y <= height; y += 10) shore.push([coast(y), y]);
-      line(g, shore, 22, "#aaa18b");
+      line(g, shore, 22, "#d4c592");
       line(
         g,
         shore.map(([x, y]) => [x - 15, y]),
@@ -2456,8 +2276,6 @@
   }
   const textureCache = new Map();
   function groundTexture(level) {
-    if (realisticAssets.ready)
-      return materialTile(level === 2 ? 2 : level === 3 ? 3 : 0, 256);
     if (textureCache.has(level)) return textureCache.get(level);
     const tile = document.createElement("canvas");
     tile.width = tile.height = 512;
@@ -2545,7 +2363,7 @@
     textureCache.set(level, tile);
     return tile;
   }
-  function nativeShip(g, x, y, time, variant = 0) {
+  function ship(g, x, y, time, variant = 0) {
     g.save();
     g.translate(x + Math.sin(time * 0.35 + variant) * 1.5, y);
     g.rotate(-0.06 + Math.sin(time * 0.25 + variant) * 0.015);
@@ -2706,7 +2524,7 @@
       const shore = [];
       for (let y = view.y - 16; y < view.y + view.h + 16; y += 8)
         shore.push([coast(y), y]);
-      line(g, shore, 24, "#aaa18b");
+      line(g, shore, 24, "#d5c28c");
       line(
         g,
         shore.map(([x, y]) => [x - 11, y]),
@@ -2736,10 +2554,7 @@
           y < view.y + view.h + 12;
           y += 12
         )
-          points.push([
-            coast(y) - 190 + phase + Math.sin(y / 54 + time * 0.65 + band) * 4,
-            y,
-          ]);
+          points.push([coast(y) + lappingWave(time, band, y).offset, y]);
         line(
           g,
           points,
@@ -2897,7 +2712,10 @@
         if (stem.shade !== shade) continue;
         let bend = Math.sin(time * 1.2 + stem.phase) * 1.4;
         for (const u of actors) {
-          const d = Math.hypot(u.x - stem.x, u.y - stem.y);
+          const dx = u.x - stem.x,
+            dy = u.y - stem.y;
+          if (Math.abs(dx) >= 36 || Math.abs(dy) >= 36) continue;
+          const d = Math.hypot(dx, dy);
           if (d < 36)
             bend +=
               (1 - d / 36) *
@@ -2934,6 +2752,7 @@
     g.restore();
   }
   const rockMassPaths = new WeakMap();
+  const rockRimPaths = new WeakMap();
   function rockMass(g, d) {
     let path = rockMassPaths.get(d);
     if (!path) {
@@ -2965,7 +2784,7 @@
     const rim = [
       ["#6d7162", "#a2a38d", "#c1bea5"],
       ["#627465", "#93a48e", "#b7c4a9"],
-      ["#8b7354", "#c0a47d", "#dbc197"],
+      ["#644321", "#c3a06b", "#f0d7a3"],
       ["#718184", "#a8b9b8", "#d5dfd6"],
     ][d.biome || 0];
     g.save();
@@ -2985,45 +2804,90 @@
     g.strokeStyle = rim[1];
     g.lineWidth = 18;
     g.stroke(path);
-    if (realisticAssets.ready) {
-      g.save();
-      g.globalAlpha = 0.6;
-      g.strokeStyle = g.createPattern(materialTile(5, 96), "repeat");
-      g.lineWidth = 22;
-      g.stroke(path);
-      g.restore();
-    }
     g.strokeStyle = rim[2];
     g.lineWidth = 1;
     g.stroke(path);
-    // Only exposed tile edges receive stone detail; shared edges disappear entirely.
-    for (const contour of d.contours)
-      for (let i = 0; i < contour.length; i++) {
-        const a = contour[i],
-          b = contour[(i + 1) % contour.length],
-          length = Math.hypot(b.x - a.x, b.y - a.y),
-          dx = (b.x - a.x) / length,
-          dy = (b.y - a.y) / length;
-        for (let t = 7; t < length - 3; t += 15) {
-          const jitter = Math.sin(a.x * 0.31 + a.y * 0.17 + t) * 5,
-            x = a.x + dx * t - dy * jitter,
-            y = a.y + dy * t + dx * jitter;
-          const radius = 5 + (Math.sin(x * 0.9 + y * 0.7) + 1) * 2.5;
-          const points = [];
-          for (let k = 0; k < 6; k++) {
-            const angle = (k * Math.PI) / 3 + 0.3,
-              rr = radius * (0.75 + 0.2 * Math.sin(x + y + k * 9));
-            points.push([x + Math.cos(angle) * rr, y + Math.sin(angle) * rr]);
+    let detail = rockRimPaths.get(d);
+    if (!detail) {
+      const chips = [new Path2D(), new Path2D()],
+        highlights = new Path2D(),
+        walls = [new Path2D(), new Path2D(), new Path2D()],
+        fractures = new Path2D();
+      // Shared edges disappear entirely.
+      for (const contour of d.contours)
+        for (let i = 0; i < contour.length; i++) {
+          const a = contour[i],
+            b = contour[(i + 1) % contour.length],
+            length = Math.hypot(b.x - a.x, b.y - a.y),
+            dx = (b.x - a.x) / length,
+            dy = (b.y - a.y) / length;
+          for (let band = 0; band < 3; band++) {
+            const near = band * 10 + 3,
+              far = near + 11,
+              path = walls[band],
+              nx = -dy,
+              ny = dx;
+            path.moveTo(a.x + nx * near, a.y + ny * near);
+            path.lineTo(b.x + nx * near, b.y + ny * near);
+            path.lineTo(b.x + nx * far, b.y + ny * far);
+            path.lineTo(a.x + nx * far, a.y + ny * far);
+            path.closePath();
           }
-          polygon(
-            g,
-            points,
-            Math.sin(x + y) > 0 ? rim[0] : rim[1],
-            "#383e3480",
-          );
-          line(g, [points[3], points[4], points[5]], 0.8, rim[2]);
+          for (let t = 12; t < length; t += 27) {
+            const x = a.x + dx * t,
+              y = a.y + dy * t;
+            fractures.moveTo(x - dy * 6, y + dx * 6);
+            fractures.lineTo(x - dy * 17 + dx * 2, y + dx * 17 + dy * 2);
+            fractures.lineTo(x - dy * 32, y + dx * 32);
+          }
+          for (let t = 7; t < length - 3; t += 15) {
+            const jitter = Math.sin(a.x * 0.31 + a.y * 0.17 + t) * 5,
+              x = a.x + dx * t - dy * jitter,
+              y = a.y + dy * t + dx * jitter;
+            const radius = 5 + (Math.sin(x * 0.9 + y * 0.7) + 1) * 2.5;
+            const points = [];
+            for (let k = 0; k < 6; k++) {
+              const angle = (k * Math.PI) / 3 + 0.3,
+                rr = radius * (0.75 + 0.2 * Math.sin(x + y + k * 9));
+              points.push([x + Math.cos(angle) * rr, y + Math.sin(angle) * rr]);
+            }
+            const path = chips[Math.sin(x + y) > 0 ? 0 : 1];
+            path.moveTo(...points[0]);
+            for (let j = 1; j < points.length; j++) path.lineTo(...points[j]);
+            path.closePath();
+            highlights.moveTo(...points[3]);
+            highlights.lineTo(...points[4]);
+            highlights.lineTo(...points[5]);
+          }
         }
-      }
+
+      detail = { chips, highlights, walls, fractures };
+      rockRimPaths.set(d, detail);
+    }
+    g.save();
+    g.clip(path, "evenodd");
+    const faces =
+      d.biome === 2
+        ? ["#a47a43", "#664422", "#302016"]
+        : [rim[0], "#44483d", "#202820"];
+    for (let i = 0; i < 3; i++) {
+      g.fillStyle = faces[i];
+      g.fill(detail.walls[i]);
+    }
+    g.strokeStyle = d.biome === 2 ? "#1e120cc0" : "#111b14aa";
+    g.lineWidth = 1.2;
+    g.stroke(detail.fractures);
+    g.restore();
+    for (let i = 0; i < 2; i++) {
+      g.fillStyle = rim[i];
+      g.fill(detail.chips[i]);
+      g.strokeStyle = "#383e3480";
+      g.lineWidth = 1;
+      g.stroke(detail.chips[i]);
+    }
+    g.strokeStyle = rim[2];
+    g.lineWidth = 0.8;
+    g.stroke(detail.highlights);
 
     g.restore();
   }
@@ -3099,39 +2963,6 @@
       );
     g.restore();
   }
-  assetReady.then((ready) => {
-    if (!ready) return;
-    const root = document.documentElement;
-    root.style.setProperty(
-      "--real-timber",
-      `url("${materialTile(7, 256).toDataURL()}")`,
-    );
-    root.style.setProperty(
-      "--real-stone",
-      `url("${materialTile(5, 256).toDataURL()}")`,
-    );
-    for (const [name, index] of Object.entries({
-      food: 3,
-      wood: 0,
-      gold: 5,
-      stone: 4,
-    })) {
-      const canvas = document.createElement("canvas");
-      canvas.width = canvas.height = 48;
-      realisticSprite(
-        canvas.getContext("2d"),
-        "resources",
-        index,
-        24,
-        24,
-        44,
-        44,
-      );
-      document.querySelectorAll(`img[src$="/${name}.svg"]`).forEach((img) => {
-        img.src = canvas.toDataURL();
-      });
-    }
-  });
   window.CruciataArt = {
     ellipse,
     line,
@@ -3141,9 +2972,11 @@
     jerusalemCross,
     roof,
     banner,
+    lappingWave,
     tree,
     resource,
     unit,
+    corpse,
     structure,
     terrain,
     terrainDetails,
@@ -3153,8 +2986,5 @@
     clipLand,
     ship,
     palette: C,
-    assetReady,
-    realisticAssets,
-    materialTile,
   };
 })();

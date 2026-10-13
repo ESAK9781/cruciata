@@ -203,7 +203,7 @@
       time: 35,
     },
     tower: {
-      name: "Watchtower",
+      name: "Defense tower",
       cost: { wood: 140, stone: 120 },
       w: 54,
       h: 54,
@@ -228,6 +228,17 @@
       range: 360,
       damage: 26,
     },
+  };
+  BUILDINGS.watchtower = {
+    name: "Observation tower",
+    cost: { wood: 35 },
+    w: 38,
+    h: 38,
+    hp: 320,
+    time: 10,
+    vision: 1100,
+    description:
+      "Cheap timber lookout. Reveals distant terrain (1100 range), but cannot attack or train troops.",
   };
   BUILDINGS.wall = {
     name: "Curtain wall",
@@ -583,18 +594,19 @@
     if (!sessionActive) return;
     if (state.result) return;
     try {
-      const copy = JSON.parse(
-        JSON.stringify(state, (key, value) =>
-          key === "groundCover" ? undefined : value,
-        ),
-      );
-      copy.fog = fog?.save();
-      copy.enemyFog = enemyFog?.save();
-      for (const u of copy.units) {
-        u.path = [];
-        u.pathGoal = null;
-        u.pathTimer = 0;
-      }
+      const copy = {
+        ...state,
+        groundCover: undefined,
+        fog: fog?.save(),
+        enemyFog: enemyFog?.save(),
+        units: state.units.map((u) => ({
+          ...u,
+          path: [],
+          pathGoal: null,
+          pathRequest: null,
+          pathTimer: 0,
+        })),
+      };
       localStorage.setItem(
         state.mode === "quickmatch"
           ? "cruciata-quickmatch-" + state.slot
@@ -752,6 +764,7 @@
       moving: false,
       working: false,
       hold: false,
+      stance: "fight",
       blessed: 0,
       job: null,
       carry: 0,
@@ -840,13 +853,110 @@
     }
     return inside;
   }
+  function fillRockHoles(tiles, valid) {
+    let added = 0;
+    // Flood from the exterior: enclosed, inaccessible pockets become solid rock.
+    const cells = [...tiles.values()];
+    if (!cells.length) return 0;
+    const x0 = Math.min(...cells.map((p) => p.x)) - 1,
+      x1 = Math.max(...cells.map((p) => p.x)) + 1,
+      y0 = Math.min(...cells.map((p) => p.y)) - 1,
+      y1 = Math.max(...cells.map((p) => p.y)) + 1,
+      exterior = new Set(),
+      queue = [{ x: x0, y: y0 }];
+    exterior.add(x0 + "," + y0);
+    for (let i = 0; i < queue.length; i++)
+      for (const [dx, dy] of [
+        [1, 0],
+        [-1, 0],
+        [0, 1],
+        [0, -1],
+      ]) {
+        const x = queue[i].x + dx,
+          y = queue[i].y + dy,
+          key = x + "," + y;
+        if (
+          x < x0 ||
+          x > x1 ||
+          y < y0 ||
+          y > y1 ||
+          tiles.has(key) ||
+          exterior.has(key)
+        )
+          continue;
+        exterior.add(key);
+        queue.push({ x, y });
+      }
+    for (let y = y0 + 1; y < y1; y++)
+      for (let x = x0 + 1; x < x1; x++)
+        if (
+          !tiles.has(x + "," + y) &&
+          !exterior.has(x + "," + y) &&
+          valid(x, y)
+        ) {
+          tiles.set(x + "," + y, { x, y });
+          added++;
+        }
+    return added;
+  }
+  function traceRockContours(tiles, cell) {
+    const edges = [];
+    for (const { x, y } of tiles.values()) {
+      const a = { x: x * cell, y: y * cell },
+        b = { x: (x + 1) * cell, y: y * cell },
+        c = { x: (x + 1) * cell, y: (y + 1) * cell },
+        d = { x: x * cell, y: (y + 1) * cell };
+      for (const [dx, dy, start, end] of [
+        [0, -1, a, b],
+        [1, 0, b, c],
+        [0, 1, c, d],
+        [-1, 0, d, a],
+      ])
+        if (!tiles.has(x + dx + "," + (y + dy)))
+          edges.push({ start, end, used: false });
+    }
+    const starts = new Map();
+    for (const edge of edges) {
+      const key = edge.start.x + "," + edge.start.y;
+      if (!starts.has(key)) starts.set(key, []);
+      starts.get(key).push(edge);
+    }
+    const contours = [];
+    for (const edge of edges) {
+      if (edge.used) continue;
+      const contour = [],
+        first = edge.start;
+      let next = edge;
+      while (next && !next.used) {
+        next.used = true;
+        contour.push(next.start);
+        const end = next.end;
+        if (end.x === first.x && end.y === first.y) break;
+        next = (starts.get(end.x + "," + end.y) || []).find((e) => !e.used);
+      }
+      if (contour.length > 3)
+        contours.push(
+          contour.filter((p, i) => {
+            const a = contour[(i + contour.length - 1) % contour.length],
+              b = contour[(i + 1) % contour.length];
+            return (p.x - a.x) * (b.y - p.y) !== (p.y - a.y) * (b.x - p.x);
+          }),
+        );
+    }
+    return contours;
+  }
   function makeRockClusters(random) {
     const cell = 64,
       count = Math.min(24, Math.ceil((W * H) / 10000000));
     state.terrainFeatures = [];
     for (let cluster = 0; cluster < count; cluster++) {
-      const cx = Math.floor((550 + random() * (W - 1100)) / cell),
-        cy = Math.floor((450 + random() * (H - 900)) / cell),
+      const flank = cluster === 0 ? state.cities?.[0] : null;
+      const cx = Math.floor(
+          (flank ? flank.x - 600 : 550 + random() * (W - 1100)) / cell,
+        ),
+        cy = Math.floor(
+          (flank ? flank.y - 384 : 450 + random() * (H - 900)) / cell,
+        ),
         tiles = new Map();
       const valid = (x, y) => {
         const px = (x + 0.5) * cell,
@@ -863,6 +973,12 @@
         if (
           state.buildings.some(
             (b) =>
+              !(
+                flank &&
+                b.city === flank.id &&
+                b.kind === "wall" &&
+                b.y < flank.y - 250
+              ) &&
               Math.abs(b.x - px) < b.w / 2 + cell &&
               Math.abs(b.y - py) < b.h / 2 + cell,
           )
@@ -880,59 +996,33 @@
       };
       if (!valid(cx, cy)) continue;
       tiles.set(cx + "," + cy, { x: cx, y: cy });
-      const wanted = 35 + Math.floor(random() * 45);
-      for (
-        let attempt = 0;
-        attempt < wanted * 18 && tiles.size < wanted;
-        attempt++
-      ) {
-        const choices = [...tiles.values()],
-          a = choices[Math.floor(random() * choices.length)],
-          direction = Math.floor(random() * 4),
-          dx = [1, 0, -1, 0][direction],
-          dy = [0, 1, 0, -1][direction],
-          x = a.x + dx,
-          y = a.y + dy;
-        if (Math.hypot(x - cx, y - cy) > 6.5 || !valid(x, y)) continue;
-        tiles.set(x + "," + y, { x, y });
+      // A winding spine with uneven shoulders creates long, connected escarpments.
+      const heading = flank ? 0 : random() * Math.PI * 2,
+        length = flank ? 20 : 24 + Math.floor(random() * 23),
+        bend = flank ? 0 : (random() - 0.5) * 1.1,
+        width = flank ? 1.7 : 1.5 + random() * 1.7;
+      let spineX = cx,
+        spineY = cy,
+        angle = heading;
+      for (let step = 0; step < length; step++) {
+        angle +=
+          (flank ? 0 : Math.sin(step * 0.27 + cluster) * 0.035) + bend / length;
+        const centerX = Math.round(spineX),
+          centerY = Math.round(spineY),
+          shoulder = width + Math.sin(step * 0.43 + cluster) * 0.9;
+        for (let dy = -4; dy <= 4; dy++)
+          for (let dx = -4; dx <= 4; dx++) {
+            const x = centerX + dx,
+              y = centerY + dy;
+            if (Math.hypot(dx, dy) <= shoulder && valid(x, y))
+              tiles.set(x + "," + y, { x, y });
+          }
+        spineX += Math.cos(angle);
+        spineY += Math.sin(angle);
       }
+      fillRockHoles(tiles, valid);
       if (tiles.size < 12) continue;
-      const edges = [];
-      for (const { x, y } of tiles.values()) {
-        const a = { x: x * cell, y: y * cell },
-          b = { x: (x + 1) * cell, y: y * cell },
-          c = { x: (x + 1) * cell, y: (y + 1) * cell },
-          d = { x: x * cell, y: (y + 1) * cell };
-        for (const [dx, dy, start, end] of [
-          [0, -1, a, b],
-          [1, 0, b, c],
-          [0, 1, c, d],
-          [-1, 0, d, a],
-        ])
-          if (!tiles.has(x + dx + "," + (y + dy)))
-            edges.push({ start, end, used: false });
-      }
-      const starts = new Map();
-      for (const edge of edges) {
-        const key = edge.start.x + "," + edge.start.y;
-        if (!starts.has(key)) starts.set(key, []);
-        starts.get(key).push(edge);
-      }
-      const contours = [];
-      for (const edge of edges) {
-        if (edge.used) continue;
-        const contour = [],
-          first = edge.start;
-        let next = edge;
-        while (next && !next.used) {
-          next.used = true;
-          contour.push(next.start);
-          const end = next.end;
-          if (end.x === first.x && end.y === first.y) break;
-          next = (starts.get(end.x + "," + end.y) || []).find((e) => !e.used);
-        }
-        if (contour.length > 3) contours.push(contour);
-      }
+      const contours = traceRockContours(tiles, cell);
       const points = contours.flat(),
         minX = Math.min(...points.map((p) => p.x)),
         maxX = Math.max(...points.map((p) => p.x)),
@@ -961,6 +1051,52 @@
       decorations.push(mass);
       state.terrainFeatures.push(mass);
     }
+  }
+  const rockCollision = new WeakMap();
+  function rockBlocks(d, x, y, margin) {
+    if (!d.tiles?.length) {
+      let interior = false;
+      for (const contour of d.contours) {
+        if (insideContour(x, y, contour)) interior = !interior;
+        for (let i = 0; i < contour.length; i++)
+          if (
+            segmentDistance(
+              { x, y },
+              contour[i],
+              contour[(i + 1) % contour.length],
+            ) <
+            14 + margin
+          )
+            return true;
+      }
+      return interior;
+    }
+    let rows = rockCollision.get(d);
+    if (!rows) {
+      rows = new Map();
+      for (const p of d.tiles) {
+        if (!rows.has(p.y)) rows.set(p.y, new Set());
+        rows.get(p.y).add(p.x);
+      }
+      rockCollision.set(d, rows);
+    }
+    const radius = 14 + margin,
+      cell = d.cell,
+      minX = Math.floor((x - radius) / cell),
+      maxX = Math.floor((x + radius) / cell),
+      minY = Math.floor((y - radius) / cell),
+      maxY = Math.floor((y + radius) / cell);
+    for (let ty = minY; ty <= maxY; ty++) {
+      const row = rows.get(ty);
+      if (!row) continue;
+      for (let tx = minX; tx <= maxX; tx++) {
+        if (!row.has(tx)) continue;
+        const dx = Math.max(tx * cell - x, 0, x - (tx + 1) * cell),
+          dy = Math.max(ty * cell - y, 0, y - (ty + 1) * cell);
+        if (dx * dx + dy * dy < radius * radius) return true;
+      }
+    }
+    return false;
   }
   function groundFree(x, y, margin = 10, ignore = null, adjacentWalls = false) {
     if (!landFree(x, y, margin)) return false;
@@ -1019,21 +1155,7 @@
     for (const d of index ? index.decorations.get(bucket) || [] : decorations) {
       if (!d.block) continue;
       if (d.kind === "rockmass") {
-        let interior = false;
-        for (const contour of d.contours) {
-          if (insideContour(x, y, contour)) interior = !interior;
-          for (let i = 0; i < contour.length; i++)
-            if (
-              segmentDistance(
-                { x, y },
-                contour[i],
-                contour[(i + 1) % contour.length],
-              ) <
-              14 + margin
-            )
-              return false;
-        }
-        if (interior) return false;
+        if (rockBlocks(d, x, y, margin)) return false;
       } else if (Math.hypot(x - d.x, y - d.y) < d.r + margin) return false;
     }
     for (const n of index ? index.nodes.get(bucket) || [] : state.nodes)
@@ -1056,6 +1178,7 @@
     return Math.hypot(p.x - a.x - dx * t, p.y - a.y - dy * t);
   }
   function rebuildNavigation() {
+    state.navDirty = false;
     objectIndex.clear();
     obstacleIndex = {
       buildings: new Map(),
@@ -1132,10 +1255,76 @@
           for (const dx of [-21, 21])
             for (const dy of [-21, 21])
               waypoints.push({ x: p.x + dx, y: p.y + dy });
-    nav.rebuild((x, y) => groundFree(x, y, 6), waypoints);
+    // Only resample changed footprints; retain an exact full-map connectivity pass.
+    const footprints = new Map();
+    for (const b of state.buildings)
+      if (b.hp > 0 && !(BUILDINGS[b.kind].passable && !b.closed)) {
+        const pad = b.kind === "wall" ? 96 : 24,
+          w = b.w + pad * 2,
+          h = b.h + pad * 2;
+        footprints.set("b" + b.id, {
+          x: b.x - w / 2,
+          y: b.y - h / 2,
+          w,
+          h,
+          key: [
+            b.x,
+            b.y,
+            b.w,
+            b.h,
+            b.closed,
+            b.wallAngle,
+            JSON.stringify(b.links),
+          ].join(";"),
+        });
+      }
+    for (const n of state.nodes)
+      if (n.remaining > 0 && n.kind !== "food")
+        footprints.set("n" + n.id, {
+          x: n.x - 40,
+          y: n.y - 40,
+          w: 80,
+          h: 80,
+          key: [n.x, n.y, n.kind].join(";"),
+        });
+    const previous = nav.footprints,
+      regions = [];
+    if (previous)
+      for (const key of new Set([...previous.keys(), ...footprints.keys()])) {
+        const old = previous.get(key),
+          current = footprints.get(key);
+        if (old?.key === current?.key) continue;
+        if (old) regions.push(old);
+        if (current) regions.push(current);
+      }
+    const incremental = previous && nav.decorations === decorations;
+    const changed = nav.rebuild(
+      (x, y) => groundFree(x, y, 6),
+      waypoints,
+      incremental ? regions : null,
+    );
+    nav.footprints = footprints;
+    nav.decorations = decorations;
+    if (!changed) return;
     for (const u of state.units) {
-      u.path = [];
-      u.pathTimer = 0;
+      const points = [u, ...(u.path || []), u.pathGoal || u];
+      const affected =
+        !incremental ||
+        regions.some((area) =>
+          points.some((p, i) => {
+            const a = points[Math.max(0, i - 1)];
+            return (
+              Math.max(a.x, p.x) >= area.x &&
+              Math.min(a.x, p.x) <= area.x + area.w &&
+              Math.max(a.y, p.y) >= area.y &&
+              Math.min(a.y, p.y) <= area.y + area.h
+            );
+          }),
+        );
+      if (affected) {
+        u.path = [];
+        u.pathTimer = 0;
+      } else u.pathRevision = nav.revision;
     }
   }
   function findFree(p) {
@@ -1167,6 +1356,11 @@
       }
     }
     return origin;
+  }
+  function routePossible(u, p) {
+    const route = nav.query(u, p);
+    // Pending is distinct from unreachable: retain the assignment while searching.
+    return route === null || route.length > 0;
   }
   function edgePoint(u, target, extra = 27) {
     if (
@@ -1203,7 +1397,7 @@
       if (
         region !== null &&
         nav.components[n.y * nav.cols + n.x] !== region &&
-        !nav.find(u, point).length
+        !routePossible(u, point)
       )
         continue;
       const value = distance(u, point) + i * 2;
@@ -1405,7 +1599,49 @@
     }
     if (savedRockMasses) {
       state.terrainFeatures = savedRockMasses;
+      for (const mass of savedRockMasses) {
+        const tiles = new Map(
+            (mass.tiles || []).map((p) => [p.x + "," + p.y, p]),
+          ),
+          cell = mass.cell || 64;
+        const added = fillRockHoles(
+          tiles,
+          (x, y) =>
+            !state.buildings.some(
+              (b) =>
+                b.hp > 0 &&
+                Math.abs(b.x - (x + 0.5) * cell) < b.w / 2 + cell / 2 &&
+                Math.abs(b.y - (y + 0.5) * cell) < b.h / 2 + cell / 2,
+            ),
+        );
+        if (added) {
+          mass.tiles = [...tiles.values()];
+          mass.contours = traceRockContours(tiles, cell);
+        }
+      }
       decorations.push(...savedRockMasses);
+      // An enclosed deposit from an older map moves to the nearby rim, preserving its stores.
+      for (const n of state.nodes)
+        if (
+          n.remaining > 0 &&
+          savedRockMasses.some((d) => rockBlocks(d, n.x, n.y, 8))
+        ) {
+          const origin = { x: n.x, y: n.y };
+          let found = false;
+          for (let radius = 64; radius <= 1600 && !found; radius += 64)
+            for (let i = 0; i < 24; i++) {
+              const p = {
+                x: origin.x + Math.cos((i * Math.PI) / 12) * radius,
+                y: origin.y + Math.sin((i * Math.PI) / 12) * radius,
+              };
+              if (groundFree(p.x, p.y, n.kind === "wood" ? 24 : 32)) {
+                n.x = p.x;
+                n.y = p.y;
+                found = true;
+                break;
+              }
+            }
+        }
     } else makeRockClusters(random);
     if (generate) {
       state.nodes = [];
@@ -1469,8 +1705,9 @@
             x: clamp(c.x + Math.cos(a) * r, 270, W - 180),
             y: clamp(c.y + Math.sin(a) * r, 130, H - 150),
             r: c.kind === "wood" ? 23 : 28,
-            remaining: c.kind === "wood" ? 220 : c.kind === "food" ? 500 : 1300,
-            max: c.kind === "wood" ? 220 : c.kind === "food" ? 500 : 1300,
+            remaining:
+              c.kind === "wood" ? 660 : c.kind === "food" ? 1500 : 3900,
+            max: c.kind === "wood" ? 660 : c.kind === "food" ? 1500 : 3900,
             palm: state.config ? state.config.biome === 2 : l.terrain >= 3,
             snow: state.config ? state.config.biome === 3 : l.terrain === 2,
             scale: 0.9 + random() * 0.3,
@@ -1558,9 +1795,20 @@
       ["tower", 240, 240],
     ])
       state.buildings.push(makeBuilding(kind, 3, x + dx, y + dy, 1, extra));
+    const ring = [
+      [-192, -352],
+      [160, -352],
+      [352, -160],
+      [352, 96],
+      [192, 256],
+      [96, 352],
+      [-160, 352],
+      [-352, 160],
+      [-352, -192],
+    ].map(([dx, dy]) => ({ x: x + dx, y: y + dy }));
     const gates = [
-      { x: x - 320, y, rotation: 90 },
-      { x: x + 320, y, rotation: 90 },
+      { x: x - 352, y: y - 32, rotation: 90 },
+      { x: x + 352, y: y - 32, rotation: 90 },
     ];
     for (const gate of gates)
       state.buildings.push(
@@ -1570,37 +1818,23 @@
           closed: true,
         }),
       );
-    for (const [a, b] of [
-      [
-        { x: x - 320, y: y - 320 },
-        { x: x + 320, y: y - 320 },
-      ],
-      [
-        { x: x + 320, y: y - 320 },
-        { x: x + 320, y: y + 320 },
-      ],
-      [
-        { x: x + 320, y: y + 320 },
-        { x: x - 320, y: y + 320 },
-      ],
-      [
-        { x: x - 320, y: y + 320 },
-        { x: x - 320, y: y - 320 },
-      ],
-    ])
+    const positions = new Set();
+    for (let i = 0; i < ring.length; i++) {
+      const a = ring[i],
+        b = ring[(i + 1) % ring.length];
       for (const p of wallLine(a, b)) {
-        if (
-          gates.some((g) => distance(g, p) < 80) ||
-          state.buildings.some(
-            (b) =>
-              b.city === city.id && b.kind === "wall" && distance(b, p) < 1,
-          )
-        )
+        const key = p.x + "," + p.y;
+        if (positions.has(key) || gates.some((g) => distance(g, p) < 80))
           continue;
+        positions.add(key);
         state.buildings.push(
-          makeBuilding("wall", 3, p.x, p.y, 1, { ...extra, wallAngle: 0 }),
+          makeBuilding("wall", 3, p.x, p.y, 1, {
+            ...extra,
+            wallAngle: Math.atan2(b.y - a.y, b.x - a.x),
+          }),
         );
       }
+    }
     for (const gate of gates)
       for (const sign of [-1, 1])
         state.buildings.push(
@@ -1609,6 +1843,15 @@
             wallAngle: Math.PI / 2,
           }),
         );
+    city.radius = 370;
+    for (let i = 0; i < 6; i++)
+      state.units.push(
+        makeUnit("civilian", 3, x - 90 + i * 36, y + 185, {
+          city: city.id,
+          home: { x, y: y + 185 },
+          wander: 6 + i,
+        }),
+      );
     for (let i = 0; i < 14; i++) {
       const type =
         i < 6
@@ -1662,7 +1905,11 @@
       );
       const contested = state.units.some(
         (u) =>
-          u.hp > 0 && u.team !== 0 && u.team !== 2 && distance(u, city) < 120,
+          u.hp > 0 &&
+          u.team !== 0 &&
+          u.team !== 2 &&
+          !["worker", "civilian", "chaplain"].includes(u.type) &&
+          distance(u, city) < 120,
       );
       city.capture = Math.max(
         0,
@@ -1683,6 +1930,11 @@
         (u) => u.city === city.id && u.hp > 0,
       )) {
         u.team = 0;
+        if (u.type === "civilian") {
+          u.type = "worker";
+          u.maxHp = TYPES.worker.hp;
+          u.hp = u.maxHp;
+        }
         u.cityDefender = false;
         u.target = null;
         u.order = null;
@@ -1756,7 +2008,7 @@
   function musterStartingUnits() {
     const occupied = [];
     const valid = (p) =>
-      groundFree(p.x, p.y, 6) &&
+      groundFree(p.x, p.y, 10) &&
       !state.buildings.some(
         (b) =>
           Math.abs(b.x - p.x) < b.w / 2 + 18 &&
@@ -1837,6 +2089,7 @@
       config: quickConfig,
       slot: quickSlot,
       seed: quickConfig?.seed || 1888 + index * 331,
+      resourceScale: 3,
       upgrades: {},
       enemy: {
         faith: 25,
@@ -2133,6 +2386,14 @@
           state.sites.push(site);
           b.team = 2;
           b.site = site.id;
+          for (let i = 0; i < 4; i++)
+            state.units.push(
+              makeUnit("civilian", 2, b.x - 70 + i * 36, b.y + 135, {
+                site: site.id,
+                home: { x: b.x, y: b.y + 135 },
+                wander: 6 + i,
+              }),
+            );
           b.outpost = true;
         }
       }
@@ -2206,6 +2467,16 @@
     };
     arrangeStartingBuildings();
     makeWorld();
+    // The northern curtain meets solid terrain; masonry buried in rock is redundant.
+    state.buildings = state.buildings.filter(
+      (b) =>
+        !(
+          b.city === state.cities[0]?.id &&
+          b.kind === "wall" &&
+          b.y < state.cities[0].y - 250 &&
+          state.terrainFeatures.some((d) => rockBlocks(d, b.x, b.y, 8))
+        ),
+    );
     rebuildNavigation();
     musterStartingUnits();
     state.roads = planRoads();
@@ -2310,6 +2581,10 @@
       spent: 0,
     };
     old.units = old.units.filter((u) => !!TYPES[u.type]);
+    for (const u of old.units) {
+      u.stance ||= u.hold ? "hold" : "fight";
+      u.pathRequest = null;
+    }
     for (const b of old.buildings) {
       if (b.kind === "market") b.kind = "house";
       const spec = BUILDINGS[b.kind];
@@ -2422,6 +2697,13 @@
     quickConfig = state.config;
     quickSlot = state.slot;
     state.controlGroups ||= {};
+    if (state.resourceScale !== 3) {
+      for (const n of state.nodes) {
+        n.remaining *= 3;
+        n.max *= 3;
+      }
+      state.resourceScale = 3;
+    }
     uid = saved.uid || 0;
     camera = saved.camera || {
       x: state.buildings[0].x,
@@ -2431,6 +2713,7 @@
     state.paused = true;
     selected.clear();
     selectedBuilding = null;
+    selectedBuildings.clear();
     makeWorld(false);
     fog = new window.CruciataFog(W, H, state.fog);
     enemyFog = new window.CruciataFog(W, H, state.enemyFog, 1);
@@ -2523,6 +2806,7 @@
     state.paused = true;
     const l = LEVELS[state.level];
     if (won && state.mode !== "quickmatch") {
+      state.armyTransitPending = state.level;
       completed.add(state.level);
       unlocked = Math.max(unlocked, Math.min(5, state.level + 1));
       persistPrefs();
@@ -2627,7 +2911,34 @@
         }
     return [...ids];
   }
-  function assignGather(u, resource, node = null, cluster = null) {
+  function assignDepotGather(u, depot) {
+    const types = BUILDINGS[depot.kind].drop || [];
+    const candidates = state.nodes.filter(
+      (n) =>
+        types.includes(n.kind) &&
+        n.remaining > 0 &&
+        (u.team === 0 ? fog : enemyFog).remembers(n),
+    );
+    if (types.includes("food"))
+      candidates.push(...completeBuildings("farm", u.team));
+    candidates.sort((a, b) => distance(a, depot) - distance(b, depot));
+    const target = candidates.find((n) => !edgePoint(u, n, 16).unreachable);
+    if (!target) return false;
+    return assignGather(
+      u,
+      target.kind === "farm" ? "food" : target.kind,
+      target,
+      null,
+      depot.id,
+    );
+  }
+  function assignGather(
+    u,
+    resource,
+    node = null,
+    cluster = null,
+    depot = null,
+  ) {
     const choices = state.nodes
       .filter(
         (n) =>
@@ -2673,6 +2984,7 @@
     u.exhaustedCluster = false;
     u.job = {
       kind: "gather",
+      depot,
       cluster: cluster || resourceCluster(target),
       resource,
       target: target.id,
@@ -2776,7 +3088,7 @@
       members: members.map((u) => u.id),
       anchor: center,
       destination,
-      path: nav.find(center, destination),
+      path: [],
       revision: nav.revision,
       speed: Math.min(...members.map((u) => TYPES[u.type].speed)),
       arrived: false,
@@ -2882,23 +3194,18 @@
   }
   function updateFormations() {
     state.formations ||= [];
+    const unitById = new Map(state.units.map((u) => [u.id, u]));
+    const active = (u, f) =>
+      u &&
+      u.hp > 0 &&
+      (u.order?.formation === f.id || u.pendingOrder?.formation === f.id);
     state.formations = state.formations.filter((f) =>
-      f.members.some((id) =>
-        state.units.some(
-          (u) =>
-            u.id === id &&
-            u.hp > 0 &&
-            (u.order?.formation === f.id || u.pendingOrder?.formation === f.id),
-        ),
-      ),
+      f.members.some((id) => active(unitById.get(id), f)),
     );
     for (const f of state.formations) {
-      const members = state.units.filter(
-        (u) =>
-          f.members.includes(u.id) &&
-          u.hp > 0 &&
-          (u.order?.formation === f.id || u.pendingOrder?.formation === f.id),
-      );
+      const members = f.members
+        .map((id) => unitById.get(id))
+        .filter((u) => active(u, f));
       if (!members.length) continue;
       if (f.escortId) {
         const wagon = getObject(f.escortId);
@@ -2967,7 +3274,7 @@
           x: origin.x + Math.cos(angle) * radius,
           y: origin.y + Math.sin(angle) * radius,
         };
-        if (available(p) && nav.find(u, p).length) return p;
+        if (available(p) && routePossible(u, p)) return p;
       }
     }
     return marchPoint(origin);
@@ -3018,11 +3325,31 @@
       u.pathRevision !== nav.revision ||
       u.stuck > 1.2
     ) {
-      u.path = nav.find(u, p);
-      u.pathGoal = p;
-      u.pathTimer = 2 + (u.id % 5) * 0.13;
-      u.pathRevision = nav.revision;
-      u.stuck = 0;
+      if (
+        !u.pathRequest ||
+        u.pathRequest.revision !== nav.revision ||
+        distance(u.pathRequest.goal, p) > 24
+      )
+        u.pathRequest = {
+          start: { x: u.x, y: u.y },
+          goal: p,
+          revision: nav.revision,
+        };
+      const path = nav.query(u.pathRequest.start, u.pathRequest.goal);
+      if (path === null) {
+        // Keep a valid existing route while its replacement is being computed.
+        if (u.pathRevision !== nav.revision || !u.path?.length) {
+          u.moving = false;
+          return false;
+        }
+      } else {
+        u.path = path;
+        u.pathRequest = null;
+        u.pathGoal = p;
+        u.pathTimer = 2 + (u.id % 5) * 0.13;
+        u.pathRevision = nav.revision;
+        u.stuck = 0;
+      }
     }
     // Finish at the exact order instead of repeatedly revisiting its nav cell.
     if (
@@ -3246,9 +3573,14 @@
       p.y + t.h / 2 > H - 32
     )
       return false;
-    for (const dx of [-t.w / 2, 0, t.w / 2])
-      for (const dy of [-t.h / 2, 0, t.h / 2])
-        if (!groundFree(p.x + dx, p.y + dy, 13, null, "all")) return false;
+    if (kind === "wall") {
+      // A masonry end may meet a cliff or shore; its center must remain on land.
+      if (!groundFree(p.x, p.y, 0, null, "all")) return false;
+    } else {
+      for (const dx of [-t.w / 2, 0, t.w / 2])
+        for (const dy of [-t.h / 2, 0, t.h / 2])
+          if (!groundFree(p.x + dx, p.y + dy, 13, null, "all")) return false;
+    }
     if (
       state.nodes.some(
         (n) =>
@@ -3334,6 +3666,12 @@
       ) {
         const dx = other.x - b.x,
           dy = other.y - b.y;
+        // Reject distant walls before scanning for an intervening corner.
+        if (
+          Math.abs(dx) > Math.max(32, (b.w + other.w) / 2) + 8 ||
+          Math.abs(dy) > Math.max(32, (b.h + other.h) / 2) + 8
+        )
+          continue;
         if (
           Math.abs(dx) > 12 &&
           Math.abs(dy) > 12 &&
@@ -3357,6 +3695,41 @@
           if (key) links[key] = { x: dx / 2, y: dy / 2 };
         }
       }
+    const neighbors = Object.values(links);
+    const directions =
+      neighbors.length === 1
+        ? [Math.atan2(-neighbors[0].y, -neighbors[0].x)]
+        : neighbors.length === 0 && Number.isFinite(b.wallAngle)
+          ? [b.wallAngle, b.wallAngle + Math.PI]
+          : [];
+    for (const angle of directions) {
+      for (let length = 16; length <= 40; length += 2) {
+        const x = b.x + Math.cos(angle) * length,
+          y = b.y + Math.sin(angle) * length;
+        const local = obstacleIndex
+          ? obstacleIndex.decorations.get(
+              Math.floor(x / 128) + "," + Math.floor(y / 128),
+            ) || []
+          : decorations;
+        const terrainBlocked =
+          !landFree(x, y, 0) ||
+          local.some(
+            (d) =>
+              d.block &&
+              (d.kind === "rockmass"
+                ? rockBlocks(d, x, y, 0)
+                : Math.hypot(x - d.x, y - d.y) < d.r),
+          );
+        if (!terrainBlocked) continue;
+        const dx = Math.cos(angle) * length,
+          dy = Math.sin(angle) * length;
+        const key =
+          (dy < -12 ? "n" : dy > 12 ? "s" : "") +
+          (dx < -12 ? "w" : dx > 12 ? "e" : "");
+        if (key) links[key] = { x: dx, y: dy, terrain: true };
+        break;
+      }
+    }
     return links;
   }
   function queueConstruction(builders, ids, append) {
@@ -3538,6 +3911,11 @@
       u.autoScout = null;
       u.target = null;
       u.manualTarget = false;
+      if (u.stance === "stand-down") {
+        u.fireTarget = null;
+        toast("This engine is standing down. Choose Hold or Fight to fire.");
+        continue;
+      }
       if (u.deployment === "deployed" || u.deployment === "setting-up") {
         const d = distance(u, p);
         if (d >= 180 && d <= 690) {
@@ -3553,7 +3931,7 @@
     }
     const combat = units.filter(
         (u) =>
-          u.type !== "worker" &&
+          (u.type !== "worker" || (!node && !building)) &&
           (u.type !== "trebuchet" || u.deployment === "packed"),
       ),
       center = combat.length
@@ -3576,6 +3954,10 @@
       slots = [];
     sorted.forEach((u, i) => {
       u.autoScout = null;
+      if (u.type === "worker") {
+        u.job = null;
+        if (!append) u.buildQueue = [];
+      }
       const row = Math.floor(i / cols),
         column = (i % cols) - (cols - 1) / 2,
         extra = u.type === "chaplain" ? 100 : u.type === "trebuchet" ? 170 : 0;
@@ -3611,18 +3993,30 @@
         members: sorted.map((u) => u.id),
         anchor: { ...center },
         destination: p,
-        path: nav.find(center, p),
+        path: [],
         revision: nav.revision,
         speed: Math.min(...sorted.map((u) => TYPES[u.type].speed)),
         arrived: false,
         wait: 0,
         escortId: escort?.id || null,
       });
-    for (const u of units.filter((u) => u.type === "worker")) {
+    for (const u of units.filter(
+      (u) => u.type === "worker" && !combat.includes(u),
+    )) {
       if (!append) u.buildQueue = [];
       u.hold = false;
       if (node && (!building || building.progress >= 1)) {
         assignGather(u, node.kind === "farm" ? "food" : node.kind, node);
+      } else if (
+        building?.team === 0 &&
+        building.progress >= 1 &&
+        BUILDINGS[building.kind].drop
+      ) {
+        if (!assignDepotGather(u, building)) {
+          u.job = null;
+          u.order = null;
+          toast("No explored resource accepted by this depot is available.");
+        }
       } else if (
         building?.team === 0 &&
         (building.progress < 1 || building.hp < building.maxHp)
@@ -3666,12 +4060,14 @@
   function selectArmy() {
     selected = new Set(fighters().map((u) => u.id));
     selectedBuilding = null;
+    selectedBuildings.clear();
     setTab("army");
     updateUI();
   }
   function selectWorkers() {
     selected = new Set(workers().map((u) => u.id));
     selectedBuilding = null;
+    selectedBuildings.clear();
     setTab("settlement");
     updateUI();
   }
@@ -3680,12 +4076,24 @@
     if (u) {
       selected = new Set([u.id]);
       selectedBuilding = null;
+      selectedBuildings.clear();
       camera.x = u.x;
       camera.y = u.y;
       setTab("settlement");
       updateView();
       updateUI();
     } else toast("All villagers are working.");
+  }
+  function setStance(value) {
+    if (!playable() || !["fight", "hold", "stand-down"].includes(value)) return;
+    for (const u of fighters().filter((u) => selected.has(u.id))) {
+      u.stance = value;
+      u.hold = false;
+      u.target = null;
+      u.manualTarget = false;
+      if (value === "stand-down") u.fireTarget = null;
+    }
+    updateUI();
   }
   function hold() {
     if (!playable()) return;
@@ -3698,7 +4106,8 @@
         u.target = null;
         u.job = null;
         u.buildQueue = [];
-        u.hold = true;
+        u.stance = u.type === "worker" ? u.stance : "hold";
+        u.hold = u.type === "worker";
         u.path = [];
       }
     placement = null;
@@ -3747,20 +4156,21 @@
         return;
       }
     }
-    if (b.kind === "wall") {
+    if (!BUILDINGS[b.kind].drop) {
       const next = state.buildings
         .filter(
           (c) =>
             c.team === u.team &&
-            c.kind === "wall" &&
             c.hp > 0 &&
             c.progress < 1 &&
-            distance(c, b) < 110,
+            distance(c, b) <= 420,
         )
-        .sort((a, c) => distance(a, u) - distance(c, u))[0];
+        .sort((a, c) => distance(a, u) - distance(c, u))
+        .find((c) => !edgePoint(u, c, 12).unreachable);
       if (next) {
         u.job = { kind: "build", target: next.id };
         u.pathTimer = 0;
+        u.pathRequest = null;
         return;
       }
     }
@@ -3768,20 +4178,9 @@
       if (!assignGather(u, "food", b)) assignGather(u, "food");
       return;
     }
-    const types = BUILDINGS[b.kind].drop;
-    if (!types) return;
-    const candidates = state.nodes
-      .filter(
-        (n) =>
-          types.includes(n.kind) &&
-          n.remaining > 0 &&
-          (u.team === 0 ? fog : enemyFog).remembers(n),
-      )
-      .sort((a, b) => distance(a, u) - distance(b, u));
-    const nearest = candidates.find((n) => !edgePoint(u, n, 16).unreachable);
-    if (nearest) assignGather(u, nearest.kind, nearest);
-    else for (const type of types) if (assignGather(u, type)) break;
+    if (BUILDINGS[b.kind].drop) assignDepotGather(u, b);
   }
+
   function harvestSpot(u, target, farm) {
     if (
       u.harvestSpot?.target === target.id &&
@@ -3830,6 +4229,10 @@
         e.team !== 2 &&
         !["chaplain", "trebuchet"].includes(e.type),
     );
+    if ((u.stance || "fight") !== "fight") {
+      if (u.order) marchUnit(u, dt);
+      return;
+    }
     if (threats.length) {
       u.fleeUntil = state.time + 5;
       const shelters = completeBuildings(null, u.team).filter(
@@ -3891,7 +4294,7 @@
             if (groundFree(p.x, p.y, 6)) candidates.push(p);
           }
           candidates.sort((a, b) => distance(u, a) - distance(u, b));
-          const point = candidates.find((p) => nav.find(u, p).length);
+          const point = candidates.find((p) => routePossible(u, p));
           contact = u.buildContact = point
             ? {
                 ...point,
@@ -3982,18 +4385,28 @@
       ) {
         if (u.carry > 0) job.phase = "deliver";
         else {
-          assignGather(u, job.resource, null, job.cluster);
+          assignGather(u, job.resource, null, job.cluster, job.depot);
           return;
         }
       }
       const capacity = 16;
       if (job.phase === "deliver" || u.carry >= capacity) {
         job.phase = "deliver";
-        const drop = completeBuildings(null, u.team)
-          .filter((b) =>
-            BUILDINGS[b.kind].drop?.includes(u.carryType || job.resource),
-          )
-          .sort((a, b) => distance(a, u) - distance(b, u))[0];
+        const preferred = getObject(job.depot);
+        const drop =
+          preferred?.team === u.team &&
+          preferred.hp > 0 &&
+          preferred.progress >= 1 &&
+          BUILDINGS[preferred.kind].drop?.includes(
+            u.carryType || job.resource,
+          ) &&
+          !edgePoint(u, preferred, 20).unreachable
+            ? preferred
+            : completeBuildings(null, u.team)
+                .filter((b) =>
+                  BUILDINGS[b.kind].drop?.includes(u.carryType || job.resource),
+                )
+                .sort((a, b) => distance(a, u) - distance(b, u))[0];
         if (!drop) return;
         const p = edgePoint(u, drop, 20);
         if (surfaceDistance(u, drop) > 65) {
@@ -4017,7 +4430,7 @@
         return;
       }
       if (edgePoint(u, target, 16).unreachable) {
-        assignGather(u, job.resource, null, job.cluster);
+        assignGather(u, job.resource, null, job.cluster, job.depot);
         return;
       }
       const farm = target.kind === "farm";
@@ -4217,11 +4630,14 @@
     return score;
   }
   function acquire(u, r = 310) {
+    if (u.stance === "stand-down") return null;
+    const mayPursue = (u.stance || "fight") === "fight" && !u.hold;
     const enemies = nearby(u, r).filter(
       (e) =>
         e.team !== u.team &&
         e.team !== 2 &&
         e.type !== "civilian" &&
+        (mayPursue || surfaceDistance(u, e) <= TYPES[u.type].range + 5) &&
         observerSees(u, e),
     );
     let best = null,
@@ -4250,7 +4666,8 @@
             !b.cityCenter &&
             b.hp > 0 &&
             observerSees(u, b) &&
-            distance(u, b) < r + b.r,
+            distance(u, b) < r + b.r &&
+            (mayPursue || surfaceDistance(u, b) <= TYPES[u.type].range + 15),
         )
         .sort((a, b) => distance(a, u) - distance(b, u))[0] || null
     );
@@ -4366,6 +4783,7 @@
         y: target.y,
         angle: target.angle,
         shattered: siege,
+        rank: target.rank || 0,
         type: target.type,
         team: target.team,
         t: 0,
@@ -4418,6 +4836,12 @@
         }
         u.pathTimer = 0;
       }
+      return;
+    }
+    if (u.stance === "stand-down") {
+      u.target = null;
+      u.fireTarget = null;
+      if (u.deployment === "packed" && u.order) marchUnit(u, dt);
       return;
     }
     let target = u.target ? getObject(u.target) : null;
@@ -4487,7 +4911,7 @@
       return;
     }
     if (u.order) {
-      if (u.order.attack && u.team === 1) {
+      if (u.order.attack && u.team === 1 && (u.stance || "fight") === "fight") {
         target = target || acquire(u, 690);
         if (target && distance(u, target) < 620 && distance(u, target) > 210) {
           u.target = target.id;
@@ -4511,6 +4935,15 @@
     }
   }
   function combatAI(u, dt) {
+    if (
+      u.stance === "stand-down" &&
+      !["chaplain", "trebuchet"].includes(u.type)
+    ) {
+      u.target = null;
+      u.manualTarget = false;
+      if (u.order) marchUnit(u, dt);
+      return;
+    }
     if (u.type === "chaplain") {
       supportAI(u, dt);
       return;
@@ -4526,6 +4959,13 @@
         target.team === 2 ||
         !observerSees(u, target) ||
         (distance(u, target) > 650 && !u.manualTarget))
+    )
+      target = null;
+    const autonomous = (u.stance || "fight") === "fight" && !u.hold;
+    if (
+      !autonomous &&
+      target &&
+      surfaceDistance(u, target) > TYPES[u.type].range + (target.kind ? 15 : 5)
     )
       target = null;
     if (u.team === 1 && u.scout) {
@@ -4564,11 +5004,18 @@
         distance(u, formation.anchor) < 270 ||
         u.lastHit > state.time - 2
       )
-        target = acquire(u, u.hold ? TYPES[u.type].range + 35 : r);
+        target = acquire(u, !autonomous ? TYPES[u.type].range + 35 : r);
+      if (
+        !autonomous &&
+        target &&
+        surfaceDistance(u, target) >
+          TYPES[u.type].range + (target.kind ? 15 : 5)
+      )
+        target = null;
     }
     if (target && u.type === "archer")
       u.aimAngle = Math.atan2(target.y - u.y, target.x - u.x);
-    if (target && u.type === "archer" && !u.hold) {
+    if (target && u.type === "archer" && autonomous) {
       const threat = nearby(u, 100)
         .filter(
           (e) =>
@@ -4610,7 +5057,7 @@
       u.angle = Math.atan2(target.y - u.y, target.x - u.x);
       if (d <= range) {
         if (u.cooldown <= 0) fire(u, target);
-      } else if (!u.hold) {
+      } else if (autonomous) {
         let goal = target.kind
           ? edgePoint(u, target, 16)
           : { x: target.x, y: target.y };
@@ -4636,6 +5083,7 @@
     if (u.order) {
       marchUnit(u, dt);
     } else if (
+      autonomous &&
       (u.team === 1 || u.cityDefender) &&
       u.home &&
       distance(u, u.home) > 60
@@ -4643,6 +5091,7 @@
       moveUnit(u, u.home, dt);
   }
   function fire(u, target) {
+    if (u.stance === "stand-down") return;
     u.aimAngle = Math.atan2(target.y - u.y, target.x - u.x);
     u.angle = u.aimAngle;
     u.cooldown = TYPES[u.type].cooldown;
@@ -4805,21 +5254,6 @@
   function enemyEconomy(dt) {
     const ai = state.enemy,
       plan = DIFFICULTIES[state.difficulty] || DIFFICULTIES.normal;
-    ai.gateCheck = (ai.gateCheck || 0) - dt;
-    if (ai.gateCheck <= 0) {
-      ai.gateCheck = 0.5;
-      for (const gate of completeBuildings("gate", 1).filter(
-        (b) => b.defence,
-      )) {
-        const closed = nearby(gate, 320).some(
-          (u) => u.team !== 1 && u.team !== 2 && enemyFog.sees(u),
-        );
-        if (gate.closed !== closed) {
-          gate.closed = closed;
-          state.navDirty = true;
-        }
-      }
-    }
     ai.think -= dt;
     if (ai.think > 0) return;
     ai.think = plan.think;
@@ -5053,7 +5487,7 @@
           members: defenders.map((u) => u.id),
           anchor: center,
           destination,
-          path: nav.find(center, destination),
+          path: [],
           revision: nav.revision,
           speed: Math.min(...defenders.map((u) => TYPES[u.type].speed)),
           arrived: false,
@@ -5162,7 +5596,7 @@
           members: group.map((u) => u.id),
           anchor: { ...center },
           destination,
-          path: nav.find(center, destination),
+          path: [],
           revision: nav.revision,
           speed: Math.min(...group.map((u) => TYPES[u.type].speed)),
           arrived: false,
@@ -5175,7 +5609,7 @@
   }
   function civilianAI(u, dt) {
     const threats = nearby(u, 180).filter(
-      (e) => e.team !== 2 && TYPES[e.type].damage > 0,
+      (e) => e.team !== u.team && e.team !== 2 && TYPES[e.type].damage > 0,
     );
     if (threats.length) {
       const closest = threats.sort(
@@ -5375,6 +5809,39 @@
       rebuildNavigation();
     }
     rebuildSpatial();
+    state.gateTimer = (state.gateTimer || 0) - dt;
+    if (state.gateTimer <= 0) {
+      state.gateTimer = 0.25;
+      for (const gate of state.buildings) {
+        if (
+          gate.kind !== "gate" ||
+          gate.hp <= 0 ||
+          gate.progress < 1 ||
+          gate.team === 2
+        )
+          continue;
+        const threat = nearby(gate, gate.autoClosed ? 200 : 145).some(
+          (u) =>
+            u.hp > 0 &&
+            u.team !== gate.team &&
+            u.team !== 2 &&
+            TYPES[u.type].damage > 0 &&
+            observerSees(gate, u),
+        );
+        if (threat && !gate.closed) {
+          gate.closed = true;
+          gate.autoClosed = true;
+          state.navDirty = true;
+        } else if (!threat && gate.autoClosed) {
+          gate.closed = false;
+          gate.autoClosed = false;
+          state.navDirty = true;
+        } else if (gate.team === 1 && gate.defence && !threat && gate.closed) {
+          gate.closed = false;
+          state.navDirty = true;
+        }
+      }
+    }
     updateScouting(dt);
     updateFormations(dt);
     strategicAI(dt);
@@ -5565,7 +6032,7 @@
             ],
             r: 2 + Math.random() * 7,
           });
-        sound("impact");
+        sound("explosion", { x: stone.tx, y: stone.ty });
       }
     }
     state.boulders = state.boulders.filter((s) => !s.hit);
@@ -5611,10 +6078,25 @@
           for (const building of state.buildings)
             if (building.site === s.id && building.hp > 0)
               building.team = claimant;
+          for (const u of state.units)
+            if (u.site === s.id && u.hp > 0) {
+              u.team = claimant;
+              if (u.type === "civilian") {
+                u.type = "worker";
+                u.maxHp = TYPES.worker.hp;
+                u.hp = u.maxHp;
+              }
+              u.home = null;
+              u.order = null;
+              u.job = null;
+              u.target = null;
+              u.path = [];
+              u.hold = false;
+            }
           toast(
             s.name +
               (claimant === 0
-                ? " secured beneath your standards."
+                ? " secured. Its residents now serve as villagers."
                 : " captured by the opposing host."),
           );
           sound("bell");
@@ -5656,6 +6138,7 @@
       finish(false);
       return;
     }
+    if (TEST) nav.process(Infinity, 32);
     if (objectiveState().won) finish(true);
     if (state.saveTimer <= 0) {
       state.saveTimer = 20;
@@ -5683,50 +6166,56 @@
     c.width = 90;
     c.height = 80;
     const g = c.getContext("2d");
-    g.translate(45, 40);
-    if (art.type) {
-      g.scale(1.5, 1.5);
-      drawUnit(
-        g,
-        {
-          type: art.type,
-          team: 0,
-          angle: -Math.PI / 2,
-          anim: 0,
-          moving: false,
-          cooldown: 0,
-          strike: 0,
-          carry: 0,
-          job: null,
-          deployment: "packed",
-        },
-        0,
-      );
-    } else if (art.kind) {
-      const spec = BUILDINGS[art.kind],
-        scale = Math.min(65 / spec.w, 58 / spec.h);
-      g.scale(scale, scale);
-      Art.structure(
-        g,
-        {
-          kind: art.kind,
-          team: 0,
-          x: 0,
-          y: 0,
-          w: spec.w,
-          h: spec.h,
-          hp: spec.hp,
-          maxHp: spec.hp,
-          progress: 1,
-        },
-        0,
-      );
-    } else {
-      g.fillStyle = "#c5a36b";
-      g.font = "34px Georgia";
-      g.textAlign = "center";
-      g.fillText(art.symbol, 0, 10);
-    }
+    const paint = () => {
+      g.setTransform(1, 0, 0, 1, 0, 0);
+      g.clearRect(0, 0, c.width, c.height);
+      g.translate(45, 40);
+      if (art.type) {
+        g.scale(1.5, 1.5);
+        drawUnit(
+          g,
+          {
+            type: art.type,
+            team: 0,
+            angle: -Math.PI / 2,
+            anim: 0,
+            moving: false,
+            cooldown: 0,
+            strike: 0,
+            carry: 0,
+            job: null,
+            deployment: "packed",
+          },
+          0,
+        );
+      } else if (art.kind) {
+        const spec = BUILDINGS[art.kind],
+          scale = Math.min(65 / spec.w, 58 / spec.h);
+        g.scale(scale, scale);
+        Art.structure(
+          g,
+          {
+            kind: art.kind,
+            team: 0,
+            x: 0,
+            y: 0,
+            w: spec.w,
+            h: spec.h,
+            hp: spec.hp,
+            maxHp: spec.hp,
+            progress: 1,
+          },
+          0,
+        );
+      } else {
+        g.fillStyle = "#c5a36b";
+        g.font = "34px Georgia";
+        g.textAlign = "center";
+        g.fillText(art.symbol, 0, 10);
+      }
+    };
+    paint();
+
     const strong = document.createElement("strong");
     strong.textContent = name;
     const price = document.createElement("span");
@@ -5764,18 +6253,33 @@
         ),
       );
     }
-    for (const [k, t] of Object.entries(BUILDINGS))
-      if (t.cost)
-        $("build-list").append(
+    for (const [label, kinds] of [
+      ["Settlement", ["towncenter", "house", "chapel"]],
+      ["Economy", ["farm", "mill", "lumbercamp", "miningcamp"]],
+      ["Military", ["barracks", "stable", "siegeworkshop"]],
+      ["Fortification", ["watchtower", "tower", "wall", "gate"]],
+    ]) {
+      const group = document.createElement("section");
+      group.className = "build-category";
+      const heading = document.createElement("h3");
+      heading.textContent = label;
+      group.append(heading);
+      for (const k of kinds) {
+        const t = BUILDINGS[k];
+        if (!t?.cost) continue;
+        group.append(
           actionCard(
             "build-" + k,
             t.name,
             t.cost,
             { kind: k },
             () => beginBuild(k),
-            `${t.name}: ${costText(t.cost)}. ${t.time}s per villager.`,
+            `${t.name}: ${costText(t.cost)}. ${t.time}s per villager. ${t.description || ""}`,
           ),
         );
+      }
+      $("build-list").append(group);
+    }
     for (const [k, t] of Object.entries(TECHS))
       $("research-list").append(
         actionCard(
@@ -5789,9 +6293,14 @@
       );
   }
 
+  const groupButtons = new Map();
   function updateUI() {
     if (!state) return;
     $("rotate-placement").hidden = placement !== "gate";
+    const stanceUnits = fighters().filter((u) => selected.has(u.id));
+    $("stance-control").hidden = !stanceUnits.length;
+    const stances = new Set(stanceUnits.map((u) => u.stance || "fight"));
+    $("unit-stance").value = stances.size === 1 ? [...stances][0] : "mixed";
     const audioState = window.CruciataAudio.status();
     $("music-now-playing").textContent =
       settings.musicVolume === 0
@@ -5841,7 +6350,31 @@
       $("worker-ledger").append(row);
     }
     const units = friendUnits().filter((u) => selected.has(u.id));
-    if (units.length) selectedBuildings.clear();
+    const groupOwned = new Map(
+      [...state.units, ...state.buildings]
+        .filter((o) => o.team === 0 && o.hp > 0)
+        .map((o) => [o.id, o]),
+    );
+    const groupSelection = new Set(
+      [...selected, ...selectedBuildings, selectedBuilding].filter((id) =>
+        groupOwned.has(id),
+      ),
+    );
+    for (const [group, button] of groupButtons) {
+      const members = controlGroupMembers(group, groupOwned),
+        buildings = members.filter((o) => o.kind).length;
+      button.classList.toggle("assigned", members.length > 0);
+      button.setAttribute(
+        "aria-pressed",
+        String(
+          members.length > 0 &&
+            members.length === groupSelection.size &&
+            members.every((o) => groupSelection.has(o.id)),
+        ),
+      );
+      button.title = `Group ${group}: ${members.length - buildings} units, ${buildings} buildings. Ctrl+${group} assigns; Ctrl+Shift+${group} adds; ${group} selects.`;
+      button.setAttribute("aria-label", button.title);
+    }
     const b = state.buildings.find(
         (b) => b.id === selectedBuilding && b.hp > 0,
       ),
@@ -6003,33 +6536,41 @@
       $("queue-detail").textContent =
         buildings.reduce((n, b) => n + b.queue.length, 0) + " total queued";
     }
+    if (units.length && selectedBuildings.size) {
+      $("selection-title").textContent =
+        `${units.length} units + ${selectedBuildings.size} structures`;
+      $("selection-detail").textContent =
+        "Orders command the units; training and cancellation apply to selected buildings.";
+    }
     if (b)
       $("selection-role").textContent =
         b.progress < 1
           ? "Foundation: assign villagers to build by right-clicking. This project provides no vision until completed."
-          : b.outpost
-            ? "Capturable outpost: bring at least three soldiers within its ring for 18 seconds, with no opposing troops present. Neutral outposts provide neither army with vision."
-            : BUILDINGS[b.kind].drop
-              ? "Depot: villagers deliver " +
-                BUILDINGS[b.kind].drop.join(", ") +
-                " here. Nearby depots shorten gathering trips. New builders automatically gather after completion."
-              : b.kind === "farm"
-                ? "Grain field: up to 5 villagers work inside. " +
-                  Math.ceil(b.remaining) +
-                  " / " +
-                  b.max +
-                  " grain remains. Villagers automatically replant exhausted fields. Right-click with villagers to assign."
-                : b.kind === "gate"
-                  ? b.closed
-                    ? "Closed fortified gate: blocks both armies. Siege engines breach its reinforced masonry. Open it to permit passage."
-                    : "Open gate: passage for both armies. Close it to block the gap."
-                  : b.team === 2
-                    ? "Protected neutral village: cannot be attacked. Bring at least three soldiers close to claim it. Captured houses add population; protect the civilians."
-                    : Object.values(TYPES).some((t) => t.producer === b.kind)
-                      ? "Trains troops. Right-click terrain to set a rally point for new units."
-                      : b.kind === "house"
-                        ? "Housing adds 12 population. Cannot train troops or set a rally point."
-                        : "Defensive structure. Cannot train troops or set a rally point.";
+          : b.kind === "watchtower"
+            ? BUILDINGS.watchtower.description
+            : b.outpost
+              ? "Capturable outpost: hold three soldiers inside its ring for 18 seconds. Its buildings and resident villagers transfer to the capturing army. Neutral outposts provide neither army with vision."
+              : BUILDINGS[b.kind].drop
+                ? "Depot: villagers deliver " +
+                  BUILDINGS[b.kind].drop.join(", ") +
+                  " here. Right-click this depot with villagers to gather and deliver here. New builders automatically gather after completion."
+                : b.kind === "farm"
+                  ? "Grain field: up to 5 villagers work inside. " +
+                    Math.ceil(b.remaining) +
+                    " / " +
+                    b.max +
+                    " grain remains. Villagers automatically replant exhausted fields. Right-click with villagers to assign."
+                  : b.kind === "gate"
+                    ? b.closed
+                      ? "Closed fortified gate: blocks both armies. Siege engines breach its reinforced masonry. Open it to permit passage."
+                      : "Open gate: passage for both armies. Close it to block the gap."
+                    : b.team === 2
+                      ? "Protected neutral village: cannot be attacked. Bring at least three soldiers close to claim it. Captured houses add population; protect the civilians."
+                      : Object.values(TYPES).some((t) => t.producer === b.kind)
+                        ? "Trains troops. Right-click terrain to set a rally point for new units."
+                        : b.kind === "house"
+                          ? "Housing adds 12 population. Cannot train troops or set a rally point."
+                          : "Defensive structure. Cannot train troops or set a rally point.";
     if (b?.city && !state.cities?.find((c) => c.id === b.city)?.captured) {
       const city = state.cities.find((c) => c.id === b.city);
       $("selection-role").textContent =
@@ -6105,6 +6646,82 @@
     }
   }
 
+  const siegeOverlay = {
+    mask: document.createElement("canvas"),
+    stamp: document.createElement("canvas"),
+    edge: document.createElement("canvas"),
+    key: "",
+  };
+  function drawSiegeUnion(engines) {
+    const scale = view.scale,
+      width = Math.ceil(view.w * scale),
+      height = Math.ceil(view.h * scale),
+      key = [
+        view.x,
+        view.y,
+        scale,
+        width,
+        height,
+        ...engines.flatMap((u) => [u.id, u.x, u.y]),
+      ].join(",");
+    if (siegeOverlay.key !== key) {
+      siegeOverlay.key = key;
+      for (const c of [
+        siegeOverlay.mask,
+        siegeOverlay.stamp,
+        siegeOverlay.edge,
+      ]) {
+        if (c.width !== width || c.height !== height) {
+          c.width = width;
+          c.height = height;
+        } else {
+          const g = c.getContext("2d");
+          g.globalCompositeOperation = "source-over";
+          g.clearRect(0, 0, width, height);
+        }
+      }
+      const mask = siegeOverlay.mask.getContext("2d"),
+        stamp = siegeOverlay.stamp.getContext("2d"),
+        edge = siegeOverlay.edge.getContext("2d");
+      for (const u of engines) {
+        stamp.clearRect(0, 0, width, height);
+        stamp.beginPath();
+        stamp.arc(
+          (u.x - view.x) * scale,
+          (u.y - view.y) * scale,
+          690 * scale,
+          0,
+          Math.PI * 2,
+        );
+        stamp.arc(
+          (u.x - view.x) * scale,
+          (u.y - view.y) * scale,
+          180 * scale,
+          0,
+          Math.PI * 2,
+          true,
+        );
+        stamp.fillStyle = "#f1cd82";
+        stamp.fill();
+        mask.drawImage(siegeOverlay.stamp, 0, 0);
+      }
+      for (const [x, y] of [
+        [-1.5, 0],
+        [1.5, 0],
+        [0, -1.5],
+        [0, 1.5],
+      ])
+        edge.drawImage(siegeOverlay.mask, x, y);
+      edge.globalCompositeOperation = "destination-out";
+      edge.drawImage(siegeOverlay.mask, 0, 0);
+    }
+    ctx.save();
+    ctx.globalAlpha = 0.07;
+    ctx.drawImage(siegeOverlay.mask, view.x, view.y, view.w, view.h);
+    ctx.globalAlpha = 0.7;
+    ctx.drawImage(siegeOverlay.edge, view.x, view.y, view.w, view.h);
+    ctx.restore();
+  }
   function drawUnit(g, u, time, drawAngle = u.angle) {
     g.scale(0.72, 0.72);
     if (u.type === "trebuchet") {
@@ -6344,14 +6961,7 @@
         continue;
       const points = road.map((p) => [p.x, p.y]);
       Art.line(ctx, points, 38, "#827761");
-      Art.line(
-        ctx,
-        points,
-        33,
-        Art.realisticAssets.ready
-          ? ctx.createPattern(Art.materialTile(1, 192), "repeat")
-          : "#a89b7e",
-      );
+      Art.line(ctx, points, 33, "#a89b7e");
       for (const offset of [-7, 7])
         Art.line(
           ctx,
@@ -6498,47 +7108,7 @@
               time,
             );
           } else {
-            ctx.rotate(c.angle + 0.4);
-            Art.ellipse(
-              ctx,
-              0,
-              0,
-              14,
-              6,
-              c.type === "worker"
-                ? "#b6a07a"
-                : c.team === 1
-                  ? "#516c52"
-                  : "#a65c40",
-            );
-            Art.ellipse(ctx, -12, 0, 5, 4, "#a4ac94");
-            Art.line(
-              ctx,
-              [
-                [7, 0],
-                [17, 4],
-              ],
-              3,
-              "#695840",
-            );
-            Art.line(
-              ctx,
-              [
-                [7, 0],
-                [15, -5],
-              ],
-              3,
-              "#695840",
-            );
-            Art.line(
-              ctx,
-              [
-                [1, 3],
-                [8, 13],
-              ],
-              1.5,
-              "#d1d3b8",
-            );
+            Art.corpse(ctx, c);
           }
           ctx.restore();
         }
@@ -6586,27 +7156,21 @@
           healthBar(ctx, b.x, b.y - b.h / 2 - 12, b.progress, 70, 0);
         }
       }
-    for (const u of state.units.filter(
+    const engines = state.units.filter(
       (u) => u.team === 0 && u.type === "trebuchet" && selected.has(u.id),
-    )) {
-      ctx.save();
-      ctx.beginPath();
-      ctx.arc(u.x, u.y, 690, 0, Math.PI * 2);
-      ctx.arc(u.x, u.y, 180, 0, Math.PI * 2, true);
-      ctx.fillStyle = "#d0b25d10";
-      ctx.fill();
-      ctx.setLineDash([10, 8]);
-      for (const range of [180, 690]) {
-        ctx.beginPath();
-        ctx.arc(u.x, u.y, range, 0, Math.PI * 2);
-        ctx.strokeStyle = range === 180 ? "#d16a5288" : "#f1cd82aa";
-        ctx.lineWidth = 1.5;
-        ctx.stroke();
-      }
-      ctx.setLineDash([]);
+    );
+    if (engines.length) {
+      drawSiegeUnion(engines);
       ctx.font = "12px Georgia";
       ctx.fillStyle = "#f5d497";
-      ctx.fillText("Siege range 180-690", u.x + 190, u.y);
+      ctx.fillText(
+        "Combined siege range 180-690",
+        engines[0].x + 190,
+        engines[0].y,
+      );
+    }
+    for (const u of engines) {
+      ctx.save();
       if (u.fireTarget) {
         Art.line(
           ctx,
@@ -6787,27 +7351,6 @@
       Art.ellipse(ctx, x - 1, fy - 1, 6, 6, "#f5a23b");
       Art.ellipse(ctx, x - 2, fy - 2, 3, 3, "#ffe6a0");
     }
-    for (const u of state.units)
-      if (
-        u.moving &&
-        onScreen(u, 30) &&
-        (u.team === 0 || playerSees(u)) &&
-        (biome === 0 || biome === 1)
-      ) {
-        for (let i = 0; i < 7; i++) {
-          const a = i * 2.399 + u.id,
-            r = 7 + (i % 3) * 3,
-            x = u.x + Math.cos(a) * r,
-            y = u.y + Math.sin(a) * r;
-          const bend = Math.sin(time * 6 + i) * 2 + Math.cos(u.angle) * 4;
-          ctx.strokeStyle = i % 2 ? "#abc77999" : "#3f632a99";
-          ctx.lineWidth = 0.8;
-          ctx.beginPath();
-          ctx.moveTo(x, y);
-          ctx.quadraticCurveTo(x + bend, y - 3, x + bend * 1.5, y - 6);
-          ctx.stroke();
-        }
-      }
     for (const p of state.particles)
       if (onScreen(p, 20)) {
         ctx.globalAlpha = 1 - p.t / p.life;
@@ -6917,6 +7460,23 @@
     mc.drawImage(terrain, 0, 0, mini.width, mini.height);
     const sx = mini.width / W,
       sy = mini.height / H;
+    mc.save();
+    mc.scale(sx, sy);
+    mc.fillStyle = "#22251d";
+    mc.strokeStyle = "#c3af7b";
+    mc.lineWidth = 24;
+    for (const d of state.terrainFeatures || []) {
+      mc.beginPath();
+      for (const contour of d.contours || []) {
+        contour.forEach((p, i) =>
+          i ? mc.lineTo(p.x, p.y) : mc.moveTo(p.x, p.y),
+        );
+        mc.closePath();
+      }
+      mc.fill("evenodd");
+      mc.stroke();
+    }
+    mc.restore();
     for (const n of state.nodes)
       if (n.remaining > 0) {
         mc.fillStyle = {
@@ -7149,7 +7709,66 @@
       mode === "attack",
     );
   });
+  $("unit-stance").addEventListener("change", (e) => setStance(e.target.value));
   $("rotate-placement").addEventListener("click", rotatePlacement);
+  function controlGroupMembers(group, owned = null) {
+    owned ||= new Map(
+      [...state.units, ...state.buildings]
+        .filter((o) => o.team === 0 && o.hp > 0)
+        .map((o) => [o.id, o]),
+    );
+    return (state.controlGroups[group] || [])
+      .map((id) => owned.get(id))
+      .filter(Boolean);
+  }
+  function controlGroup(group, event = {}) {
+    if (!playable()) return;
+    const owned = new Map(
+      [...state.units, ...state.buildings]
+        .filter((o) => o.team === 0 && o.hp > 0)
+        .map((o) => [o.id, o]),
+    );
+    if (event.ctrlKey || event.metaKey) {
+      const previous = event.shiftKey
+        ? controlGroupMembers(group, owned).map((o) => o.id)
+        : [];
+      const selection = [
+        ...selected,
+        ...selectedBuildings,
+        selectedBuilding,
+      ].filter((id) => owned.has(id));
+      state.controlGroups[group] = [...new Set([...previous, ...selection])];
+      toast(
+        `Group ${group} ${selection.length ? "assigned" : "cleared"} (${state.controlGroups[group].length} members).`,
+      );
+    } else {
+      const members = controlGroupMembers(group, owned);
+      selected = new Set(members.filter((o) => o.type).map((o) => o.id));
+      selectedBuildings = new Set(
+        members.filter((o) => o.kind).map((o) => o.id),
+      );
+      selectedBuilding = [...selectedBuildings][0] || null;
+      selectedNode = null;
+      placement = null;
+      mode = "move";
+      if (!members.length)
+        toast(
+          `Group ${group} is empty. Select units or buildings and press Ctrl+${group}.`,
+        );
+      else if (selectedBuildings.size) setTab("army");
+    }
+    updateUI();
+  }
+
+  for (const group of ["1", "2", "3", "4", "5", "6", "7", "8", "9", "0"]) {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.id = "control-group-" + group;
+    button.textContent = group;
+    button.addEventListener("click", (event) => controlGroup(group, event));
+    $("control-groups").append(button);
+    groupButtons.set(group, button);
+  }
   window.addEventListener("keydown", (e) => {
     if (
       document.querySelector("dialog[open]") ||
@@ -7220,27 +7839,18 @@
       "standard",
       "trebuchet",
     ];
-    if (/^Digit[1-9]$/.test(e.code)) {
+    if (/^(Digit|Numpad)[0-9]$/.test(e.code)) {
+      e.preventDefault();
       const group = e.code.slice(-1);
-      if (e.ctrlKey || e.metaKey) {
-        state.controlGroups[group] = [...selected];
-        toast(`Company ${group} assigned (${selected.size} troops).`);
-      } else if (e.shiftKey && Number(group) <= 7) {
+      if (
+        e.shiftKey &&
+        !e.ctrlKey &&
+        !e.metaKey &&
+        Number(group) >= 1 &&
+        Number(group) <= 7
+      )
         recruit(keys[Number(group) - 1]);
-      } else {
-        const living = new Set(
-          state.units.filter((u) => u.team === 0 && u.hp > 0).map((u) => u.id),
-        );
-        selected = new Set(
-          (state.controlGroups[group] || []).filter((id) => living.has(id)),
-        );
-        selectedBuilding = null;
-        if (!selected.size)
-          toast(
-            `Company ${group} is empty. Select troops and press Ctrl+${group}.`,
-          );
-        updateUI();
-      }
+      else controlGroup(group, e);
     }
   });
   window.addEventListener("keyup", (e) => panKeys.delete(e.code));
@@ -7379,6 +7989,7 @@
       if (!TEST) update(STEP * (DEBUG_MODE ? state.cheats?.speed || 1 : 1));
       accumulator -= STEP;
     }
+    if (!TEST && playable()) nav.process(3);
     uiClock += dt;
     if (uiClock > 0.2) {
       uiClock = 0;
@@ -7521,6 +8132,11 @@
           : null,
       levels: LEVELS.map((l) => ({ name: l.name, sub: l.sub, story: l.story })),
     }),
+    consumeArmyTransit: () => {
+      const level = state.armyTransitPending;
+      state.armyTransitPending = null;
+      return Number.isInteger(level) ? level : null;
+    },
     launch: (level, config = null, slot = null) => {
       quickConfig = config;
       quickSlot = slot;
@@ -7556,6 +8172,7 @@
     gate: () => {
       const b = getObject(selectedBuilding);
       if (b?.kind === "gate") {
+        b.autoClosed = false;
         b.closed = !b.closed;
         state.navDirty = true;
         updateUI();

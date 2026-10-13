@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width,initial-scale=1" />
     <title>cruciāta — A pilgrim's empire</title>
     <link rel="icon" type="image/svg+xml" href="assets/icons/favicon.svg" />
-    <link rel="stylesheet" href="style.css" />
+    <link rel="stylesheet" href="src/style.css" />
   </head>
   <body>
     <section id="front-menu" aria-label="Main menu" aria-busy="true">
@@ -157,6 +157,11 @@
               ><button id="zoom-out" aria-label="Zoom out">−</button
               ><button id="zoom-in" aria-label="Zoom in">+</button>
             </div>
+            <div
+              id="control-groups"
+              role="group"
+              aria-label="Control groups: Ctrl plus a number assigns, Ctrl Shift adds, number selects"
+            ></div>
             <div id="objective-panel">
               <div class="eyebrow">WAR ORDERS</div>
               <div id="objective-text"></div>
@@ -228,6 +233,22 @@
                 ><button id="research-tab" role="tab" aria-selected="false">
                   Unit upgrades
                 </button>
+                <label
+                  id="stance-control"
+                  hidden
+                  title="Fight: pursue and attack. Hold: attack in range without moving independently. Stand down: move only on orders and never attack."
+                >
+                  Stance
+                  <select
+                    id="unit-stance"
+                    aria-label="Military aggression stance"
+                  >
+                    <option value="fight">Fight</option>
+                    <option value="hold">Hold</option>
+                    <option value="stand-down">Stand down</option>
+                    <option value="mixed" disabled>Mixed stances</option>
+                  </select>
+                </label>
                 <button
                   id="rotate-placement"
                   type="button"
@@ -283,9 +304,10 @@
           even among troops. F then click advances while fighting. H holds.
           Space selects combat troops; E selects villagers; V selects an idle
           villager. Right-click a pilgrim with a selected company to guard it
-          and follow its route automatically. Ctrl+1–9 assigns a company; 1–9
-          recalls it. Shift+1–7 queues swordsmen, archers, knights, chaplains,
-          villagers, standard bearers, and trebuchets.
+          and follow its route automatically. Ctrl+0?9 assigns units or
+          buildings; Ctrl+Shift+0?9 adds to a group; 0?9 recalls it. Shift+1–7
+          queues swordsmen, archers, knights, chaplains, villagers, standard
+          bearers, and trebuchets.
         </dd>
         <dt>Unit roles</dt>
         <dd>
@@ -354,12 +376,13 @@
       </p>
       <button id="reset-progress">Reset campaign and saved game</button>
     </dialog>
-    <script src="navigation.js"></script>
-    <script src="fog.js"></script>
-    <script src="audio.js"></script>
-    <script src="artwork.js"></script>
-    <script src="game.js"></script>
+    <script src="src/navigation.js"></script>
+    <script src="src/fog.js"></script>
+    <script src="src/audio.js"></script>
+    <script src="src/artwork.js"></script>
+    <script src="src/game.js"></script>
 
-    <script src="menus.js"></script>
+    <script src="assets/maps/levant-coast.js"></script>
+    <script src="src/menus.js"></script>
   </body>
 </html>
