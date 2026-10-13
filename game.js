@@ -852,6 +852,15 @@
         const px = (x + 0.5) * cell,
           py = (y + 0.5) * cell;
         if (
+          state.nodes.some(
+            (n) =>
+              n.remaining > 0 &&
+              Math.abs(n.x - px) < cell / 2 + n.r + 24 &&
+              Math.abs(n.y - py) < cell / 2 + n.r + 24,
+          )
+        )
+          return false;
+        if (
           state.buildings.some(
             (b) =>
               Math.abs(b.x - px) < b.w / 2 + cell &&
@@ -1316,6 +1325,12 @@
     return roads;
   }
   function makeWorld(generate = true) {
+    const savedRockMasses =
+      !generate &&
+      Array.isArray(state.terrainFeatures) &&
+      state.terrainFeatures.every((feature) => feature.kind === "rockmass")
+        ? state.terrainFeatures
+        : null;
     obstacleIndex = null;
     objectIndex.clear();
     const l = LEVELS[state.level],
@@ -1388,7 +1403,10 @@
       if (landFree(d.x, d.y, 16, false) && groundFree(d.x, d.y, 0))
         decorations.push(d);
     }
-    makeRockClusters(random);
+    if (savedRockMasses) {
+      state.terrainFeatures = savedRockMasses;
+      decorations.push(...savedRockMasses);
+    } else makeRockClusters(random);
     if (generate) {
       state.nodes = [];
       const clusters = [
@@ -2419,6 +2437,7 @@
     enemyFog.update(state.units, state.buildings);
     fog.update(state.units, state.buildings);
     rebuildNavigation();
+    state.roads = planRoads();
     ensureGroundCover();
     setMissionUI();
     renderLevelNav();

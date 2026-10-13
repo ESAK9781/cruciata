@@ -1909,3 +1909,27 @@ test("enemy builds paid connected defenses with real builders and gates react to
   });
   expect(closed).toBe(true);
 });
+
+test("saved rock-cluster footprints survive resume and restored roads remain passable", async ({
+  page,
+}) => {
+  await begin(page);
+  const before = await page.evaluate(() => {
+    cruciata.scenario((s) => {
+      s.paused = true;
+    });
+    const s = cruciata.snapshot();
+    cruciata.save();
+    return s.terrainFeatures;
+  });
+  const after = await page.evaluate(() => {
+    cruciata.resume();
+    const s = cruciata.snapshot();
+    return {
+      features: s.terrainFeatures,
+      clear: s.roads.every((road) => road.every((p) => cruciata.free(p))),
+    };
+  });
+  expect(after.features).toEqual(before);
+  expect(after.clear).toBe(true);
+});
