@@ -8,7 +8,7 @@ Play at [esak9781.github.io/cruciata](https://esak9781.github.io/cruciata/). Sou
 
 Run `npm ci` and `npm start`, then open `http://localhost:3000`. Run `npm run build` to create the complete static site in `dist/`. Upload that folder to any static host; no backend, account, database, or external font is required. Paths also work under a GitHub Pages repository subpath.
 
-The included `.github/workflows/pages.yml` validates, tests Chromium and Firefox, builds, and publishes `dist/`. In GitHub repository Settings / Pages, choose GitHub Actions as the source. The workflow runs on main/master or manually.
+The included `.github/workflows/pages.yml` checks source, builds, and publishes `dist/`. Browser tests run locally, outside the deployment workflow. In GitHub repository Settings / Pages, choose GitHub Actions as the source. The workflow runs on main/master or manually.
 
 ## Campaign and quickmatch
 
