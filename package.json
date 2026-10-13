@@ -1,0 +1,22 @@
+{
+  "name": "cruciata",
+  "version": "3.0.0",
+  "description": "A stylized top-down RTS campaign",
+  "private": true,
+  "scripts": {
+    "start": "node server.js",
+    "build": "node scripts/build-static.js",
+    "pretest": "npm run build",
+    "test": "playwright test",
+    "check": "node --check fog.js && node --check audio.js && node --check game.js && node --check menus.js && node --check artwork.js && node --check navigation.js && node --check server.js && node --check scripts/build-static.js && prettier --check index.html style.css game.js menus.js artwork.js navigation.js fog.js audio.js server.js playwright.config.js scripts/*.js tests/*.js .github/workflows/*.yml README.md MUSIC_PROMPTS.md CREDITS.md package.json",
+    "format": "prettier --write index.html style.css game.js menus.js artwork.js navigation.js fog.js audio.js server.js playwright.config.js scripts/*.js tests/*.js .github/workflows/*.yml README.md MUSIC_PROMPTS.md CREDITS.md package.json"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "devDependencies": {
+    "@playwright/test": "^1.64.0",
+    "prettier": "^3.9.10"
+  }
+}

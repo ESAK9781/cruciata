@@ -1,0 +1,31 @@
+# Four quiet background soundtracks for Gemini / Lyria
+
+Generate four distinct, equally restrained instrumental tracks for one shuffled playlist. They play throughout the game, regardless of combat, mission, or victory. No track should be a battle cue. Each should unfold through changing phrases and instrumentation instead of repeating a short loop. Aim for 3-5 minutes each, or the longest duration the tool supports. Maintain similar perceived loudness across all four. Use natural acoustic instruments, leave space for game sound effects, and avoid recognizable quotations of existing music.
+
+## 1. Roads of the Levant
+
+**Suggested filename: `01-roads-of-the-levant.wav`**
+
+Create a quiet, atmospheric medieval instrumental soundtrack for a stylized top-down strategy game set in the Levant during a fictional crusade. Keep it at approximately 62-68 BPM, with a subtle walking pulse and no forceful beat. Use warm lute, soft oud, lightly bowed viols, occasional wooden flute, and very sparse frame drum touches. Convey open country, distant settlements, patient travel, and quiet resolve. Give the melody room to breathe: phrases should vary in length, pass between instruments, and develop through gentle modal changes. Avoid a repeating four-bar ostinato or an obvious verse-chorus form. Over the duration, move gradually from lute-led passages to string and flute passages, then into a new combination of textures. Do not build to a climax. No brass fanfares, driving drums, trailer impacts, vocals with words, or sudden changes in volume. Keep the mix soft and spacious, with a natural acoustic feel. The music must remain comfortable under conversation and the game's gathering and combat effects. Use a brief, understated opening and a gentle natural ending; this will play in a shuffled background playlist, not as a seamless short loop.
+
+## 2. The Quiet Cloister
+
+**Suggested filename: `02-the-quiet-cloister.wav`**
+
+Create a contemplative, understated medieval background piece at approximately 58-64 BPM. Imagine a shaded cloister, parchment chronicles, and a distant pilgrim procession, without turning the piece into a religious ceremony or a dramatic cinematic cue. Use soft plucked harp or psaltery, warm viols, low sustained strings, and occasional very distant wordless vocal tones. The choir should be a subtle human color, not a prominent melody, and there must be no intelligible lyrics or recognizable liturgical text. Introduce a simple opening idea, then develop it into several related but distinct phrases through changing harmonies, answering plucked figures, and shifting instrumental combinations. Avoid repeating a fixed chord loop or using the same melodic phrase throughout. Make the emotional tone thoughtful, humane, and quietly hopeful, with a little sadness but no oppressive darkness. No marching rhythm, big bells, orchestral swells, powerful drums, or triumphant ending. Keep the dynamic range modest and the sound warm rather than bright or piercing. Let the last section settle gently, without a grand cadence or an abrupt cut. This should sit behind gameplay alongside three equally calm tracks in a random playlist.
+
+## 3. Courtyards and Olive Trees
+
+**Suggested filename: `03-courtyards-and-olive-trees.wav`**
+
+Create a gentle, spacious acoustic medieval soundtrack with subtle Levantine colors, around 66-72 BPM, suitable for uninterrupted background listening in a strategy game. Lead with a softly played oud, answered by lute, breathy wooden flute, and a small warm string ensemble. Include occasional delicate frame drum or brushed hand percussion, quiet enough that it never creates a dance groove or pushes the player into urgency. Convey sunlit stone courtyards, olive groves, ordinary life, craftsmanship, and a sense of place. Treat the regional instrumentation with dignity; avoid exoticized villain music, suspense stingers, and stereotyped dramatic flourishes. Write a flowing sequence of varied melodic ideas instead of a short repeated motif. Allow rests, alternate solo and ensemble passages, and make gradual changes in mode, register, and accompaniment over the full piece. Keep the energy consistently low even as the music changes. No modern bass, electronics, fast percussion, soaring solo vocals, or large crescendos. Use a restrained, natural mix with soft transients and clear space for game sound effects. Give it a calm opening and an unforced ending suitable for shuffling with other pieces of the same mood.
+
+## 4. Beneath the Evening Sky
+
+**Suggested filename: `04-beneath-the-evening-sky.wav`**
+
+Create a calm, gently expansive medieval instrumental background track at approximately 60-68 BPM. The atmosphere is dusk over a large Levantine landscape: campfires, distant city walls, tired travelers, and a moment of reflection. Use mellow bowed viols and cellos, sparse lute or oud plucking, low wooden flute, and a faint, occasional wordless choir only if it remains unobtrusive. Keep percussion minimal or omit it. The emotional palette should balance peace, homesickness, fragile hope, and the gravity of the setting, without becoming a mournful lament or an epic finale. Develop the piece continuously through several distinct but related sections: a sparse opening, a warmer ensemble passage, a quieter solo-led passage, and a fresh final texture. Do not repeat identical melodic phrases or rely on a constant arpeggio loop. Avoid dramatic rises, heroic horns, tension-building rhythms, sharp high strings, cinematic impacts, and an enormous resolved ending. Keep perceived loudness and energy similar to the other three playlist tracks. Finish softly and naturally. It should remain pleasant and unobtrusive through building, exploration, and fighting alike, because the soundtrack is shuffled independently of gameplay.
+
+## Playback
+
+The supplied recordings are now filed in `assets/music/`: Midday at the Oasis, Lanterns by the Slope, Shadows in the Stone Courtyard, and Iter Nostrum. All four play in one shuffled bag independent of gameplay. Each plays once before reshuffling, with no repeat across bag boundaries. Music and sound effects have separate saved volume controls. These prompts remain available for generating additional tracks with the same background character.

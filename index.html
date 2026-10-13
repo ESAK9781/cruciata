@@ -1,0 +1,318 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>cruciāta — A pilgrim's empire</title>
+    <link rel="icon" type="image/svg+xml" href="assets/icons/favicon.svg" />
+    <link rel="stylesheet" href="style.css" />
+  </head>
+  <body>
+    <div id="app">
+      <header>
+        <a class="brand" href="#"
+          ><span>✠</span
+          ><span>cruciāta<small>A PILGRIM'S EMPIRE</small></span></a
+        >
+        <div class="header-motto">IN HOC SIGNO VINCES</div>
+        <div class="header-actions">
+          <span id="save-status">LOCAL CHRONICLE</span
+          ><button id="save-button" title="Save the current game">Save</button
+          ><button id="pause-button">Ⅱ Pause</button
+          ><button id="help-button" title="Field guide">?</button
+          ><button id="settings-button" title="Settings">⚙</button>
+        </div>
+      </header>
+      <main>
+        <aside class="sidebar">
+          <div class="sidebar-title">
+            <span>✥</span>
+            <div class="eyebrow">THE PILGRIM'S CHRONICLE</div>
+          </div>
+          <h1>The road to<br /><em>Jerusalem</em></h1>
+          <nav id="level-list" aria-label="Campaign chapters"></nav>
+          <div class="settlement-ledger">
+            <div class="eyebrow">STEWARDSHIP</div>
+            <button id="town-button">
+              ⌂ &nbsp; Find settlement <kbd>Q</kbd></button
+            ><button id="idle-button">
+              ♙ &nbsp; Idle villagers <strong id="idle-count">0</strong
+              ><kbd>V</kbd></button
+            ><button id="workers-button">All villagers <kbd>E</kbd></button>
+            <div id="worker-ledger"></div>
+          </div>
+          <div class="sidebar-bottom">
+            <div class="eyebrow">A KINGDOM IS BUILT BY MANY HANDS</div>
+            <p>
+              Guard the fields. Shelter the pilgrims. Preserve your company.
+            </p>
+            <button id="restart-button">↻ Restart chapter</button>
+          </div>
+        </aside>
+        <section class="game-column">
+          <div class="mission-heading">
+            <div>
+              <div id="chapter-label" class="eyebrow">
+                CHAPTER I · THE LEVANT
+              </div>
+              <h2 id="mission-title">A foothold on the coast</h2>
+            </div>
+            <span id="timer">00:00</span>
+          </div>
+          <div class="resource-bar">
+            <div title="Food: gathered from orchards and farms">
+              <span class="resource-icon food"
+                ><img src="assets/icons/food.svg" alt="" /></span
+              ><strong id="food">400</strong><span>Food</span>
+            </div>
+            <div title="Wood: gathered from forests">
+              <span class="resource-icon wood"
+                ><img src="assets/icons/wood.svg" alt="" /></span
+              ><strong id="wood">360</strong><span>Wood</span>
+            </div>
+            <div title="Gold: mined from gold veins">
+              <span class="resource-icon gold"
+                ><img src="assets/icons/gold.svg" alt="" /></span
+              ><strong id="gold">320</strong><span>Gold</span>
+            </div>
+            <div title="Stone: quarried from deposits">
+              <span class="resource-icon stone"
+                ><img src="assets/icons/stone.svg" alt="" /></span
+              ><strong id="stone">240</strong><span>Stone</span>
+            </div>
+            <div title="Population: houses add twelve places">
+              <span class="resource-icon people"
+                ><img src="assets/icons/people.svg" alt="" /></span
+              ><strong id="population">13 / 28</strong><span>People</span>
+            </div>
+            <div title="Faith: chaplains and chapels">
+              <span class="resource-icon faith"
+                ><img src="assets/icons/faith.svg" alt="" /></span
+              ><strong id="faith">20</strong><span>Faith</span>
+            </div>
+            <span id="status-label">AT REST</span>
+          </div>
+          <div id="battlefield">
+            <canvas
+              id="game"
+              tabindex="0"
+              aria-label="Battlefield. Left click or drag to select. Right click to command, gather, or build."
+            ></canvas>
+            <div class="map-label">
+              <span class="compass">✥</span
+              ><span id="map-name">THE LEVANTINE COAST</span>
+            </div>
+            <div class="map-controls">
+              <button id="pan-left" aria-label="Pan left">←</button
+              ><button id="pan-up" aria-label="Pan up">↑</button
+              ><button id="pan-down" aria-label="Pan down">↓</button
+              ><button id="pan-right" aria-label="Pan right">→</button
+              ><button id="zoom-out" aria-label="Zoom out">−</button
+              ><button id="zoom-in" aria-label="Zoom in">+</button>
+            </div>
+            <div id="objective-panel">
+              <div class="eyebrow">WAR ORDERS</div>
+              <div id="objective-text"></div>
+              <div id="objective-sub"></div>
+              <div class="objective-strength">
+                <span id="objective-stage">Establish a settlement</span
+                ><strong id="garrison-strength">0%</strong>
+              </div>
+              <div class="objective-track">
+                <div id="garrison-progress"></div>
+              </div>
+            </div>
+            <div id="toast" role="status"></div>
+            <div class="map-bottom">
+              <span id="weather-label"></span>
+              <div>
+                <button id="select-all">Select army <kbd>SPACE</kbd></button
+                ><button id="home-view">Home</button>
+              </div>
+            </div>
+            <div class="minimap-frame">
+              <canvas
+                id="minimap"
+                width="208"
+                height="143"
+                aria-label="Minimap: click or drag to pan, right click to command"
+              ></canvas
+              ><span>THE THEATRE OF WAR</span>
+            </div>
+            <div id="overlay" class="hidden"></div>
+          </div>
+          <div class="command-panel">
+            <div class="selection-summary">
+              <canvas id="selection-icon" width="74" height="74"></canvas>
+              <div>
+                <div id="selection-label" class="eyebrow">YOUR COMPANY</div>
+                <strong id="selection-title">The pilgrim army</strong>
+                <p id="selection-detail">Select troops or a structure.</p>
+                <p id="selection-role"></p>
+                <div class="selection-health">
+                  <div id="selection-health"></div>
+                </div>
+                <div id="queue-detail"></div>
+              </div>
+            </div>
+            <div class="commands">
+              <button id="attack-button">
+                <span>⚔</span>Advance<kbd>F</kbd></button
+              ><button id="hold-button"><span>⛨</span>Hold<kbd>H</kbd></button
+              ><button id="bless-button"><span>✝</span>Bless<kbd>B</kbd></button
+              ><button id="deploy-button">
+                <span>⚒</span><span id="deploy-label">Set up</span
+                ><kbd>T</kbd></button
+              ><button
+                id="scout-button"
+                title="Explore unknown lands as a company; avoid combat"
+              >
+                <span>&#8982;</span>Scout<kbd>G</kbd></button
+              ><button id="cancel-button">
+                <span>×</span>Cancel<kbd>X</kbd>
+              </button>
+            </div>
+            <div class="muster-panel">
+              <div class="muster-tabs" role="tablist">
+                <button id="army-tab" role="tab" aria-selected="true">
+                  Muster</button
+                ><button id="settlement-tab" role="tab" aria-selected="false">
+                  Build</button
+                ><button id="research-tab" role="tab" aria-selected="false">
+                  Unit upgrades
+                </button>
+                <button
+                  id="rotate-placement"
+                  type="button"
+                  title="Rotate gate (R)"
+                  hidden
+                >
+                  Rotate gate (R)
+                </button>
+              </div>
+              <div id="recruit-list" class="action-grid"></div>
+              <div id="build-list" class="action-grid hidden"></div>
+              <div id="research-list" class="action-grid hidden"></div>
+            </div>
+          </div>
+          <footer>
+            <span
+              >LMB select · Shift-drag company · empty RMB drag pan · RMB
+              command · WASD / arrows pan · wheel zoom</span
+            ><span id="wave-countdown"></span>
+          </footer>
+        </section>
+      </main>
+    </div>
+    <dialog id="help-dialog">
+      <button class="close-dialog" aria-label="Close">×</button>
+      <div class="eyebrow">THE FIELD GUIDE</div>
+      <h2>Build a kingdom. Lead a company.</h2>
+      <p>
+        Your villagers gather food, wood, gold, and stone. Resources are
+        credited only when they return to a suitable storehouse. Protect those
+        routes.
+      </p>
+      <dl>
+        <dt>Villagers</dt>
+        <dd>
+          Select and right-click an orchard, forest, ore vein, or completed farm
+          to gather. Open Build, choose a structure, and click a clear site.
+          Right-click a damaged structure to repair it.
+        </dd>
+        <dt>Construction</dt>
+        <dd>
+          Houses add population. Mills, lumber camps, and mining camps shorten
+          deliveries. Barracks, stables, chapels, and siege workshops train
+          different troops. Hold Shift when placing foundations to queue them
+          for your selected builders. Drag to place cheap, continuous walls;
+          hold Shift to add another connected waypoint. Diagonals and corners
+          join automatically.
+        </dd>
+        <dt>Armies</dt>
+        <dd>
+          Drag to select; right-click to march in formation. G scouts unknown
+          lands as a group without engaging enemies. Alt-drag selects buildings
+          even among troops. F then click advances while fighting. H holds.
+          Space selects combat troops; E selects villagers; V selects an idle
+          villager. Right-click a pilgrim with a selected company to guard it
+          and follow its route automatically. Ctrl+1–9 assigns a company; 1–9
+          recalls it. Shift+1–7 queues swordsmen, archers, knights, chaplains,
+          villagers, standard bearers, and trebuchets.
+        </dd>
+        <dt>Unit roles</dt>
+        <dd>
+          Infantry holds the front. Archers keep their distance. Cavalry flanks
+          vulnerable troops. Chaplains heal from the rear and seek safety.
+        </dd>
+        <dt>Trebuchets</dt>
+        <dd>
+          Train them at a siege workshop. T sets them up in 6 seconds or packs
+          them in 4. Deployed engines fire devastating area attacks, with a
+          minimum range of 180. Keep allies out of the impact area. Moving a
+          deployed engine automatically packs it.
+        </dd>
+        <dt>Economy</dt>
+        <dd>
+          Select a military building to research its next unit variation.
+          Existing units and future recruits upgrade together. Your soldiers
+          consume food; shortages weaken their fighting strength.
+        </dd>
+        <dt>Scouting & fog</dt>
+        <dd>
+          Unexplored land is hidden. Troops and structures reveal nearby
+          terrain; cavalry scouts farther. Explored terrain remains visible in
+          shadow, but enemy troops disappear when your scouts leave. Frontier
+          settlements and distant mineral fields reward exploration.
+        </dd>
+        <dt>Camera & saves</dt>
+        <dd>
+          WASD or arrow keys pan; the wheel zooms. Right-drag pans when no units
+          or structures are selected. Click or drag the minimap to look,
+          right-click to command. Q returns to your settlement. The game
+          autosaves every 20 seconds; Save creates an immediate checkpoint.
+          Reload to resume.
+        </dd>
+      </dl>
+      <p class="fine-print">
+        Six fictional chapters inspired by medieval history. Each has its own
+        victory conditions. The chronicle is not a historical simulation.
+      </p>
+    </dialog>
+    <dialog id="settings-dialog">
+      <button class="close-dialog" aria-label="Close">×</button>
+      <div class="eyebrow">MAKE CAMP</div>
+      <h2>Settings</h2>
+      <label class="volume-setting" for="music-volume"
+        >Music
+        <output id="music-volume-label">20%</output>
+        <input id="music-volume" type="range" min="0" max="100" value="20" />
+      </label>
+      <label class="volume-setting" for="effects-volume"
+        >Sound effects
+        <output id="effects-volume-label">65%</output>
+        <input id="effects-volume" type="range" min="0" max="100" value="65" />
+      </label>
+      <p id="music-now-playing" class="fine-print"></p>
+      <button id="skip-track">Next track</button>
+      <label class="setting"
+        >Battle sounds<input id="sound-toggle" type="checkbox" checked /></label
+      ><label class="setting"
+        >Blood & fallen soldiers<input id="gore-toggle" type="checkbox" checked
+      /></label>
+      <p class="fine-print">
+        Campaign completion and active games are stored locally in this browser.
+        A save on this device does not transfer to another browser or website
+        address.
+      </p>
+      <button id="reset-progress">Reset campaign and saved game</button>
+    </dialog>
+    <script src="navigation.js"></script>
+    <script src="fog.js"></script>
+    <script src="audio.js"></script>
+    <script src="artwork.js"></script>
+    <script src="game.js"></script>
+
+    <script src="menus.js"></script>
+  </body>
+</html>
