@@ -8,8 +8,8 @@
     "build": "node scripts/build-static.js",
     "pretest": "npm run build",
     "test": "playwright test",
-    "check": "node --check fog.js && node --check audio.js && node --check game.js && node --check menus.js && node --check artwork.js && node --check navigation.js && node --check server.js && node --check scripts/build-static.js && prettier --check index.html style.css game.js menus.js artwork.js navigation.js fog.js audio.js server.js playwright.config.js scripts/*.js tests/*.js .github/workflows/*.yml README.md MUSIC_PROMPTS.md CREDITS.md package.json",
-    "format": "prettier --write index.html style.css game.js menus.js artwork.js navigation.js fog.js audio.js server.js playwright.config.js scripts/*.js tests/*.js .github/workflows/*.yml README.md MUSIC_PROMPTS.md CREDITS.md package.json"
+    "check": "node --check fog.js && node --check audio.js && node --check game.js && node --check menus.js && node --check artwork.js && node --check navigation.js && node --check server.js && node --check scripts/build-static.js && prettier --check index.html style.css game.js menus.js artwork.js navigation.js fog.js audio.js server.js playwright.config.js scripts/*.js tests/*.js .github/workflows/*.yml README.md REALISM_ASSETS.md MUSIC_PROMPTS.md CREDITS.md package.json",
+    "format": "prettier --write index.html style.css game.js menus.js artwork.js navigation.js fog.js audio.js server.js playwright.config.js scripts/*.js tests/*.js .github/workflows/*.yml README.md REALISM_ASSETS.md MUSIC_PROMPTS.md CREDITS.md package.json"
   },
   "keywords": [],
   "author": "",

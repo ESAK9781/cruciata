@@ -6292,6 +6292,16 @@
         : LEVELS[state.level].terrain >= 3
           ? 2
           : LEVELS[state.level].terrain;
+    Art.terrainDetails(
+      ctx,
+      view,
+      biome,
+      coastX,
+      riverX,
+      time,
+      bridgeY(),
+      state.mode !== "quickmatch" && LEVELS[state.level].terrain === 0,
+    );
     ctx.save();
     Art.clipLand(
       ctx,
@@ -6314,8 +6324,15 @@
       )
         continue;
       const points = road.map((p) => [p.x, p.y]);
-      Art.line(ctx, points, 38, "#a58c5e");
-      Art.line(ctx, points, 33, "#c5b381");
+      Art.line(ctx, points, 38, "#827761");
+      Art.line(
+        ctx,
+        points,
+        33,
+        Art.realisticAssets.ready
+          ? ctx.createPattern(Art.materialTile(1, 192), "repeat")
+          : "#a89b7e",
+      );
       for (const offset of [-7, 7])
         Art.line(
           ctx,
@@ -6325,16 +6342,6 @@
         );
     }
     ctx.restore();
-    Art.terrainDetails(
-      ctx,
-      view,
-      biome,
-      coastX,
-      riverX,
-      time,
-      bridgeY(),
-      state.mode !== "quickmatch" && LEVELS[state.level].terrain === 0,
-    );
     const movingCoverActors = state.units.filter(
       (u) =>
         u.hp > 0 &&
@@ -6417,7 +6424,7 @@
                   [Math.cos(a) * 23, Math.sin(a) * 23],
                 ],
                 2,
-                "#a41925",
+                "#62221d",
               );
             }
           }

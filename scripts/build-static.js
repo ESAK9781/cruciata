@@ -15,6 +15,7 @@ for (const file of [
   "fog.js",
   "audio.js",
   "CREDITS.md",
+  "REALISM_ASSETS.md",
   ".nojekyll",
 ]) {
   fs.copyFileSync(path.join(root, file), path.join(output, file));
