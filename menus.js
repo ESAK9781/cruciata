@@ -4,10 +4,8 @@
   const game = window.cruciata;
   const cross =
     '<svg viewBox="0 0 100 100" aria-hidden="true"><g fill="none" stroke="currentColor" stroke-width="7"><path d="M50 13v74M13 50h74M38 13h24M38 87h24M13 38v24M87 38v24"/><path stroke-width="5" d="M26 18v16M18 26h16M74 18v16M66 26h16M26 66v16M18 74h16M74 66v16M66 74h16"/></g></svg>';
-  const shell = document.createElement("section");
-  shell.id = "front-menu";
-  shell.setAttribute("aria-label", "Main menu");
-  document.body.append(shell);
+  const shell = document.getElementById("front-menu");
+  const mainMarkup = shell.innerHTML;
   let activeSlot = 0,
     firstVisit = true;
   const presets = {
@@ -70,11 +68,12 @@
   function main() {
     if (!firstVisit) game.menu();
     firstVisit = false;
-    frame(
-      "The road to Jerusalem",
-      "AD MAIOREM DEI GLORIAM",
-      `<p class="menu-intro">Raise a settlement. Sustain a host. Carry your standard through a land shaped by faith, siege, and the cost of war.</p><div class="menu-main-buttons"><button id="open-campaign">Campaign <small>Six chapters · the pilgrim's chronicle</small></button><button id="open-quickmatch">Quickmatch <small>Generated battlefields · three local sessions</small></button><button id="resume-campaign">Continue campaign <small>Your last recorded march</small></button><button id="menu-settings">Settings <small>Music, sound effects, and battle detail</small></button></div><blockquote>“Beati pacifici, quoniam filii Dei vocabuntur.”<small>Blessed are the peacemakers · Matthew 5:9</small></blockquote>`,
-    );
+    shell.hidden = false;
+    shell.innerHTML = mainMarkup;
+    shell.removeAttribute("aria-busy");
+    shell.querySelectorAll("button").forEach((button) => {
+      button.disabled = false;
+    });
     bind("open-campaign", campaign);
     bind("open-quickmatch", slots);
     bind("resume-campaign", () => {

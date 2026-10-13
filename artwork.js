@@ -132,6 +132,21 @@
       }
   }
   function sigil(g, x, y, size, team, color = C.cream) {
+    if (team === 3) {
+      polygon(
+        g,
+        [
+          [x - size, y - size],
+          [x + size, y - size],
+          [x + size * 0.7, y + size * 0.5],
+          [x, y + size],
+          [x - size * 0.7, y + size * 0.5],
+        ],
+        color,
+        "#755b32",
+      );
+      return;
+    }
     if (team !== 1) {
       jerusalemCross(g, x, y, size, color);
       return;
@@ -196,10 +211,17 @@
         [x + 18 + sway, y + 19],
         [x + 4 + sway, y + 15],
       ],
-      team === 2 ? "#9a917e" : team === 1 ? C.green : C.red,
+      team === 3
+        ? "#b18b3b"
+        : team === 2
+          ? "#9a917e"
+          : team === 1
+            ? C.green
+            : C.red,
       "#dec9a288",
     );
     if (team === 0) cross(g, x + 11 + sway * 0.4, y + 8, 4, C.cream);
+    else if (team === 3) sigil(g, x + 11, y + 8, 4, team, C.cream);
     else if (team === 1) {
       g.strokeStyle = C.cream;
       g.lineWidth = 1.5;
@@ -454,7 +476,14 @@
         Math.PI / 2,
     );
     const neutral = u.team === 2,
-      red = u.team === 1 ? C.green : neutral ? "#b99b63" : C.red,
+      red =
+        u.team === 3
+          ? "#ad873a"
+          : u.team === 1
+            ? C.green
+            : neutral
+              ? "#b99b63"
+              : C.red,
       step = u.moving ? Math.sin(u.anim) * 3 : 0;
     const civilian = u.type === "worker" || u.type === "civilian";
     const trim = (u.rank || 0) > 1 ? C.gold : "#d4d9cb";
@@ -897,6 +926,15 @@
     }
     g.restore();
   }
+  function wallStroke(g, points, width, color) {
+    g.strokeStyle = color;
+    g.lineWidth = width;
+    g.lineCap = "butt";
+    g.lineJoin = "miter";
+    g.beginPath();
+    points.forEach(([x, y], i) => (i ? g.lineTo(x, y) : g.moveTo(x, y)));
+    g.stroke();
+  }
   function structure(g, b, time) {
     g.save();
     g.translate(b.x, b.y);
@@ -1189,7 +1227,7 @@
         );
       }
       for (const arm of links)
-        line(
+        wallStroke(
           g,
           [
             [4, 5],
@@ -1199,7 +1237,7 @@
           "#3a3f2c44",
         );
       for (const arm of links) {
-        line(
+        wallStroke(
           g,
           [
             [0, 0],
@@ -1208,7 +1246,7 @@
           24,
           "#63563e",
         );
-        line(
+        wallStroke(
           g,
           [
             [0, 0],
@@ -1217,7 +1255,7 @@
           21,
           "#d1bd92",
         );
-        line(
+        wallStroke(
           g,
           [
             [0, 0],
@@ -1232,7 +1270,7 @@
         g.rotate(a);
         // Reinforced stone courses and a recessed walk distinguish curtain walls.
         for (const side of [-1, 1])
-          line(
+          wallStroke(
             g,
             [
               [0, side * 6],
@@ -1244,7 +1282,7 @@
         for (let x = 3; x < d; x += 9) {
           for (const side of [-1, 1])
             rect(g, x - 2, side * 9 - 2, 5, 5, "#f0ddb2", "#928060");
-          line(
+          wallStroke(
             g,
             [
               [x, -6],
@@ -1255,7 +1293,7 @@
           );
         }
         if (b.hp < b.maxHp * 0.8) {
-          line(
+          wallStroke(
             g,
             [
               [d * 0.4, -8],
@@ -1272,7 +1310,7 @@
       }
       rect(g, -6, -6, 12, 12, "#b4a483");
       if (b.hp < b.maxHp * 0.65)
-        line(
+        wallStroke(
           g,
           [
             [-5, -5],
@@ -2415,195 +2453,119 @@
         );
     g.restore();
   }
-  function ridge(g, d, view = null) {
-    const visible = (p) =>
-      !view ||
-      (p.x > view.x - d.width * 2 &&
-        p.x < view.x + view.w + d.width * 2 &&
-        p.y > view.y - d.width * 2 &&
-        p.y < view.y + view.h + d.width * 2);
-    const palettes = [
-        ["#827e66", "#b0ac8a", "#686d58", "#d0c6a1"],
-        ["#797e68", "#a6b28b", "#586b58", "#c2c7a3"],
-        ["#a48563", "#d4b58b", "#886746", "#edcea3"],
-        ["#8d9894", "#c3cdcb", "#63777a", "#e6ede6"],
-      ],
-      [base, light, shade, crest] = palettes[d.biome || 0];
-    const groups = [];
-    for (const [a, b] of d.segments) {
-      const last = groups[groups.length - 1];
-      if (
-        last &&
-        Math.hypot(
-          last[last.length - 1].x - a.x,
-          last[last.length - 1].y - a.y,
-        ) < 1
-      )
-        last.push(b);
-      else groups.push([a, b]);
+  const rockMassPaths = new WeakMap();
+  function rockMass(g, d) {
+    let path = rockMassPaths.get(d);
+    if (!path) {
+      path = new Path2D();
+      for (const contour of d.contours) {
+        for (let i = 0; i < contour.length; i++) {
+          const previous = contour[(i + contour.length - 1) % contour.length],
+            p = contour[i],
+            next = contour[(i + 1) % contour.length];
+          const incoming = Math.hypot(p.x - previous.x, p.y - previous.y),
+            outgoing = Math.hypot(next.x - p.x, next.y - p.y),
+            round = 12;
+          const a = {
+            x: p.x + (previous.x - p.x) * Math.min(0.3, round / incoming),
+            y: p.y + (previous.y - p.y) * Math.min(0.3, round / incoming),
+          };
+          const b = {
+            x: p.x + (next.x - p.x) * Math.min(0.3, round / outgoing),
+            y: p.y + (next.y - p.y) * Math.min(0.3, round / outgoing),
+          };
+          if (i === 0) path.moveTo(a.x, a.y);
+          else path.lineTo(a.x, a.y);
+          path.quadraticCurveTo(p.x, p.y, b.x, b.y);
+        }
+        path.closePath();
+      }
+      rockMassPaths.set(d, path);
     }
+    const rim = [
+      ["#6d7162", "#a2a38d", "#c1bea5"],
+      ["#627465", "#93a48e", "#b7c4a9"],
+      ["#8b7354", "#c0a47d", "#dbc197"],
+      ["#718184", "#a8b9b8", "#d5dfd6"],
+    ][d.biome || 0];
     g.save();
-    for (const group of groups) {
-      const samples = [];
-      for (let j = 0; j < group.length - 1; j++) {
-        const a = group[j],
-          b = group[j + 1],
+    g.lineJoin = "round";
+    g.translate(4, 6);
+    g.fillStyle = "#19201955";
+    g.fill(path, "evenodd");
+    g.strokeStyle = "#19201940";
+    g.lineWidth = 34;
+    g.stroke(path);
+    g.translate(-4, -6);
+    g.fillStyle = "#080b0a";
+    g.fill(path, "evenodd");
+    g.strokeStyle = rim[0];
+    g.lineWidth = 28;
+    g.stroke(path);
+    g.strokeStyle = rim[1];
+    g.lineWidth = 18;
+    g.stroke(path);
+    g.strokeStyle = rim[2];
+    g.lineWidth = 2;
+    g.stroke(path);
+    // Only exposed tile edges receive stone detail; shared edges disappear entirely.
+    for (const contour of d.contours)
+      for (let i = 0; i < contour.length; i++) {
+        const a = contour[i],
+          b = contour[(i + 1) % contour.length],
           length = Math.hypot(b.x - a.x, b.y - a.y),
-          nx = -(b.y - a.y) / length,
-          ny = (b.x - a.x) / length;
-        const count = Math.ceil(length / 34);
-        for (let i = 0; i < count; i++) {
-          const t = i / count,
-            x = a.x + (b.x - a.x) * t,
-            y = a.y + (b.y - a.y) * t;
-          const relief =
-            Math.sin(x * 0.017 + y * 0.011) * 0.08 +
-            Math.sin(x * 0.043 - y * 0.027) * 0.035;
-          const half = d.width * (0.46 + relief),
-            offset = Math.sin(x * 0.024 + y * 0.009) * d.width * 0.09;
-          samples.push({
-            x,
-            y,
-            nx,
-            ny,
-            left: [x + nx * half, y + ny * half],
-            right: [x - nx * half, y - ny * half],
-            top: [x + nx * offset, y + ny * offset],
-          });
-        }
-      }
-      const last = group[group.length - 1],
-        prev = samples[samples.length - 1];
-      if (!prev) continue;
-      samples.push({
-        ...prev,
-        x: last.x,
-        y: last.y,
-        left: [
-          last.x + prev.nx * d.width * 0.46,
-          last.y + prev.ny * d.width * 0.46,
-        ],
-        right: [
-          last.x - prev.nx * d.width * 0.46,
-          last.y - prev.ny * d.width * 0.46,
-        ],
-        top: [last.x, last.y],
-      });
-      const left = samples.map((p) => p.left),
-        right = samples.map((p) => p.right),
-        tops = samples.map((p) => p.top);
-      const outline = [...left, ...right.slice().reverse()];
-      polygon(
-        g,
-        outline.map(([x, y]) => [x + 8, y + 12]),
-        "#28322738",
-      );
-      polygon(g, outline, base);
-      polygon(g, [...left, ...tops.slice().reverse()], light);
-      polygon(g, [...tops, ...right.slice().reverse()], shade);
-      for (let i = 0; i < samples.length - 1; i++) {
-        const p = samples[i],
-          q = samples[i + 1];
-        if (!visible(p) && !visible(q)) continue;
-        for (const side of ["left", "right"]) {
-          const gradient = g.createLinearGradient(
-            p.top[0],
-            p.top[1],
-            p[side][0],
-            p[side][1],
-          );
-          gradient.addColorStop(0, side === "left" ? crest : light);
-          gradient.addColorStop(0.25, side === "left" ? light : base);
-          gradient.addColorStop(1, side === "left" ? base : shade);
-          polygon(g, [p.top, q.top, q[side], p[side]], gradient);
-        }
-      }
-      g.save();
-      g.beginPath();
-      outline.forEach(([x, y], i) => (i ? g.lineTo(x, y) : g.moveTo(x, y)));
-      g.closePath();
-      g.clip();
-      // Small fractured rock shelves give the entire slope a continuous surface.
-      for (let i = 0; i < samples.length - 1; i++) {
-        const p = samples[i],
-          q = samples[i + 1];
-        if (!visible(p) && !visible(q)) continue;
-        const hash = (n) => {
-          const v =
-            Math.sin((p.x + n * 73.1) * 12.9898 + p.y * 78.233) * 43758.5453;
-          return v - Math.floor(v);
-        };
-        for (let k = 0; k < 8; k++) {
-          const t = hash(k * 3),
-            side = (hash(k * 3 + 1) - 0.5) * d.width;
-          const x = p.x + (q.x - p.x) * t + p.nx * side,
-            y = p.y + (q.y - p.y) * t + p.ny * side;
-          const r = 2 + hash(k * 3 + 2) * 9;
+          dx = (b.x - a.x) / length,
+          dy = (b.y - a.y) / length;
+        for (let t = 7; t < length - 3; t += 15) {
+          const jitter = Math.sin(a.x * 0.31 + a.y * 0.17 + t) * 5,
+            x = a.x + dx * t - dy * jitter,
+            y = a.y + dy * t + dx * jitter;
+          const radius = 5 + (Math.sin(x * 0.9 + y * 0.7) + 1) * 2.5;
+          const points = [];
+          for (let k = 0; k < 6; k++) {
+            const angle = (k * Math.PI) / 3 + 0.3,
+              rr = radius * (0.75 + 0.2 * Math.sin(x + y + k * 9));
+            points.push([x + Math.cos(angle) * rr, y + Math.sin(angle) * rr]);
+          }
           polygon(
             g,
-            [
-              [x - r, y - 2],
-              [x - r * 0.45, y - r * 0.5],
-              [x + r * 0.6, y - r * 0.35],
-              [x + r, y + 2],
-              [x + r * 0.2, y + r * 0.45],
-              [x - r * 0.8, y + r * 0.3],
-            ],
-            k % 3 === 0 ? light : base,
+            points,
+            Math.sin(x + y) > 0 ? rim[0] : rim[1],
+            "#383e3480",
           );
-          line(
-            g,
-            [
-              [x - r * 0.45, y - r * 0.5],
-              [x + r * 0.6, y - r * 0.35],
-            ],
-            0.8,
-            crest,
-          );
-          line(
-            g,
-            [
-              [x - r * 0.8, y + r * 0.3],
-              [x + r * 0.2, y + r * 0.45],
-              [x + r, y + 2],
-            ],
-            0.8,
-            shade,
-          );
-        }
-        if (i % 3 === 0) {
-          const t = 0.25 + hash(99) * 0.45;
-          line(
-            g,
-            [
-              [p.top[0] + 8, p.top[1]],
-              [p.x + p.nx * d.width * t, p.y + p.ny * d.width * t],
-              [q.left[0], q.left[1]],
-            ],
-            1.3,
-            "#655e4b55",
-          );
+          line(g, [points[3], points[4], points[5]], 0.8, rim[2]);
         }
       }
-      for (const side of [-1, 1])
-        for (const lane of [0.15, 0.3, 0.43]) {
-          const contour = samples.map((p, i) => [
-            p.x +
-              p.nx *
-                d.width *
-                (side * lane + Math.sin(i * 0.8 + lane * 10) * 0.025),
-            p.y +
-              p.ny *
-                d.width *
-                (side * lane + Math.sin(i * 0.8 + lane * 10) * 0.025),
-          ]);
-          line(g, contour, 1.2, side === 1 ? "#e8dab44d" : "#3d494145");
-        }
-      line(g, tops, 1, "#ece0bb38");
-      g.restore();
-      line(g, right, 1.3, "#333f3645");
-    }
+
     g.restore();
+  }
+  function clipLand(g, view, level, coast, river, bridge, sea) {
+    g.beginPath();
+    g.rect(view.x, view.y, view.w, view.h);
+    if (sea) {
+      g.moveTo(view.x - 100, view.y - 100);
+      g.lineTo(coast(view.y - 100), view.y - 100);
+      for (let y = view.y - 100; y <= view.y + view.h + 100; y += 12)
+        g.lineTo(coast(y), y);
+      g.lineTo(view.x - 100, view.y + view.h + 100);
+      g.closePath();
+    }
+    if (level === 1) {
+      for (const [start, end] of [
+        [view.y - 100, Math.min(view.y + view.h + 100, bridge - 47)],
+        [Math.max(view.y - 100, bridge + 47), view.y + view.h + 100],
+      ]) {
+        if (end <= start) continue;
+        g.moveTo(river(start) - 60, start);
+        for (let y = start; y < end; y += 10) g.lineTo(river(y) - 60, y);
+        g.lineTo(river(end) - 60, end);
+        g.lineTo(river(end) + 60, end);
+        for (let y = end; y > start; y -= 10) g.lineTo(river(y) + 60, y);
+        g.lineTo(river(start) + 60, start);
+        g.closePath();
+      }
+    }
+    g.clip("evenodd");
   }
   function cliff(g, d) {
     g.save();
@@ -2666,7 +2628,8 @@
     terrainDetails,
     groundCover,
     cliff,
-    ridge,
+    rockMass,
+    clipLand,
     ship,
     palette: C,
   };

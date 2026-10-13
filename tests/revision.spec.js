@@ -595,15 +595,15 @@ test("wheel zoom preserves the ground under an off-center cursor", async ({
   expect(Math.hypot(before.x - after.x, before.y - after.y)).toBeLessThan(0.1);
 });
 
-test("sweeping cliff ranges block their face and roads use passable terrain", async ({
+test("joined rock clusters block their interior and roads use passable terrain", async ({
   page,
 }) => {
   await begin(page);
   const checks = await page.evaluate(() => {
     const s = cruciata.snapshot(),
       f = s.terrainFeatures[0],
-      seg = f.segments[3],
-      p = { x: (seg[0].x + seg[1].x) / 2, y: (seg[0].y + seg[1].y) / 2 };
+      tile = f.tiles[0],
+      p = { x: (tile.x + 0.5) * f.cell, y: (tile.y + 0.5) * f.cell };
     return {
       size: s.world,
       features: s.terrainFeatures.length,
@@ -614,8 +614,8 @@ test("sweeping cliff ranges block their face and roads use passable terrain", as
     };
   });
   expect(checks.size.width).toBe(12800);
-  expect(checks.features).toBe(3);
-  expect(checks.span).toBeGreaterThan(4000);
+  expect(checks.features).toBeGreaterThan(3);
+  expect(checks.span).toBeGreaterThan(200);
   expect(checks.blocked).toBe(true);
   expect(checks.roads).toBeGreaterThan(3);
   expect(checks.clear).toBe(true);
@@ -1634,4 +1634,278 @@ test("developed quickmatch settlements avoid overlapping buildings and muster ou
     return errors;
   });
   expect(result).toEqual([]);
+});
+
+test("main menu covers the first frame even while game scripts are delayed", async ({
+  page,
+}) => {
+  let release;
+  const delayed = new Promise((resolve) => {
+    release = resolve;
+  });
+  await page.route("**/game.js", async (route) => {
+    await delayed;
+    await route.continue();
+  });
+  await page.goto("/?test", { waitUntil: "commit" });
+  try {
+    await expect(page.locator("#front-menu")).toBeVisible();
+    await expect(page.locator("#front-menu h1")).toHaveText(
+      "The road to Jerusalem",
+    );
+    expect(
+      await page.evaluate(
+        () =>
+          document
+            .elementFromPoint(innerWidth / 2, innerHeight / 2)
+            .closest("#front-menu") !== null,
+      ),
+    ).toBe(true);
+    await expect(page.locator("#open-campaign")).toBeDisabled();
+  } finally {
+    release();
+  }
+  await expect(page.locator("#open-campaign")).toBeEnabled();
+  await page.locator("#open-campaign").click();
+  await expect(page.locator("#chapter-0")).toBeVisible();
+});
+
+test("rock clusters expose a joined stone rim with a continuous black center", async ({
+  page,
+}) => {
+  await begin(page);
+  const result = await page.evaluate(() => {
+    const f = cruciata
+        .snapshot()
+        .terrainFeatures.find((f) => f.kind === "rockmass"),
+      tiles = new Set(f.tiles.map((t) => t.x + "," + t.y));
+    const tile =
+      f.tiles.find((t) =>
+        [
+          [1, 0],
+          [-1, 0],
+          [0, 1],
+          [0, -1],
+        ].every(([dx, dy]) => tiles.has(t.x + dx + "," + (t.y + dy))),
+      ) || f.tiles[0];
+    const p = { x: (tile.x + 0.5) * f.cell, y: (tile.y + 0.5) * f.cell },
+      c = document.createElement("canvas");
+    c.width = c.height = 400;
+    const g = c.getContext("2d");
+    g.translate(200 - p.x, 200 - p.y);
+    CruciataArt.rockMass(g, f);
+    const pixel = Array.from(g.getImageData(200, 200, 1, 1).data);
+    return {
+      pixel,
+      contours: f.contours.length,
+      tiles: f.tiles.length,
+      blocked: !cruciata.free(p),
+    };
+  });
+  expect(result.pixel[0]).toBeLessThan(20);
+  expect(result.pixel[1]).toBeLessThan(20);
+  expect(result.pixel[2]).toBeLessThan(20);
+  expect(result.pixel[3]).toBe(255);
+  expect(result.tiles).toBeGreaterThan(20);
+  expect(result.blocked).toBe(true);
+});
+
+for (const level of [0, 1])
+  test(`natural terrain and roads stay out of water in chapter ${level}`, async ({
+    page,
+  }) => {
+    await begin(page);
+    const result = await page.evaluate((level) => {
+      cruciata.start(level);
+      const s = cruciata.snapshot(),
+        errors = [];
+      for (const n of s.nodes)
+        if (!cruciata.land(n, n.kind === "wood" ? 52 : 35))
+          errors.push("resource " + n.id);
+      for (const mass of s.terrainFeatures)
+        for (const t of mass.tiles)
+          for (const dx of [0, mass.cell])
+            for (const dy of [0, mass.cell])
+              if (
+                !cruciata.land(
+                  { x: t.x * mass.cell + dx, y: t.y * mass.cell + dy },
+                  12,
+                )
+              )
+                errors.push("rock edge");
+      for (const road of s.roads)
+        for (let i = 1; i < road.length; i++) {
+          const a = road[i - 1],
+            b = road[i],
+            steps = Math.ceil(Math.hypot(b.x - a.x, b.y - a.y) / 8);
+          for (let j = 0; j <= steps; j++)
+            if (
+              !cruciata.land(
+                {
+                  x: a.x + ((b.x - a.x) * j) / steps,
+                  y: a.y + ((b.y - a.y) * j) / steps,
+                },
+                20,
+                true,
+              )
+            )
+              errors.push("road");
+        }
+      return errors;
+    }, level);
+    expect(result).toEqual([]);
+  });
+
+test("fortified cities defend locally and transfer their surviving garrison and buildings on capture", async ({
+  page,
+}) => {
+  await begin(page);
+  const before = await page.evaluate(() => {
+    let result;
+    cruciata.scenario((s) => {
+      const city = s.cities[0];
+      s.enemy.think = 1e6;
+      const guards = s.units.filter((u) => u.city === city.id),
+        troops = s.units
+          .filter((u) => u.team === 0 && u.type === "sword")
+          .slice(0, 3);
+      s.units = [...guards, ...troops];
+      for (const [i, u] of troops.entries()) {
+        u.x = city.x + 70;
+        u.y = city.y + (i - 1) * 24;
+        u.hp = u.maxHp = 10000;
+        u.hold = true;
+        u.target = null;
+        u.order = null;
+      }
+      for (const [i, u] of guards.entries()) {
+        const a = (i * Math.PI * 2) / guards.length;
+        u.x = city.x + Math.cos(a) * 220;
+        u.y = city.y + Math.sin(a) * 220;
+        u.home = { x: u.x, y: u.y };
+        u.hold = true;
+        u.target = null;
+      }
+      result = {
+        city: city.id,
+        guardIds: guards.map((u) => u.id),
+        buildingIds: s.buildings
+          .filter((b) => b.city === city.id)
+          .map((b) => b.id),
+      };
+    });
+    return result;
+  });
+  const after = await page.evaluate(() => {
+    cruciata.step(13);
+    return cruciata.snapshot();
+  });
+  expect(after.cities.find((c) => c.id === before.city).captured).toBe(true);
+  expect(
+    before.guardIds.every(
+      (id) => after.units.find((u) => u.id === id).team === 0,
+    ),
+  ).toBe(true);
+  expect(
+    before.buildingIds.every(
+      (id) => after.buildings.find((b) => b.id === id).team === 0,
+    ),
+  ).toBe(true);
+  expect(
+    after.units
+      .filter((u) => before.guardIds.includes(u.id))
+      .every((u) => !u.cityDefender),
+  ).toBe(true);
+  expect(
+    after.buildings
+      .filter((b) => b.city === before.city && b.kind === "gate")
+      .every((b) => !b.closed),
+  ).toBe(true);
+});
+
+test("enemy builds paid connected defenses with real builders and gates react to discovered threats", async ({
+  page,
+}) => {
+  await begin(page);
+  await page.evaluate(() =>
+    cruciata.scenario((s) => {
+      s.nodes = [];
+      s.decorations = [];
+      s.terrainFeatures = [];
+      s.time = 60;
+      s.enemy.think = 0;
+      s.enemy.resources = {
+        food: 10000,
+        wood: 10000,
+        gold: 10000,
+        stone: 10000,
+      };
+      const base = s.buildings.find((b) => b.id === s.capitals.enemy);
+      const template = s.buildings.find(
+        (b) => b.kind === "house" && b.team === 1,
+      );
+      for (const [i, kind] of [
+        "lumbercamp",
+        "miningcamp",
+        "mill",
+        "farm",
+        "stable",
+        "chapel",
+        "siegeworkshop",
+      ].entries())
+        s.buildings.push({
+          ...template,
+          id: 99000 + i,
+          kind,
+          x: base.x + 80 + (i % 3) * 90,
+          y: base.y - 180 - Math.floor(i / 3) * 100,
+          remaining: 2400,
+          max: 2400,
+        });
+      for (const u of s.units.filter(
+        (u) => u.team === 1 && u.type === "worker",
+      )) {
+        u.job = null;
+        u.order = null;
+      }
+    }),
+  );
+  const result = await page.evaluate(() => {
+    cruciata.step(0.1);
+    return cruciata.snapshot();
+  });
+  expect(
+    result.enemy.fortification.plots.filter((p) => p.kind === "wall").length,
+  ).toBeGreaterThan(30);
+  const defence = result.buildings.filter((b) => b.defence);
+  expect(defence.length).toBeGreaterThan(0);
+  expect(defence.every((b) => b.progress < 1)).toBe(true);
+  expect(
+    result.units.some(
+      (u) =>
+        u.team === 1 &&
+        u.job?.kind === "build" &&
+        defence.some((b) => b.id === u.job.target),
+    ),
+  ).toBe(true);
+  expect(result.enemy.paid.stone).toBeGreaterThan(0);
+  await page.evaluate(() =>
+    cruciata.scenario((s) => {
+      const gate = s.buildings.find((b) => b.defence && b.kind === "gate");
+      gate.progress = 1;
+      gate.hp = gate.maxHp;
+      const u = s.units.find((u) => u.team === 0 && u.type === "sword");
+      u.x = gate.x - 100;
+      u.y = gate.y;
+      u.hp = 10000;
+      u.hold = true;
+    }),
+  );
+  const closed = await page.evaluate(() => {
+    cruciata.step(0.6);
+    return cruciata
+      .snapshot()
+      .buildings.find((b) => b.defence && b.kind === "gate").closed;
+  });
+  expect(closed).toBe(true);
 });

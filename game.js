@@ -804,16 +804,157 @@
       (state.config?.biome === 1 ? W * 0.5 : 1610) + Math.sin(y / 330) * 165
     );
   }
-  function groundFree(x, y, margin = 10, ignore = null, adjacentWalls = false) {
-    if (x < 24 || y < 24 || x > W - 24 || y > H - 24) return false;
+  function landFree(x, y, margin = 0, allowBridge = true) {
+    if (
+      x < 24 + margin ||
+      y < 24 + margin ||
+      x > W - 24 - margin ||
+      y > H - 24 - margin
+    )
+      return false;
     const l = LEVELS[state.level];
-    if (l.terrain === 0 && x < coastX(y) + 25 + margin) return false;
+    if (
+      state.mode !== "quickmatch" &&
+      l.terrain === 0 &&
+      x < coastX(y) + 25 + margin
+    )
+      return false;
     if (
       (state.config ? state.config.biome === 1 : l.terrain === 1) &&
       Math.abs(x - riverX(y)) < 60 + margin &&
-      Math.abs(y - bridgeY()) > 56 - margin
+      (!allowBridge || Math.abs(y - bridgeY()) > 56 - margin)
     )
       return false;
+    return true;
+  }
+  function insideContour(x, y, contour) {
+    let inside = false;
+    for (let i = 0, j = contour.length - 1; i < contour.length; j = i++) {
+      const a = contour[i],
+        b = contour[j];
+      if (
+        a.y > y !== b.y > y &&
+        x < ((b.x - a.x) * (y - a.y)) / (b.y - a.y) + a.x
+      )
+        inside = !inside;
+    }
+    return inside;
+  }
+  function makeRockClusters(random) {
+    const cell = 64,
+      count = Math.min(24, Math.ceil((W * H) / 10000000));
+    state.terrainFeatures = [];
+    for (let cluster = 0; cluster < count; cluster++) {
+      const cx = Math.floor((550 + random() * (W - 1100)) / cell),
+        cy = Math.floor((450 + random() * (H - 900)) / cell),
+        tiles = new Map();
+      const valid = (x, y) => {
+        const px = (x + 0.5) * cell,
+          py = (y + 0.5) * cell;
+        if (
+          state.buildings.some(
+            (b) =>
+              Math.abs(b.x - px) < b.w / 2 + cell &&
+              Math.abs(b.y - py) < b.h / 2 + cell,
+          )
+        )
+          return false;
+        for (const dx of [-cell / 2, 0, cell / 2])
+          for (const dy of [-cell / 2, 0, cell / 2])
+            if (!landFree(px + dx, py + dy, 20, false)) return false;
+        return !decorations.some(
+          (d) =>
+            d.kind === "rockmass" &&
+            Math.abs(d.x - px) < d.rx + cell &&
+            Math.abs(d.y - py) < d.ry + cell,
+        );
+      };
+      if (!valid(cx, cy)) continue;
+      tiles.set(cx + "," + cy, { x: cx, y: cy });
+      const wanted = 35 + Math.floor(random() * 45);
+      for (
+        let attempt = 0;
+        attempt < wanted * 18 && tiles.size < wanted;
+        attempt++
+      ) {
+        const choices = [...tiles.values()],
+          a = choices[Math.floor(random() * choices.length)],
+          direction = Math.floor(random() * 4),
+          dx = [1, 0, -1, 0][direction],
+          dy = [0, 1, 0, -1][direction],
+          x = a.x + dx,
+          y = a.y + dy;
+        if (Math.hypot(x - cx, y - cy) > 6.5 || !valid(x, y)) continue;
+        tiles.set(x + "," + y, { x, y });
+      }
+      if (tiles.size < 12) continue;
+      const edges = [];
+      for (const { x, y } of tiles.values()) {
+        const a = { x: x * cell, y: y * cell },
+          b = { x: (x + 1) * cell, y: y * cell },
+          c = { x: (x + 1) * cell, y: (y + 1) * cell },
+          d = { x: x * cell, y: (y + 1) * cell };
+        for (const [dx, dy, start, end] of [
+          [0, -1, a, b],
+          [1, 0, b, c],
+          [0, 1, c, d],
+          [-1, 0, d, a],
+        ])
+          if (!tiles.has(x + dx + "," + (y + dy)))
+            edges.push({ start, end, used: false });
+      }
+      const starts = new Map();
+      for (const edge of edges) {
+        const key = edge.start.x + "," + edge.start.y;
+        if (!starts.has(key)) starts.set(key, []);
+        starts.get(key).push(edge);
+      }
+      const contours = [];
+      for (const edge of edges) {
+        if (edge.used) continue;
+        const contour = [],
+          first = edge.start;
+        let next = edge;
+        while (next && !next.used) {
+          next.used = true;
+          contour.push(next.start);
+          const end = next.end;
+          if (end.x === first.x && end.y === first.y) break;
+          next = (starts.get(end.x + "," + end.y) || []).find((e) => !e.used);
+        }
+        if (contour.length > 3) contours.push(contour);
+      }
+      const points = contours.flat(),
+        minX = Math.min(...points.map((p) => p.x)),
+        maxX = Math.max(...points.map((p) => p.x)),
+        minY = Math.min(...points.map((p) => p.y)),
+        maxY = Math.max(...points.map((p) => p.y));
+      const mass = {
+        kind: "rockmass",
+        x: (minX + maxX) / 2,
+        y: (minY + maxY) / 2,
+        rx: (maxX - minX) / 2 + 24,
+        ry: (maxY - minY) / 2 + 24,
+        r: 0,
+        block: true,
+        contours,
+        cell,
+        tiles: [...tiles.values()],
+        biome:
+          state.config?.biome ??
+          (LEVELS[state.level].terrain === 2
+            ? 3
+            : LEVELS[state.level].terrain >= 3
+              ? 2
+              : 0),
+        seed: state.seed + cluster * 91,
+      };
+      decorations.push(mass);
+      state.terrainFeatures.push(mass);
+    }
+  }
+  function groundFree(x, y, margin = 10, ignore = null, adjacentWalls = false) {
+    if (!landFree(x, y, margin)) return false;
     const bucket = Math.floor(x / 128) + "," + Math.floor(y / 128),
       index =
         obstacleIndex && !state.navDirty && margin <= 64 ? obstacleIndex : null;
@@ -868,13 +1009,22 @@
     }
     for (const d of index ? index.decorations.get(bucket) || [] : decorations) {
       if (!d.block) continue;
-      if (d.kind === "ridge") {
-        for (const segment of d.segments)
-          if (
-            segmentDistance({ x, y }, segment[0], segment[1]) <
-            d.width / 2 + margin
-          )
-            return false;
+      if (d.kind === "rockmass") {
+        let interior = false;
+        for (const contour of d.contours) {
+          if (insideContour(x, y, contour)) interior = !interior;
+          for (let i = 0; i < contour.length; i++)
+            if (
+              segmentDistance(
+                { x, y },
+                contour[i],
+                contour[(i + 1) % contour.length],
+              ) <
+              14 + margin
+            )
+              return false;
+        }
+        if (interior) return false;
       } else if (Math.hypot(x - d.x, y - d.y) < d.r + margin) return false;
     }
     for (const n of index ? index.nodes.get(bucket) || [] : state.nodes)
@@ -932,8 +1082,8 @@
         insert(
           obstacleIndex.decorations,
           d,
-          d.kind === "ridge" ? d.rx : d.r,
-          d.kind === "ridge" ? d.ry : d.r,
+          d.kind === "rockmass" ? d.rx : d.r,
+          d.kind === "rockmass" ? d.ry : d.r,
         );
     for (const n of state.nodes)
       if (n.remaining > 0)
@@ -953,7 +1103,7 @@
             waypoints.push({ x: b.x + dx, y: b.y + dy });
     for (const obstacle of [
       ...state.nodes.filter((n) => n.remaining > 0 && n.kind !== "food"),
-      ...decorations.filter((d) => d.block && d.kind !== "ridge"),
+      ...decorations.filter((d) => d.block && d.kind !== "rockmass"),
     ]) {
       const radius =
         (obstacle.kind === "wood"
@@ -967,6 +1117,12 @@
           y: obstacle.y + Math.sin((i * Math.PI) / 8) * radius,
         });
     }
+    for (const d of decorations.filter((d) => d.kind === "rockmass"))
+      for (const contour of d.contours)
+        for (const p of contour)
+          for (const dx of [-21, 21])
+            for (const dy of [-21, 21])
+              waypoints.push({ x: p.x + dx, y: p.y + dy });
     nav.rebuild((x, y) => groundFree(x, y, 6), waypoints);
     for (const u of state.units) {
       u.path = [];
@@ -1125,12 +1281,24 @@
     }
   }
   function planRoads() {
+    const roadNav = new window.CruciataNavigation(W, H, 32);
+    roadNav.rebuild((x, y) => groundFree(x, y, 22));
     const hubs = [
       state.buildings[0],
       state.buildings[1],
       ...state.buildings.filter((b) => b.team === 1 && b.kind === "towncenter"),
       ...state.sites,
-    ].map((p) => findFree(p));
+    ]
+      .map((p) => {
+        const cell = roadNav.nearest(p.x, p.y);
+        return cell
+          ? {
+              x: (cell.x + 0.5) * roadNav.cell,
+              y: (cell.y + 0.5) * roadNav.cell,
+            }
+          : null;
+      })
+      .filter(Boolean);
     const reached = [hubs.shift()],
       roads = [];
     while (hubs.length) {
@@ -1141,7 +1309,7 @@
           if (d < best.d) best = { d, i, a };
         }
       const b = hubs.splice(best.i, 1)[0],
-        route = nav.find(best.a, b);
+        route = roadNav.find(best.a, b);
       if (route.length) roads.push([best.a, ...route]);
       reached.push(b);
     }
@@ -1200,7 +1368,11 @@
           block: true,
           scale: 1,
         };
-        if (groundFree(d.x, d.y, 12) && !road.some((p) => distance(d, p) < 180))
+        if (
+          landFree(d.x, d.y, d.r + 12, false) &&
+          groundFree(d.x, d.y, 12) &&
+          !road.some((p) => distance(d, p) < 180)
+        )
           decorations.push(d);
       }
     }
@@ -1213,63 +1385,10 @@
         block: false,
         scale: 0.4 + random() * 0.4,
       };
-      if (groundFree(d.x, d.y, 0)) decorations.push(d);
+      if (landFree(d.x, d.y, 16, false) && groundFree(d.x, d.y, 0))
+        decorations.push(d);
     }
-    state.terrainFeatures = [];
-    for (let ridge = 0; ridge < 3; ridge++) {
-      const points = [],
-        start = W * (0.25 + ridge * 0.14),
-        span = W * 0.4,
-        phase = random() * Math.PI * 2;
-      for (let i = 0; i < 19; i++) {
-        const t = i / 18;
-        points.push({
-          x: start + span * t,
-          y:
-            H * (0.48 + ridge * 0.13) +
-            Math.sin(t * Math.PI * 2 + phase) * (240 + ridge * 80) +
-            t * 180,
-        });
-      }
-      const segments = [];
-      for (let i = 0; i < points.length - 1; i++) {
-        if (
-          ((state.config ? state.config.biome === 1 : l.terrain === 1) &&
-            segmentDistance(
-              { x: riverX(bridgeY()), y: bridgeY() },
-              points[i],
-              points[i + 1],
-            ) < 300) ||
-          [4, 12].includes(i) ||
-          state.buildings.some(
-            (b) => segmentDistance(b, points[i], points[i + 1]) < 340,
-          )
-        )
-          continue;
-        segments.push([points[i], points[i + 1]]);
-      }
-      const xs = points.map((p) => p.x),
-        ys = points.map((p) => p.y),
-        minX = Math.min(...xs),
-        maxX = Math.max(...xs),
-        minY = Math.min(...ys),
-        maxY = Math.max(...ys);
-      const d = {
-        kind: "ridge",
-        x: (minX + maxX) / 2,
-        y: (minY + maxY) / 2,
-        rx: (maxX - minX) / 2 + 180,
-        ry: (maxY - minY) / 2 + 180,
-        r: 0,
-        width: 180 + ridge * 25,
-        biome:
-          state.config?.biome ?? (l.terrain === 2 ? 3 : l.terrain >= 3 ? 2 : 0),
-        segments,
-        block: true,
-      };
-      decorations.push(d);
-      state.terrainFeatures.push(d);
-    }
+    makeRockClusters(random);
     if (generate) {
       state.nodes = [];
       const clusters = [
@@ -1344,7 +1463,11 @@
           )
             continue;
           if (state.buildings.some((b) => distance(b, n) < b.r + 45)) continue;
-          if (!groundFree(n.x, n.y, 28)) continue;
+          if (
+            !landFree(n.x, n.y, n.kind === "wood" ? 52 : 35, false) ||
+            !groundFree(n.x, n.y, 28)
+          )
+            continue;
           if (
             n.kind === "wood" &&
             state.units.some((u) => u.team !== 2 && distance(u, n) < 50)
@@ -1385,6 +1508,178 @@
         }),
       );
     return id;
+  }
+  function addSiegeCity(x, y, name) {
+    x = Math.round(x / 32) * 32;
+    y = Math.round(y / 32) * 32;
+    const city = {
+      id: ++uid,
+      x,
+      y,
+      name,
+      radius: 320,
+      capture: 0,
+      captured: false,
+    };
+    state.cities.push(city);
+    const extra = { city: city.id };
+    const center = makeBuilding("towncenter", 3, x, y, 1, {
+      ...extra,
+      cityCenter: true,
+    });
+    city.center = center.id;
+    state.buildings.push(center);
+    for (const [kind, dx, dy] of [
+      ["house", -140, -120],
+      ["house", 140, -120],
+      ["barracks", -140, 110],
+      ["chapel", 140, 110],
+      ["tower", -240, -240],
+      ["tower", 240, -240],
+      ["tower", -240, 240],
+      ["tower", 240, 240],
+    ])
+      state.buildings.push(makeBuilding(kind, 3, x + dx, y + dy, 1, extra));
+    const gates = [
+      { x: x - 320, y, rotation: 90 },
+      { x: x + 320, y, rotation: 90 },
+    ];
+    for (const gate of gates)
+      state.buildings.push(
+        makeBuilding("gate", 3, gate.x, gate.y, 1, {
+          ...extra,
+          rotation: gate.rotation,
+          closed: true,
+        }),
+      );
+    for (const [a, b] of [
+      [
+        { x: x - 320, y: y - 320 },
+        { x: x + 320, y: y - 320 },
+      ],
+      [
+        { x: x + 320, y: y - 320 },
+        { x: x + 320, y: y + 320 },
+      ],
+      [
+        { x: x + 320, y: y + 320 },
+        { x: x - 320, y: y + 320 },
+      ],
+      [
+        { x: x - 320, y: y + 320 },
+        { x: x - 320, y: y - 320 },
+      ],
+    ])
+      for (const p of wallLine(a, b)) {
+        if (
+          gates.some((g) => distance(g, p) < 80) ||
+          state.buildings.some(
+            (b) =>
+              b.city === city.id && b.kind === "wall" && distance(b, p) < 1,
+          )
+        )
+          continue;
+        state.buildings.push(
+          makeBuilding("wall", 3, p.x, p.y, 1, { ...extra, wallAngle: 0 }),
+        );
+      }
+    for (const gate of gates)
+      for (const sign of [-1, 1])
+        state.buildings.push(
+          makeBuilding("wall", 3, gate.x, gate.y + 56 * sign, 1, {
+            ...extra,
+            wallAngle: Math.PI / 2,
+          }),
+        );
+    for (let i = 0; i < 14; i++) {
+      const type =
+        i < 6
+          ? "archer"
+          : i === 12
+            ? "chaplain"
+            : i === 13
+              ? "standard"
+              : "sword";
+      const a = (i * Math.PI * 2) / 14,
+        r = type === "archer" ? 245 : 115;
+      const p = { x: x + Math.cos(a) * r, y: y + Math.sin(a) * r };
+      state.units.push(
+        makeUnit(type, 3, p.x, p.y, {
+          city: city.id,
+          cityDefender: true,
+          home: { ...p },
+          hold: type === "archer",
+        }),
+      );
+    }
+  }
+  function observerSees(observer, target) {
+    if (observer.team === 3) {
+      const city = state.cities?.find((c) => c.id === observer.city);
+      return (
+        !!city &&
+        !city.captured &&
+        distance(target, city) < city.radius + 220 &&
+        distance(observer, target) < 600
+      );
+    }
+    return (observer.team === 0 ? fog : enemyFog).sees(target);
+  }
+  function captureCities(dt) {
+    for (const city of state.cities || []) {
+      if (city.captured) continue;
+      const soldiers = state.units.filter(
+        (u) =>
+          u.hp > 0 &&
+          u.team === 0 &&
+          ![
+            "worker",
+            "chaplain",
+            "civilian",
+            "pilgrim",
+            "merchant",
+            "trebuchet",
+          ].includes(u.type) &&
+          distance(u, city) < 100,
+      );
+      const contested = state.units.some(
+        (u) =>
+          u.hp > 0 && u.team !== 0 && u.team !== 2 && distance(u, city) < 120,
+      );
+      city.capture = Math.max(
+        0,
+        Math.min(
+          12,
+          city.capture + (soldiers.length >= 3 && !contested ? dt : -dt * 0.5),
+        ),
+      );
+      if (city.capture < 12) continue;
+      city.captured = true;
+      for (const b of state.buildings.filter(
+        (b) => b.city === city.id && b.hp > 0,
+      )) {
+        b.team = 0;
+        if (b.kind === "gate") b.closed = false;
+      }
+      for (const u of state.units.filter(
+        (u) => u.city === city.id && u.hp > 0,
+      )) {
+        u.team = 0;
+        u.cityDefender = false;
+        u.target = null;
+        u.order = null;
+        u.hold = false;
+        u.path = [];
+        u.home = null;
+      }
+      state.navDirty = true;
+      fog.update(state.units, state.buildings);
+      toast(
+        city.name +
+          " captured. Its surviving garrison and buildings now serve your army.",
+      );
+      sound("horn");
+    }
   }
   function arrangeStartingBuildings() {
     obstacleIndex = null;
@@ -1450,13 +1745,13 @@
           Math.abs(b.y - p.y) < b.h / 2 + 18,
       ) &&
       !occupied.some((u) => distance(u, p) < 24);
-    for (const team of [0, 1, 2]) {
+    for (const team of [0, 1, 2, 3]) {
       const capital = state.buildings.find(
         (b) =>
           b.id === (team === 0 ? state.capitals.player : state.capitals.enemy),
       );
       const base =
-        team === 2
+        team >= 2
           ? []
           : state.buildings.filter(
               (b) => b.team === team && distance(b, capital) < 850,
@@ -1471,7 +1766,7 @@
       for (const u of state.units.filter((u) => u.team === team)) {
         const index = soldiers.indexOf(u);
         const origin =
-          index >= 0 && team !== 2
+          index >= 0 && team < 2
             ? {
                 x: front + (team === 0 ? 1 : -1) * Math.floor(index / 10) * 30,
                 y:
@@ -1561,6 +1856,7 @@
       nodes: [],
       sites: [],
       squads: [],
+      cities: [],
       formations: [],
       techs: {},
       controlGroups: {},
@@ -1882,6 +2178,8 @@
         const id = addVillage(W * (0.34 + i * 0.19), H * (0.39 + i * 0.13));
         state.sites.find((s) => s.id === id).optional = true;
       }
+    addSiegeCity(W * 0.35, H * 0.26, "Castellum Petrae");
+    addSiegeCity(W * 0.6, H * 0.66, "Civitas Fontis");
     state.capitals = {
       player: state.buildings[0].id,
       enemy: state.buildings.find(
@@ -2889,9 +3187,13 @@
     );
     updateUI();
   }
-  function placementSpec(kind, team = 0) {
+  function placementSpec(
+    kind,
+    team = 0,
+    rotation = team === 0 ? placementRotation : 0,
+  ) {
     const spec = BUILDINGS[kind];
-    return kind === "gate" && team === 0 && placementRotation === 90
+    return kind === "gate" && rotation === 90
       ? { ...spec, w: spec.h, h: spec.w }
       : spec;
   }
@@ -2901,9 +3203,14 @@
     toast("Gate rotated. Press R or Rotate gate to turn it again.");
     updateUI();
   }
-  function validSite(kind, p, team = 0) {
+  function validSite(
+    kind,
+    p,
+    team = 0,
+    rotation = team === 0 ? placementRotation : 0,
+  ) {
     if (team === 0 ? !playerRemembers(p) : !enemyFog.remembers(p)) return false;
-    const t = placementSpec(kind, team);
+    const t = placementSpec(kind, team, rotation);
     if (
       state.units.some(
         (u) =>
@@ -3169,10 +3476,20 @@
         state.units
           .filter(
             (u) =>
-              u.team === 1 && u.hp > 0 && playerSees(u) && distance(u, p) < 24,
+              u.team !== 0 &&
+              u.team !== 2 &&
+              u.hp > 0 &&
+              playerSees(u) &&
+              distance(u, p) < 24,
           )
           .sort((a, b) => distance(a, p) - distance(b, p))[0] ||
-        (building?.team === 1 && playerSees(building) ? building : null);
+        (building &&
+        building.team !== 0 &&
+        building.team !== 2 &&
+        !building.cityCenter &&
+        playerSees(building)
+          ? building
+          : null);
     const escort = friendUnits().find(
       (u) => ["pilgrim", "merchant"].includes(u.type) && distance(u, p) < 35,
     );
@@ -3886,13 +4203,13 @@
         e.team !== u.team &&
         e.team !== 2 &&
         e.type !== "civilian" &&
-        (u.team === 0 ? fog : enemyFog).sees(e),
+        observerSees(u, e),
     );
     let best = null,
       score = Infinity;
     for (const e of enemies) {
       if (
-        u.team === 1 &&
+        (u.team === 1 || u.cityDefender) &&
         !u.order?.attack &&
         u.home &&
         distance(e, u.home) > 420
@@ -3911,8 +4228,9 @@
           (b) =>
             b.team !== u.team &&
             b.team !== 2 &&
+            !b.cityCenter &&
             b.hp > 0 &&
-            (u.team === 0 ? fog : enemyFog).sees(b) &&
+            observerSees(u, b) &&
             distance(u, b) < r + b.r,
         )
         .sort((a, b) => distance(a, u) - distance(b, u))[0] || null
@@ -3950,6 +4268,11 @@
   function damage(target, amount, source, siege = false) {
     if (DEBUG_MODE && state.cheats?.invulnerable && target?.team === 0) return;
     if (!target || target.hp <= 0 || target.team === 2) return;
+    if (
+      target.cityCenter &&
+      !state.cities?.find((c) => c.id === target.city)?.captured
+    )
+      return;
     const fortified =
       target.kind === "wall" || target.kind === "gate" || target.gate;
     const armored = fortified
@@ -4082,7 +4405,7 @@
     if (
       target?.team === u.team ||
       target?.team === 2 ||
-      (target && !(u.team === 0 ? fog : enemyFog).sees(target))
+      (target && !observerSees(u, target))
     )
       target = null;
     if (u.deployment === "deployed") {
@@ -4098,7 +4421,7 @@
                 b.team !== u.team &&
                 b.team !== 2 &&
                 b.hp > 0 &&
-                (u.team === 0 ? fog : enemyFog).sees(b) &&
+                observerSees(u, b) &&
                 distance(u, b) < TYPES.trebuchet.range &&
                 distance(u, b) > 180,
             )
@@ -4108,7 +4431,7 @@
               (e) =>
                 e.team !== u.team &&
                 e.team !== 2 &&
-                (u.team === 0 ? fog : enemyFog).sees(e) &&
+                observerSees(u, e) &&
                 distance(u, e) > 180,
             )
             .sort(
@@ -4182,7 +4505,7 @@
       target &&
       (target.team === u.team ||
         target.team === 2 ||
-        !(u.team === 0 ? fog : enemyFog).sees(target) ||
+        !observerSees(u, target) ||
         (distance(u, target) > 650 && !u.manualTarget))
     )
       target = null;
@@ -4293,7 +4616,11 @@
     u.manualTarget = false;
     if (u.order) {
       marchUnit(u, dt);
-    } else if (u.team === 1 && u.home && distance(u, u.home) > 60)
+    } else if (
+      (u.team === 1 || u.cityDefender) &&
+      u.home &&
+      distance(u, u.home) > 60
+    )
       moveUnit(u, u.home, dt);
   }
   function fire(u, target) {
@@ -4337,9 +4664,143 @@
       grace: 180,
     },
   };
+  function enemyFortifications(base, ws) {
+    const ai = state.enemy;
+    if (!ai.fortification) {
+      const owned = completeBuildings(null, 1).filter(
+        (b) =>
+          !["wall", "gate", "tower"].includes(b.kind) &&
+          distance(b, base) < 750,
+      );
+      const snap = (n) => Math.round(n / 32) * 32;
+      const left = snap(
+          Math.max(96, Math.min(...owned.map((b) => b.x - b.w / 2)) - 96),
+        ),
+        right = snap(
+          Math.min(W - 96, Math.max(...owned.map((b) => b.x + b.w / 2)) + 96),
+        );
+      const top = snap(
+          Math.max(96, Math.min(...owned.map((b) => b.y - b.h / 2)) - 96),
+        ),
+        bottom = snap(
+          Math.min(H - 96, Math.max(...owned.map((b) => b.y + b.h / 2)) + 96),
+        );
+      const cx = snap((left + right) / 2),
+        cy = snap((top + bottom) / 2),
+        plots = [];
+      const gates = [
+        { x: left, y: cy, rotation: 90 },
+        { x: right, y: cy, rotation: 90 },
+        { x: cx, y: top, rotation: 0 },
+        { x: cx, y: bottom, rotation: 0 },
+      ];
+      for (const g of gates) plots.push({ kind: "gate", ...g });
+      for (const [a, b] of [
+        [
+          { x: left, y: top },
+          { x: left, y: bottom },
+        ],
+        [
+          { x: right, y: top },
+          { x: right, y: bottom },
+        ],
+        [
+          { x: left, y: top },
+          { x: right, y: top },
+        ],
+        [
+          { x: left, y: bottom },
+          { x: right, y: bottom },
+        ],
+      ])
+        for (const point of wallLine(a, b)) {
+          if (
+            gates.some((g) => distance(g, point) < 80) ||
+            plots.some((p) => distance(p, point) < 1)
+          )
+            continue;
+          plots.push({ kind: "wall", ...point });
+        }
+      for (const g of gates)
+        for (const sign of [-1, 1])
+          plots.push({
+            kind: "wall",
+            x: g.x + (g.rotation === 0 ? 56 * sign : 0),
+            y: g.y + (g.rotation === 90 ? 56 * sign : 0),
+          });
+      for (const p of [
+        { x: left + 80, y: top + 80 },
+        { x: left + 80, y: bottom - 80 },
+        { x: right - 80, y: top + 80 },
+        { x: right - 80, y: bottom - 80 },
+      ])
+        plots.push({ kind: "tower", ...p });
+      plots.sort(
+        (a, b) =>
+          (a.kind === "gate" ? 0 : a.kind === "tower" ? 1 : 2) -
+            (b.kind === "gate" ? 0 : b.kind === "tower" ? 1 : 2) ||
+          distance(a, base) - distance(b, base),
+      );
+      ai.fortification = { plots, left, right, top, bottom };
+    }
+    const active = state.buildings.filter(
+      (b) => b.team === 1 && b.defence && b.hp > 0 && b.progress < 1,
+    );
+    const builders = ws
+      .filter(
+        (u) =>
+          !["build", "repair"].includes(u.job?.kind) &&
+          u.fleeUntil <= state.time,
+      )
+      .slice(0, Math.max(1, Math.floor(ws.length / 4)));
+    if (!builders.length || active.length >= 8) return;
+    const ids = [];
+    for (const p of ai.fortification.plots) {
+      if (ids.length >= 3 || ids.length + active.length >= 8) break;
+      if (
+        state.buildings.some(
+          (b) => b.team === 1 && b.hp > 0 && distance(b, p) < 4,
+        )
+      )
+        continue;
+      if (!afford(BUILDINGS[p.kind].cost, 1)) continue;
+      const spec = BUILDINGS[p.kind];
+      if (!validSite(p.kind, p, 1, p.rotation || 0)) continue;
+      pay(spec.cost, 1, 1);
+      const b = makeBuilding(p.kind, 1, p.x, p.y, 0, {
+        rotation: p.rotation || 0,
+        closed: false,
+        defence: true,
+        wallAngle:
+          Math.abs(p.x - ai.fortification.left) < 1 ||
+          Math.abs(p.x - ai.fortification.right) < 1
+            ? Math.PI / 2
+            : 0,
+      });
+      state.buildings.push(b);
+      ids.push(b.id);
+      state.navDirty = true;
+    }
+    if (ids.length) queueConstruction(builders, ids, false);
+  }
   function enemyEconomy(dt) {
     const ai = state.enemy,
       plan = DIFFICULTIES[state.difficulty] || DIFFICULTIES.normal;
+    ai.gateCheck = (ai.gateCheck || 0) - dt;
+    if (ai.gateCheck <= 0) {
+      ai.gateCheck = 0.5;
+      for (const gate of completeBuildings("gate", 1).filter(
+        (b) => b.defence,
+      )) {
+        const closed = nearby(gate, 320).some(
+          (u) => u.team !== 1 && u.team !== 2 && enemyFog.sees(u),
+        );
+        if (gate.closed !== closed) {
+          gate.closed = closed;
+          state.navDirty = true;
+        }
+      }
+    }
     ai.think -= dt;
     if (ai.think > 0) return;
     ai.think = plan.think;
@@ -4409,17 +4870,16 @@
       if (!completeBuildings(kind, 1).length) build(kind);
     const farms = completeBuildings("farm", 1).filter((b) => b.remaining > 0);
     if (farms.length < Math.ceil(ws.length / 7)) build("farm");
+    if (state.time > 45 && ws.length >= 6) enemyFortifications(base, ws);
     for (const kind of ["barracks", "stable", "chapel", "siegeworkshop"])
       if (
         !completeBuildings(kind, 1).length &&
         (kind !== "siegeworkshop" || state.time > 150)
       )
         build(kind);
-    if (state.time > 100 && !completeBuildings("tower", 1).length)
-      build("tower");
     const damaged = completeBuildings(null, 1).filter(
       (b) =>
-        b.hp < b.maxHp * 0.7 &&
+        b.hp < b.maxHp * (b.defence ? 0.9 : 0.7) &&
         !ws.some((u) => u.job?.kind === "repair" && u.job.target === b.id),
     );
     if (damaged.length && state.enemy.resources.wood > 25) {
@@ -4432,7 +4892,7 @@
         worker.order = null;
       }
     }
-    const desired = { food: 0.3, wood: 0.3, gold: 0.25, stone: 0.15 },
+    const desired = { food: 0.3, wood: 0.3, gold: 0.2, stone: 0.2 },
       assignments = { food: 0, wood: 0, gold: 0, stone: 0 };
     for (const u of ws) if (u.job?.resource) assignments[u.job.resource]++;
     for (const u of ws) {
@@ -4941,10 +5401,7 @@
         if (b.guardCooldown <= 0) {
           const target = nearby(b, spec.range)
             .filter(
-              (u) =>
-                u.team !== b.team &&
-                u.team !== 2 &&
-                (b.team === 0 ? fog : enemyFog).sees(u),
+              (u) => u.team !== b.team && u.team !== 2 && observerSees(b, u),
             )
             .sort((a, c) => distance(a, b) - distance(c, b))[0];
           if (target) {
@@ -5093,6 +5550,7 @@
       }
     }
     state.boulders = state.boulders.filter((s) => !s.hit);
+    captureCities(dt);
     for (const s of state.sites) {
       if (s.name === "Pilgrim refuge") continue;
       const owner = s.team ?? (s.captured ? 0 : 2);
@@ -5382,11 +5840,13 @@
       : "";
     if (b) {
       const spec = BUILDINGS[b.kind];
-      $("selection-title").textContent = b.outpost
-        ? state.sites.find((s) => s.id === b.site)?.name || "Outpost"
-        : b.kind === "chapel" && b.team === 1
-          ? "Prayer house"
-          : spec.name;
+      $("selection-title").textContent = b.cityCenter
+        ? state.cities.find((c) => c.id === b.city)?.name || "City center"
+        : b.outpost
+          ? state.sites.find((s) => s.id === b.site)?.name || "Outpost"
+          : b.kind === "chapel" && b.team === 1
+            ? "Prayer house"
+            : spec.name;
       $("selection-label").textContent =
         b.team === 0
           ? "YOUR STRUCTURE"
@@ -5551,6 +6011,12 @@
                       : b.kind === "house"
                         ? "Housing adds 12 population. Cannot train troops or set a rally point."
                         : "Defensive structure. Cannot train troops or set a rally point.";
+    if (b?.city && !state.cities?.find((c) => c.id === b.city)?.captured) {
+      const city = state.cities.find((c) => c.id === b.city);
+      $("selection-role").textContent =
+        city.name +
+        ": defensive city. Breach its walls, then hold the center with 3 soldiers for 12 seconds without hostile troops nearby. All surviving buildings and units join you. Capture the center rather than demolishing it.";
+    }
     if (isCapital(b))
       $("selection-role").textContent =
         "Capital and resource depot. Its destruction decides the battle immediately, regardless of other objectives. Trains villagers and accepts every resource.";
@@ -5826,6 +6292,16 @@
         : LEVELS[state.level].terrain >= 3
           ? 2
           : LEVELS[state.level].terrain;
+    ctx.save();
+    Art.clipLand(
+      ctx,
+      view,
+      biome,
+      coastX,
+      riverX,
+      bridgeY(),
+      state.mode !== "quickmatch" && LEVELS[state.level].terrain === 0,
+    );
     for (const road of state.roads || []) {
       if (
         !road.some((p) => onScreen(p, 120)) &&
@@ -5848,6 +6324,7 @@
           "#8d78493d",
         );
     }
+    ctx.restore();
     Art.terrainDetails(
       ctx,
       view,
@@ -5879,7 +6356,7 @@
         );
     for (const d of decorations)
       if (onScreen(d)) {
-        if (d.kind === "ridge") Art.ridge(ctx, d, view);
+        if (d.kind === "rockmass") Art.rockMass(ctx, d);
         else if (d.kind === "cliff") Art.cliff(ctx, d);
         else if (d.kind === "rock") {
           Art.ellipse(ctx, d.x + 4, d.y + 4, d.r, d.r * 0.8, "#4a553c35");
@@ -6145,6 +6622,30 @@
         if (s.team === 2 || s.claimProgress > 0)
           healthBar(ctx, s.x, s.y + s.r + 10, s.claimProgress || 0, 70);
       }
+    for (const city of state.cities || [])
+      if (onScreen(city, 420) && playerRemembers(city)) {
+        ctx.strokeStyle = city.captured ? "#e9cf8599" : "#d8ae5899";
+        ctx.lineWidth = 2;
+        ctx.setLineDash([8, 6]);
+        ctx.beginPath();
+        ctx.arc(city.x, city.y, 100, 0, Math.PI * 2);
+        ctx.stroke();
+        ctx.setLineDash([]);
+        ctx.fillStyle = "#f4e3b8";
+        ctx.font = "bold 13px Georgia";
+        ctx.textAlign = "center";
+        ctx.fillText(city.name, city.x, city.y - 75);
+        ctx.font = "10px Georgia";
+        ctx.fillText(
+          city.captured
+            ? "CITY CAPTURED"
+            : "CITY CENTER - 3 SOLDIERS / 12 SECONDS",
+          city.x,
+          city.y + 90,
+        );
+        if (city.capture > 0 && !city.captured)
+          healthBar(ctx, city.x, city.y + 108, city.capture / 12, 110);
+      }
     const visible = state.units
       .filter(
         (u) => u.hp > 0 && onScreen(u, 45) && (u.team === 0 || playerSees(u)),
@@ -6405,7 +6906,13 @@
       .filter(Boolean))
       if (b.hp > 0) {
         mc.fillStyle =
-          b.team === 1 ? "#843d2d" : b.team === 2 ? "#9a8c67" : "#eadbb0";
+          b.team === 3
+            ? "#be923d"
+            : b.team === 1
+              ? "#843d2d"
+              : b.team === 2
+                ? "#9a8c67"
+                : "#eadbb0";
         mc.fillRect(
           b.x * sx - (b.w * sx) / 2,
           b.y * sy - (b.h * sy) / 2,
@@ -6416,15 +6923,17 @@
     for (const u of state.units) {
       if (u.team !== 0 && !playerSees(u)) continue;
       mc.fillStyle =
-        u.team === 1
-          ? "#ac3b29"
-          : u.team === 2
-            ? "#c8b581"
-            : selected.has(u.id)
-              ? "#fffbe5"
-              : u.type === "worker"
-                ? "#85b47b"
-                : "#e8d79c";
+        u.team === 3
+          ? "#c99c46"
+          : u.team === 1
+            ? "#ac3b29"
+            : u.team === 2
+              ? "#c8b581"
+              : selected.has(u.id)
+                ? "#fffbe5"
+                : u.type === "worker"
+                  ? "#85b47b"
+                  : "#e8d79c";
       mc.fillRect(u.x * sx - 1, u.y * sy - 1, 2, 2);
     }
     if (!state.cheats?.reveal || !DEBUG_MODE)
@@ -7083,6 +7592,10 @@
     scenario: (fn) => {
       if (TEST && typeof fn === "function") {
         fn(state);
+        if (Array.isArray(state.decorations)) {
+          decorations = state.decorations;
+          delete state.decorations;
+        }
         rebuildNavigation();
         rebuildSpatial();
         fog.update(state.units, state.buildings);
@@ -7092,6 +7605,8 @@
     },
     vision: (p) => ({ visible: playerSees(p), explored: playerRemembers(p) }),
     audio: () => window.CruciataAudio.status(),
+    land: (p, margin = 0, allowBridge = false) =>
+      TEST ? landFree(p.x, p.y, margin, allowBridge) : false,
     site: (kind, p) => (TEST && BUILDINGS[kind] ? validSite(kind, p) : false),
     free: (p) => (TEST ? groundFree(p.x, p.y, 8) : false),
     route: (a, b) => (TEST ? nav.find(a, b) : []),
