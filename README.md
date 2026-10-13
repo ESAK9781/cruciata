@@ -6,9 +6,11 @@ A static, stylized overhead RTS about a fictional pilgrim host during the First 
 
 Play at [esak9781.github.io/cruciata](https://esak9781.github.io/cruciata/). Source: [ESAK9781/cruciata](https://github.com/ESAK9781/cruciata).
 
+An independent [realism visual branch](https://github.com/ESAK9781/cruciata/tree/realism) provides a [playable comparison](https://esak9781.github.io/cruciata/realism/). It uses detailed bitmap assets and natural materials while preserving the game rules. The normal site continues to use the main branch's presentation.
+
 Run `npm ci` and `npm start`, then open `http://localhost:3000`. Run `npm run build` to create the complete static site in `dist/`. Upload that folder to any static host; no backend, account, database, or external font is required. Paths also work under a GitHub Pages repository subpath.
 
-The included `.github/workflows/pages.yml` checks source, builds, and publishes `dist/`. Browser tests run locally, outside the deployment workflow. In GitHub repository Settings / Pages, choose GitHub Actions as the source. The workflow runs on main/master or manually.
+The included `.github/workflows/pages.yml` checks source, builds, and publishes `dist/`, including the separate realism comparison under `/realism/`. Browser tests run locally, outside the deployment workflow. In GitHub repository Settings / Pages, choose GitHub Actions as the source. The workflow runs on main/master/realism or manually.
 
 ## Campaign and quickmatch
 
