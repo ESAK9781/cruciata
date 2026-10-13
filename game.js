@@ -5879,7 +5879,7 @@
         );
     for (const d of decorations)
       if (onScreen(d)) {
-        if (d.kind === "ridge") Art.ridge(ctx, d);
+        if (d.kind === "ridge") Art.ridge(ctx, d, view);
         else if (d.kind === "cliff") Art.cliff(ctx, d);
         else if (d.kind === "rock") {
           Art.ellipse(ctx, d.x + 4, d.y + 4, d.r, d.r * 0.8, "#4a553c35");

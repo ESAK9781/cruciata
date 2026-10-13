@@ -2415,7 +2415,13 @@
         );
     g.restore();
   }
-  function ridge(g, d) {
+  function ridge(g, d, view = null) {
+    const visible = (p) =>
+      !view ||
+      (p.x > view.x - d.width * 2 &&
+        p.x < view.x + view.w + d.width * 2 &&
+        p.y > view.y - d.width * 2 &&
+        p.y < view.y + view.h + d.width * 2);
     const palettes = [
         ["#827e66", "#b0ac8a", "#686d58", "#d0c6a1"],
         ["#797e68", "#a6b28b", "#586b58", "#c2c7a3"],
@@ -2498,6 +2504,7 @@
       for (let i = 0; i < samples.length - 1; i++) {
         const p = samples[i],
           q = samples[i + 1];
+        if (!visible(p) && !visible(q)) continue;
         for (const side of ["left", "right"]) {
           const gradient = g.createLinearGradient(
             p.top[0],
@@ -2520,6 +2527,7 @@
       for (let i = 0; i < samples.length - 1; i++) {
         const p = samples[i],
           q = samples[i + 1];
+        if (!visible(p) && !visible(q)) continue;
         const hash = (n) => {
           const v =
             Math.sin((p.x + n * 73.1) * 12.9898 + p.y * 78.233) * 43758.5453;
