@@ -1764,7 +1764,15 @@
           : (1 - (u.strike || 0)) * Math.PI * 2,
       frame =
         action === "idle" ? 0 : Math.floor((clock / (Math.PI * 2)) * 12) % 12;
-    const spriteType = u.type === "knight" ? "knight5" : u.type;
+    // Muslim swordsmen and riders were redrawn (crescent shields): new keys.
+    const spriteType =
+      u.team === 1 && u.type === "knight"
+        ? "knight6"
+        : u.type === "knight"
+          ? "knight5"
+          : u.team === 1 && u.type === "sword"
+            ? "sword2"
+            : u.type;
     personFrame.key = `person:${spriteType}:${u.team}:${rank}:${heading}:${action}:${frame}:${u.carry > 0}`;
     personFrame.phase = (frame * Math.PI * 2) / 12;
     personFrame.heading = heading;

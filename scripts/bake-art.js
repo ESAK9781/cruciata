@@ -113,6 +113,9 @@ const fs = require("node:fs"),
         next();
         window.CruciataBakeSprite = (key, w, h, ox, oy, draw) => {
           if (frames[key]) return true;
+          // Construction scaffolds, piles and footings render at runtime.
+          if (/^(site:|sitePile:|siteFooting:|colossus:)/.test(key))
+            return true;
           const c = document.createElement("canvas");
           c.width = Math.ceil(w * scale);
           c.height = Math.ceil(h * scale);
@@ -230,7 +233,7 @@ const fs = require("node:fs"),
                       const angle = (heading * Math.PI) / 4,
                         u = { type, team, rank, carry: carry ? 5 : 0 };
                       CruciataBakeSprite(
-                        `person:${type === "knight" ? "knight5" : type}:${team}:${rank}:${angle}:${action}:${frame}:${carry}`,
+                        `person:${team === 1 && type === "knight" ? "knight6" : type === "knight" ? "knight5" : team === 1 && type === "sword" ? "sword2" : type}:${team}:${rank}:${angle}:${action}:${frame}:${carry}`,
                         100,
                         120,
                         50,

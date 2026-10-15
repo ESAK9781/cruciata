@@ -533,22 +533,37 @@
           ],
           team,
         );
-      line(
-        [
-          [-8, -27],
-          [-8, -20],
-        ],
-        1,
-        "#eadbb6",
-      );
-      line(
-        [
-          [-11, -25],
-          [-5, -25],
-        ],
-        1,
-        "#eadbb6",
-      );
+      if (islamic) {
+        // Muslim shields bear a crescent and star, never a cross.
+        g.save();
+        g.strokeStyle = "#eadbb6";
+        g.lineWidth = 1.1;
+        g.beginPath();
+        g.arc(-8.6, -23, 3.3, 0.75, Math.PI * 2 - 0.75);
+        g.stroke();
+        g.fillStyle = "#eadbb6";
+        g.beginPath();
+        g.arc(-6.6, -23, 1, 0, Math.PI * 2);
+        g.fill();
+        g.restore();
+      } else {
+        line(
+          [
+            [-8, -27],
+            [-8, -20],
+          ],
+          1,
+          "#eadbb6",
+        );
+        line(
+          [
+            [-11, -25],
+            [-5, -25],
+          ],
+          1,
+          "#eadbb6",
+        );
+      }
       line(
         [
           [8, armY],

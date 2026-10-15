@@ -1003,7 +1003,8 @@
         2,
         "#906e43",
       );
-      cross(g, 24, -18, 5, C.gold);
+      if (u.team === 1) sigil(g, 24, -18, 5, u.team, C.gold);
+      else cross(g, 24, -18, 5, C.gold);
     } else {
       line(
         g,
