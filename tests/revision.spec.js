@@ -1635,6 +1635,9 @@ test("developed quickmatch settlements avoid overlapping buildings and muster ou
     for (const [i, b] of s.buildings.entries())
       for (const other of s.buildings.slice(i + 1))
         if (
+          // Attached towers sit on their curtain by design.
+          !b.wallAttachment &&
+          !other.wallAttachment &&
           Math.abs(b.x - other.x) < (b.w + other.w) / 2 - 0.01 &&
           Math.abs(b.y - other.y) < (b.h + other.h) / 2 - 0.01
         )

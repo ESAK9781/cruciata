@@ -118,6 +118,71 @@
       this.jobs = [];
       this.activeJob = null;
       this.ownerKeys = new Map();
+      // Adaptive resolution: every chunk is a quadtree of free squares, so open
+      // ground costs a handful of nodes while cluttered ground keeps 16-unit cells.
+      const chunks = this.chunkCols * this.chunkRows;
+      this.useLeaves = true;
+      this.leafOf = new Int32Array(this.cols * this.rows).fill(-1);
+      this.lx = new Int16Array(chunks * 1024);
+      this.ly = new Int16Array(chunks * 1024);
+      this.ls = new Uint8Array(chunks * 1024);
+      this.leafCount = new Uint16Array(chunks);
+      this.leafTotal = 0;
+      this.satScratch = new Int32Array(33 * 33);
+      this.leafStack = [];
+    }
+    // Rebuild the free-square quadtree of one chunk from the blocked grid.
+    buildChunkLeaves(chunk) {
+      const cols = this.cols,
+        rows = this.rows,
+        cx = chunk % this.chunkCols,
+        cy = (chunk / this.chunkCols) | 0,
+        x0 = cx * 32,
+        y0 = cy * 32,
+        sat = this.satScratch,
+        leafOf = this.leafOf,
+        blocked = this.blocked;
+      for (let y = y0; y < Math.min(rows, y0 + 32); y++)
+        leafOf.fill(-1, y * cols + x0, y * cols + Math.min(cols, x0 + 32));
+      sat.fill(0);
+      for (let j = 0; j < 32; j++) {
+        let row = 0;
+        for (let i = 0; i < 32; i++) {
+          const gx = x0 + i,
+            gy = y0 + j;
+          row += gx < cols && gy < rows ? blocked[gy * cols + gx] : 1;
+          sat[(j + 1) * 33 + i + 1] = sat[j * 33 + i + 1] + row;
+        }
+      }
+      const count = (x, y, s) =>
+        sat[(y + s) * 33 + x + s] -
+        sat[y * 33 + x + s] -
+        sat[(y + s) * 33 + x] +
+        sat[y * 33 + x];
+      const stack = this.leafStack;
+      stack.length = 0;
+      stack.push(0, 0, 32);
+      let n = 0;
+      while (stack.length) {
+        const s = stack.pop(),
+          y = stack.pop(),
+          x = stack.pop(),
+          blockedCells = count(x, y, s);
+        if (blockedCells === s * s) continue;
+        if (blockedCells === 0) {
+          const id = chunk * 1024 + n++;
+          this.lx[id] = x0 + x;
+          this.ly[id] = y0 + y;
+          this.ls[id] = s;
+          for (let yy = y0 + y; yy < y0 + y + s; yy++)
+            leafOf.fill(id, yy * cols + x0 + x, yy * cols + x0 + x + s);
+          continue;
+        }
+        const h = s >> 1;
+        stack.push(x, y, h, x + h, y, h, x, y + h, h, x + h, y + h, h);
+      }
+      this.leafTotal += n - this.leafCount[chunk];
+      this.leafCount[chunk] = n;
     }
     rebuild(test, waypoints = [], regions = null) {
       this.physicalFree = test;
@@ -139,6 +204,7 @@
       for (const p of waypoints)
         if (test(p.x, p.y)) unique.set(p.x + "," + p.y, p);
       this.waypoints = [...unique.values()];
+      this.waypoints.forEach((p, i) => (p.wid = i));
       this.waypointChunks = new Map();
       for (const p of this.waypoints) {
         const key =
@@ -171,6 +237,28 @@
             if (this.blocked[id] !== value) changed = true;
             this.blocked[id] = value;
           }
+      }
+      if (changed) {
+        const size = this.chunkCells * this.cell,
+          dirtyChunks = new Set();
+        for (const area of areas)
+          for (
+            let cy = Math.max(0, Math.floor(area.y / size));
+            cy <=
+            Math.min(this.chunkRows - 1, Math.floor((area.y + area.h) / size));
+            cy++
+          )
+            for (
+              let cx = Math.max(0, Math.floor(area.x / size));
+              cx <=
+              Math.min(
+                this.chunkCols - 1,
+                Math.floor((area.x + area.w) / size),
+              );
+              cx++
+            )
+              dirtyChunks.add(cy * this.chunkCols + cx);
+        for (const chunk of dirtyChunks) this.buildChunkLeaves(chunk);
       }
       if (!changed) {
         if (!regions?.length) return false;
@@ -438,19 +526,47 @@
     clearLine(a, b) {
       const dx = b.x - a.x,
         dy = b.y - a.y,
-        length = Math.hypot(dx, dy),
-        steps = Math.ceil(length / 3);
-      if (!steps) return this.physicalFree(a.x, a.y);
-      const stepX = dx / steps,
-        stepY = dy / steps;
-      let cx = a.x,
-        cy = a.y;
-      for (let i = 0; i <= steps; i++) {
-        if (!this.physicalFree(cx, cy)) return false;
-        cx += stepX;
-        cy += stepY;
+        length = Math.hypot(dx, dy);
+      if (length < 1e-6) return this.physicalFree(a.x, a.y);
+      const ux = dx / length,
+        uy = dy / length,
+        cell = this.cell,
+        leaves = this.useLeaves && length > 96;
+      let t = 0;
+      for (;;) {
+        const x = a.x + ux * t,
+          y = a.y + uy * t;
+        if (!this.physicalFree(x, y)) return false;
+        if (t >= length) return true;
+        let step = 3;
+        if (leaves) {
+          // Inside a wide free square nothing can intervene: hop to its far edge.
+          const cx = (x / cell) | 0,
+            cy = (y / cell) | 0;
+          if (cx >= 0 && cy >= 0 && cx < this.cols && cy < this.rows) {
+            const id = this.leafOf[cy * this.cols + cx];
+            if (id >= 0 && this.ls[id] >= 4) {
+              const x0 = this.lx[id] * cell,
+                y0 = this.ly[id] * cell,
+                size = this.ls[id] * cell,
+                tx =
+                  ux > 1e-9
+                    ? (x0 + size - x) / ux
+                    : ux < -1e-9
+                      ? (x0 - x) / ux
+                      : Infinity,
+                ty =
+                  uy > 1e-9
+                    ? (y0 + size - y) / uy
+                    : uy < -1e-9
+                      ? (y0 - y) / uy
+                      : Infinity;
+              step = Math.max(3, Math.min(tx, ty));
+            }
+          }
+        }
+        t = Math.min(length, t + step);
       }
-      return true;
     }
     gapRoute(start, goal) {
       return this.complete(this.gapRouteSteps(start, goal));
@@ -458,19 +574,14 @@
     *gapRouteSteps(start, goal, limit = 512) {
       // Obstacle-edge vertices retain passages narrower than a navigation cell.
       const pad = 256;
-      const points = [
-        start,
-        goal,
-        ...this.localWaypoints(start, goal, pad)
-          .sort(
-            (a, b) =>
-              Math.hypot(a.x - start.x, a.y - start.y) +
-              Math.hypot(a.x - goal.x, a.y - goal.y) -
-              Math.hypot(b.x - start.x, b.y - start.y) -
-              Math.hypot(b.x - goal.x, b.y - goal.y),
-          )
-          .slice(0, limit),
-      ];
+      const near = this.localWaypoints(start, goal, pad).map((p) => ({
+        p,
+        d:
+          Math.hypot(p.x - start.x, p.y - start.y) +
+          Math.hypot(p.x - goal.x, p.y - goal.y),
+      }));
+      near.sort((a, b) => a.d - b.d);
+      const points = [start, goal, ...near.slice(0, limit).map((o) => o.p)];
       const cost = new Float64Array(points.length).fill(Infinity),
         parent = new Int32Array(points.length).fill(-1),
         closed = new Uint8Array(points.length),
@@ -493,24 +604,30 @@
             Math.hypot(points[i].x - points[id].x, points[i].y - points[id].y);
           if (next >= cost[i]) continue;
           const a = points[id],
-            b = points[i],
-            ka = a.x + "," + a.y,
-            kb = b.x + "," + b.y,
-            key = ka < kb ? ka + ";" + kb : kb + ";" + ka;
-          yield;
-          let edge = this.gapEdges.get(key);
-          let clear = edge?.clear;
-          if (clear === undefined) {
+            b = points[i];
+          let clear;
+          if (id > 1 && i > 1) {
+            // Waypoint-to-waypoint edges are cached by integer pair key.
+            const key =
+              a.wid < b.wid ? a.wid * 2097152 + b.wid : b.wid * 2097152 + a.wid;
+            yield;
+            let edge = this.gapEdges.get(key);
+            clear = edge?.clear;
+            if (clear === undefined) {
+              clear = this.clearLine(a, b);
+              if (this.gapEdges.size > 50000)
+                this.gapEdges.delete(this.gapEdges.keys().next().value);
+              this.gapEdges.set(key, {
+                clear,
+                minX: Math.min(a.x, b.x),
+                maxX: Math.max(a.x, b.x),
+                minY: Math.min(a.y, b.y),
+                maxY: Math.max(a.y, b.y),
+              });
+            }
+          } else {
+            yield;
             clear = this.clearLine(a, b);
-            if (this.gapEdges.size > 50000)
-              this.gapEdges.delete(this.gapEdges.keys().next().value);
-            this.gapEdges.set(key, {
-              clear,
-              minX: Math.min(a.x, b.x),
-              maxX: Math.max(a.x, b.x),
-              minY: Math.min(a.y, b.y),
-              maxY: Math.max(a.y, b.y),
-            });
           }
           if (!clear) continue;
           cost[i] = next;
@@ -697,6 +814,184 @@
         this.findRouteSteps(start, destination, unrestricted),
       );
     }
+    // A* over free quadtree squares; returns portal points ending at `goal`.
+    *leafRouteSteps(s, end, goal, corridor) {
+      const cols = this.cols,
+        rows = this.rows,
+        leafOf = this.leafOf,
+        lx = this.lx,
+        ly = this.ly,
+        ls = this.ls,
+        blocked = this.blocked,
+        chunkCols = this.chunkCols,
+        cap = this.lx.length;
+      if (this.leafCost?.length !== cap) {
+        this.leafCost = new Float64Array(cap);
+        this.leafParent = new Int32Array(cap);
+        this.leafClosed = new Uint32Array(cap);
+        this.leafStamp = new Uint32Array(cap);
+        this.leafEpoch = 0;
+      }
+      const cost = this.leafCost,
+        parent = this.leafParent,
+        closed = this.leafClosed,
+        stamp = this.leafStamp,
+        epoch = ++this.leafEpoch,
+        startLeaf = leafOf[s.y * cols + s.x],
+        goalLeaf = leafOf[end.y * cols + end.x];
+      if (startLeaf < 0 || goalLeaf < 0) return null;
+      const gx = end.x + 0.5,
+        gy = end.y + 0.5,
+        cxOf = (id) => lx[id] + ls[id] / 2,
+        cyOf = (id) => ly[id] + ls[id] / 2,
+        heap = new Heap();
+      cost[startLeaf] = 0;
+      stamp[startLeaf] = epoch;
+      parent[startLeaf] = -1;
+      heap.pushItem(
+        startLeaf,
+        Math.hypot(cxOf(startLeaf) - gx, cyOf(startLeaf) - gy),
+      );
+      let found = false,
+        expansions = 0;
+      const relax = (current, id) => {
+        if (closed[id] === epoch) return;
+        if (
+          corridor &&
+          !corridor.has(((ly[id] >> 5) * chunkCols + (lx[id] >> 5)) | 0)
+        )
+          return;
+        const next =
+          cost[current] +
+          Math.hypot(cxOf(id) - cxOf(current), cyOf(id) - cyOf(current));
+        if (stamp[id] === epoch && next >= cost[id]) return;
+        // Cluttered ground keeps the physical edge test; open squares are
+        // convex and entirely free.
+        if (ls[current] <= 2 && ls[id] <= 2) {
+          const open =
+            ls[current] === 1 &&
+            ls[id] === 1 &&
+            (lx[current] === lx[id] || ly[current] === ly[id])
+              ? this.edgeOpen(
+                  ly[current] * cols + lx[current],
+                  ly[id] * cols + lx[id],
+                )
+              : this.clearLine(
+                  {
+                    x: cxOf(current) * this.cell,
+                    y: cyOf(current) * this.cell,
+                  },
+                  { x: cxOf(id) * this.cell, y: cyOf(id) * this.cell },
+                );
+          if (!open) return;
+        }
+        cost[id] = next;
+        stamp[id] = epoch;
+        parent[id] = current;
+        heap.pushItem(id, next + Math.hypot(cxOf(id) - gx, cyOf(id) - gy));
+      };
+      while (heap.length) {
+        const current = heap.popId();
+        if (closed[current] === epoch) continue;
+        if (current === goalLeaf) {
+          found = true;
+          break;
+        }
+        if ((++expansions & 63) === 0) yield;
+        closed[current] = epoch;
+        const x = lx[current],
+          y = ly[current],
+          size = ls[current];
+        if (x > 0)
+          for (let yy = y; yy < y + size;) {
+            const id = leafOf[yy * cols + x - 1];
+            if (id < 0) yy++;
+            else {
+              relax(current, id);
+              yy = ly[id] + ls[id];
+            }
+          }
+        if (x + size < cols)
+          for (let yy = y; yy < y + size;) {
+            const id = leafOf[yy * cols + x + size];
+            if (id < 0) yy++;
+            else {
+              relax(current, id);
+              yy = ly[id] + ls[id];
+            }
+          }
+        if (y > 0)
+          for (let xx = x; xx < x + size;) {
+            const id = leafOf[(y - 1) * cols + xx];
+            if (id < 0) xx++;
+            else {
+              relax(current, id);
+              xx = lx[id] + ls[id];
+            }
+          }
+        if (y + size < rows)
+          for (let xx = x; xx < x + size;) {
+            const id = leafOf[(y + size) * cols + xx];
+            if (id < 0) xx++;
+            else {
+              relax(current, id);
+              xx = lx[id] + ls[id];
+            }
+          }
+        // Diagonal hops across a free corner, never cutting a blocked cell.
+        for (const [dx, dy] of [
+          [-1, -1],
+          [1, -1],
+          [-1, 1],
+          [1, 1],
+        ]) {
+          const ox = dx < 0 ? x - 1 : x + size,
+            oy = dy < 0 ? y - 1 : y + size,
+            ax = dx < 0 ? x : x + size - 1,
+            ay = dy < 0 ? y : y + size - 1;
+          if (ox < 0 || oy < 0 || ox >= cols || oy >= rows) continue;
+          const id = leafOf[oy * cols + ox];
+          if (id < 0) continue;
+          if (blocked[ay * cols + ox] || blocked[oy * cols + ax]) continue;
+          relax(current, id);
+        }
+      }
+      if (!found) return null;
+      const chain = [];
+      for (let id = goalLeaf; id >= 0 && id !== startLeaf; id = parent[id])
+        chain.push(id);
+      chain.push(startLeaf);
+      chain.reverse();
+      const cell = this.cell,
+        route = [];
+      for (let i = 0; i + 1 < chain.length; i++) {
+        const a = chain[i],
+          b = chain[i + 1];
+        const abutX = lx[b] + ls[b] === lx[a] || lx[a] + ls[a] === lx[b],
+          abutY = ly[b] + ls[b] === ly[a] || ly[a] + ls[a] === ly[b],
+          edgeX = lx[b] + ls[b] === lx[a] ? lx[a] : lx[b],
+          edgeY = ly[b] + ls[b] === ly[a] ? ly[a] : ly[b],
+          midX =
+            (Math.max(lx[a], lx[b]) + Math.min(lx[a] + ls[a], lx[b] + ls[b])) /
+            2,
+          midY =
+            (Math.max(ly[a], ly[b]) + Math.min(ly[a] + ls[a], ly[b] + ls[b])) /
+            2;
+        // The shared boundary's midpoint, or the shared corner for diagonals.
+        const px = abutX ? edgeX : midX,
+          py = abutY ? edgeY : midY;
+        // Cluttered ground follows verified cell centres; open ground crosses
+        // the shared boundary.
+        if (ls[a] <= 2 && ls[b] <= 2)
+          route.push({
+            x: (lx[b] + ls[b] / 2) * cell,
+            y: (ly[b] + ls[b] / 2) * cell,
+          });
+        else route.push({ x: px * cell, y: py * cell });
+      }
+      route.push(goal);
+      return route;
+    }
     *findRouteSteps(start, destination, unrestricted = false) {
       this.searches++;
       const precise = this.physicalFree(destination.x, destination.y);
@@ -705,18 +1000,33 @@
       const s = this.nearest(start.x, start.y);
       const end = s ? this.nearest(destination.x, destination.y, null) : null;
       if (!s || !end)
-        return precise ? yield* this.gapRouteSteps(start, destination) : [];
+        return precise
+          ? yield* this.gapRouteSteps(start, destination, 160)
+          : [];
       if (
         this.components[s.y * this.cols + s.x] !==
         this.components[end.y * this.cols + end.x]
       )
-        return precise ? yield* this.gapRouteSteps(start, destination) : [];
+        return precise
+          ? yield* this.gapRouteSteps(start, destination, 160)
+          : [];
       const goal = {
         x: (end.x + 0.5) * this.cell,
         y: (end.y + 0.5) * this.cell,
       };
       if (this.clearLine(start, goal)) return [goal];
       const corridor = unrestricted ? null : this.chunkCorridor(s, end);
+      if (this.useLeaves) {
+        const route = yield* this.leafRouteSteps(s, end, goal, corridor);
+        if (!route) {
+          if (corridor)
+            return yield* this.findRouteSteps(start, destination, true);
+          return precise
+            ? yield* this.gapRouteSteps(start, destination, 160)
+            : [];
+        }
+        return yield* this.finishRoute(route, start, destination, precise);
+      }
       const count = this.blocked.length;
       if (this.cost?.length !== count) {
         this.cost = new Float64Array(count);
@@ -793,7 +1103,9 @@
       if (!found) {
         if (corridor)
           return yield* this.findRouteSteps(start, destination, true);
-        return precise ? yield* this.gapRouteSteps(start, destination) : [];
+        return precise
+          ? yield* this.gapRouteSteps(start, destination, 160)
+          : [];
       }
       const route = [];
       for (let id = ei; id !== si && id >= 0; id = parent[id])
@@ -802,6 +1114,10 @@
           y: (Math.floor(id / this.cols) + 0.5) * this.cell,
         });
       route.reverse();
+      return yield* this.finishRoute(route, start, destination, precise);
+    }
+    // Smooth a coarse route with bounded, yielding look-ahead.
+    *finishRoute(route, start, destination, precise) {
       const smooth = [];
       let anchor = start,
         i = 0,
@@ -818,6 +1134,11 @@
           if ((++checks & 3) === 0) yield;
         }
         yield;
+        // A coarse square can hide a sub-cell obstacle; detour around it locally.
+        if (far === i && !this.clearLine(anchor, route[i])) {
+          const detour = yield* this.gapRouteSteps(anchor, route[i], 96);
+          for (const q of detour.slice(0, -1)) smooth.push(q);
+        }
         smooth.push(route[far]);
         anchor = route[far];
         i = far + 1;

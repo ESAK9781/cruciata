@@ -31,7 +31,9 @@
     remembers(p) {
       return !!this.explored[this.index(p)];
     }
-    update(units, buildings) {
+    // Siege projectiles in flight see like an ordinary soldier, so a trebuchet
+    // shot lights up the ground it is about to land on.
+    update(units, buildings, projectiles = []) {
       this.visible.fill(0);
       const sources = units
         .filter((u) => u.team === this.team && u.hp > 0)
@@ -47,6 +49,9 @@
                   ? 760
                   : 440,
         }));
+      for (const shot of projectiles)
+        if (shot.team === this.team && !shot.hit)
+          sources.push({ x: shot.x, y: shot.y, vision: 440 });
       for (const b of buildings)
         if (b.team === this.team && b.hp > 0 && b.progress >= 1)
           sources.push({

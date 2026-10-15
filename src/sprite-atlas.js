@@ -7,12 +7,16 @@
     pending = new Set();
   function load(index) {
     const now = performance.now();
-    if (pages.has(index)) {
-      const value = pages.get(index);
-      value.used = now;
-      pages.delete(index);
-      pages.set(index, value);
-      return value;
+    const known = pages.get(index);
+    if (known) {
+      // Recency only needs to be roughly right; skip the reordering when the
+      // page was touched moments ago (thousands of draws share a few pages).
+      if (now - known.used > 150) {
+        known.used = now;
+        pages.delete(index);
+        pages.set(index, known);
+      }
+      return known;
     }
     const image = new Image();
     image.used = now;
@@ -39,7 +43,7 @@
   let hits = 0,
     misses = 0,
     pendingFrames = 0;
-  const previous = new Map();
+  const groups = new Map();
   window.CruciataAtlas = {
     draw(g, key, w, h, ox, oy) {
       const e = data.frames[key];
@@ -47,19 +51,23 @@
         misses++;
         return false;
       }
-      const group = (e.group ||= key
-        .split(":")
-        .slice(
-          0,
-          key.startsWith("buildingMotion:")
-            ? 8
-            : key.startsWith("building:")
-              ? 6
-              : key.startsWith("person:") || key.startsWith("siege:machine:")
-                ? 5
-                : 3,
-        )
-        .join(":"));
+      if (!e.go) {
+        const name = key
+          .split(":")
+          .slice(
+            0,
+            key.startsWith("buildingMotion:")
+              ? 8
+              : key.startsWith("building:")
+                ? 6
+                : key.startsWith("person:") || key.startsWith("siege:machine:")
+                  ? 5
+                  : 3,
+          )
+          .join(":");
+        e.go = groups.get(name) || groups.set(name, { last: null }).get(name);
+      }
+      const go = e.go;
       const image = load(e[0]);
       if (image.failed) {
         misses++;
@@ -69,9 +77,9 @@
         pendingFrames++;
         // Keep the last ready pose while another local page decodes. A known
         // atlas animation never falls back to rebuilding geometry mid-frame.
-        const old = previous.get(group);
-        if (old && pages.get(old.e[0])?.naturalWidth) {
-          const [p, x, y, sw, sh, dx, dy] = old.e;
+        const old = go.last;
+        if (old && pages.get(old[0])?.naturalWidth) {
+          const [p, x, y, sw, sh, dx, dy] = old;
           g.drawImage(
             pages.get(p),
             x,
@@ -99,8 +107,38 @@
         sh / data.scale,
       );
       hits++;
-      previous.set(group, { e });
-      while (previous.size > 128) previous.delete(previous.keys().next().value);
+      go.last = e;
+      return true;
+    },
+    // Draws a baked frame at world position (x, y) uniformly scaled, under the
+    // canvas's current transform, so callers need no per-sprite matrix change.
+    drawAt(g, key, ox, oy, x, y, scale) {
+      const e = data.frames[key];
+      if (!e || !e.go) return false; // first use goes through draw()
+      const image = load(e[0]);
+      if (image.failed) return false;
+      let frame = e;
+      if (!image.complete || !image.naturalWidth) {
+        pendingFrames++;
+        frame = e.go.last;
+        if (!frame || !pages.get(frame[0])?.naturalWidth) return true;
+      } else {
+        e.go.last = e;
+        hits++;
+      }
+      const [page, sx, sy, sw, sh, dx, dy] = frame,
+        k = scale / data.scale;
+      g.drawImage(
+        frame === e ? image : pages.get(page),
+        sx,
+        sy,
+        sw,
+        sh,
+        x + (dx - ox) * scale,
+        y + (dy - oy) * scale,
+        sw * k,
+        sh * k,
+      );
       return true;
     },
     get ready() {

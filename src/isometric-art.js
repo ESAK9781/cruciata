@@ -1401,45 +1401,49 @@
       if (u.carry > 0) m.box(0, 6, base + 11, 8, 5, 9, P.wood);
     }
   }
+  // Shared by the sprite path and the direct atlas path so both agree on keys.
+  const personFrame = { key: "", phase: 0, heading: 0, action: "" };
+  function personKey(u, time, angle) {
+    const heading =
+        (Math.round(
+          (Math.atan2(Math.sin(angle), Math.cos(angle)) * 4) / Math.PI,
+        ) *
+          Math.PI) /
+        4,
+      rank = ["worker", "civilian", "chaplain"].includes(u.type)
+        ? 0
+        : Math.min(1, u.rank || 0),
+      action = u.moving
+        ? "walk"
+        : u.working
+          ? u.job?.resource === "food" && u.gatherSource === "food"
+            ? "berries"
+            : u.job?.resource ||
+              (u.job?.kind === "clear" ? u.gatherSource : null) ||
+              "build"
+          : u.strike > 0
+            ? "attack"
+            : "idle",
+      clock = u.moving
+        ? (u.anim ?? time * 9)
+        : u.working
+          ? (u.workPhase ?? 0) * Math.PI * 2
+          : (1 - (u.strike || 0)) * Math.PI * 2,
+      frame =
+        action === "idle" ? 0 : Math.floor((clock / (Math.PI * 2)) * 12) % 12;
+    const spriteType = u.type === "knight" ? "knight5" : u.type;
+    personFrame.key = `person:${spriteType}:${u.team}:${rank}:${heading}:${action}:${frame}:${u.carry > 0}`;
+    personFrame.phase = (frame * Math.PI * 2) / 12;
+    personFrame.heading = heading;
+    personFrame.action = action;
+    return personFrame;
+  }
   function unit(g, u, time, angle = u.angle || 0) {
     if (window.CruciataPeopleArt) {
-      const heading =
-          (Math.round(
-            (Math.atan2(Math.sin(angle), Math.cos(angle)) * 4) / Math.PI,
-          ) *
-            Math.PI) /
-          4,
-        rank = ["worker", "civilian", "chaplain"].includes(u.type)
-          ? 0
-          : Math.min(1, u.rank || 0),
-        action = u.moving
-          ? "walk"
-          : u.working
-            ? u.job?.resource === "food" && u.gatherSource === "food"
-              ? "berries"
-              : u.job?.resource ||
-                (u.job?.kind === "clear" ? u.gatherSource : null) ||
-                "build"
-            : u.strike > 0
-              ? "attack"
-              : "idle",
-        clock = u.moving
-          ? (u.anim ?? time * 9)
-          : u.working
-            ? (u.workPhase ?? 0) * Math.PI * 2
-            : (1 - (u.strike || 0)) * Math.PI * 2,
-        frame =
-          action === "idle" ? 0 : Math.floor((clock / (Math.PI * 2)) * 12) % 12,
-        phase = (frame * Math.PI * 2) / 12;
-      const spriteType = u.type === "knight" ? "knight5" : u.type;
-      sprite(
-        g,
-        `person:${spriteType}:${u.team}:${rank}:${heading}:${action}:${frame}:${u.carry > 0}`,
-        100,
-        120,
-        50,
-        95,
-        (q) => window.CruciataPeopleArt.draw(q, u, phase, heading, action),
+      const f = personKey(u, time, angle),
+        { phase, heading, action } = f;
+      sprite(g, f.key, 100, 120, 50, 95, (q) =>
+        window.CruciataPeopleArt.draw(q, u, phase, heading, action),
       );
       return;
     }
@@ -1861,6 +1865,89 @@
     frame.overlays.push({ draw, transform: g.getTransform() });
     return true;
   };
+  // Queues one upright figure at ground position (x, y). `base` carries the
+  // canvas's translation/scale (a, d, e, f) so the queued transform is arithmetic
+  // rather than a captured matrix; outside a frame the figure is drawn at once.
+  A.unitFigure = (g, o, time, angle, x, y, base) => {
+    if (!frame || painting || g !== frame.g) {
+      g.save();
+      g.translate(x, y);
+      g.scale(0.72, 0.72);
+      unit(g, o, time, angle);
+      g.restore();
+      return;
+    }
+    frame.objects.push({
+      figure: o,
+      time,
+      angle,
+      base,
+      x,
+      y: o.y,
+      a: base.a * 0.72,
+      d: base.d * 0.72,
+      e: base.e + base.a * x,
+      f: base.f + base.d * y,
+      alpha: g.globalAlpha,
+      index: frame.objects.length,
+    });
+  };
+  // Trees and resource patches queue as plain data and, when baked, draw
+  // straight from the atlas without a canvas state change apiece.
+  const softShadow = document.createElement("canvas");
+  softShadow.width = 64;
+  softShadow.height = 40;
+  {
+    const q = softShadow.getContext("2d");
+    q.fillStyle = "#253323";
+    q.globalAlpha = 0.19;
+    q.beginPath();
+    q.ellipse(32, 20, 30, 17, 0, 0, Math.PI * 2);
+    q.fill();
+  }
+  const treeKeys = new Map();
+  A.treeFast = (g, x, y, scale, palm, snow, base) => {
+    if (!frame || painting || g !== frame.g) {
+      A.tree(g, x, y, scale, palm, snow);
+      return;
+    }
+    const code = (palm ? 2 : 0) + (snow ? 1 : 0);
+    let key = treeKeys.get(code);
+    if (!key) treeKeys.set(code, (key = `tree:${!!palm}:${!!snow}`));
+    frame.objects.push({
+      prop: 1,
+      key,
+      x,
+      y,
+      scale,
+      palm,
+      snow,
+      base,
+      alpha: g.globalAlpha,
+      index: frame.objects.length,
+    });
+  };
+  A.resourceFast = (g, n, base) => {
+    if (n.remaining <= 0) return;
+    if (n.kind === "wood") {
+      A.treeFast(g, n.x, n.y, 1.3, n.palm, n.snow, base);
+      return;
+    }
+    if (!frame || painting || g !== frame.g) {
+      A.resource(g, n, 0);
+      return;
+    }
+    frame.objects.push({
+      prop: 2,
+      key: `resource:${n.kind}:${(n.id || 0) % 3}`,
+      n,
+      x: n.x,
+      y: n.y,
+      base,
+      alpha: g.globalAlpha,
+      index: frame.objects.length,
+    });
+  };
   A.flushFrame = () => {
     if (!frame) return;
     const f = frame;
@@ -1868,7 +1955,60 @@
     const g = f.g;
     g.save();
     f.objects.sort((a, b) => a.y - b.y || a.index - b.index);
+    let direct = null;
     for (const o of f.objects) {
+      if (o.figure) {
+        // Baked people draw straight from the atlas in world space under the
+        // canvas's own transform: no per-figure state change at all.
+        if (window.CruciataPeopleArt && globalThis.CruciataAtlas?.drawAt) {
+          if (direct !== o.base) {
+            g.setTransform(o.base.a, 0, 0, o.base.d, o.base.e, o.base.f);
+            direct = o.base;
+          }
+          if (g.globalAlpha !== o.alpha) g.globalAlpha = o.alpha;
+          const k = personKey(o.figure, o.time, o.angle);
+          if (globalThis.CruciataAtlas.drawAt(g, k.key, 50, 95, o.x, o.y, 0.72))
+            continue;
+        }
+        // Plain-number transform: no matrix object is built or converted.
+        direct = null;
+        g.setTransform(o.a, 0, 0, o.d, o.e, o.f);
+        g.globalAlpha = o.alpha;
+        unit(g, o.figure, o.time, o.angle);
+        continue;
+      }
+      if (o.prop && globalThis.CruciataAtlas?.drawAt) {
+        if (direct !== o.base) {
+          g.setTransform(o.base.a, 0, 0, o.base.d, o.base.e, o.base.f);
+          direct = o.base;
+        }
+        if (g.globalAlpha !== o.alpha) g.globalAlpha = o.alpha;
+        const atlas = globalThis.CruciataAtlas;
+        if (o.prop === 1) {
+          const k = o.scale;
+          g.drawImage(
+            softShadow,
+            o.x + 7 * k - 24 * k,
+            o.y + 7 * k - 14 * k,
+            48 * k,
+            28 * k,
+          );
+          if (atlas.drawAt(g, o.key, 50, 110, o.x, o.y, k)) continue;
+        } else {
+          g.drawImage(softShadow, o.x + 7 - 28, o.y + 7 - 18, 56, 36);
+          if (atlas.drawAt(g, o.key, 55, 80, o.x, o.y, 1)) continue;
+        }
+      }
+      if (o.prop) {
+        // Not baked (or not decoded yet): draw through the full path.
+        direct = null;
+        g.setTransform(o.base.a, 0, 0, o.base.d, o.base.e, o.base.f);
+        if (g.globalAlpha !== o.alpha) g.globalAlpha = o.alpha;
+        if (o.prop === 1) tree(g, o.x, o.y, o.scale, o.palm, o.snow);
+        else resource(g, o.n);
+        continue;
+      }
+      direct = null;
       g.setTransform(o.transform);
       g.globalAlpha = o.alpha;
       o.draw();
@@ -1896,34 +2036,79 @@
     hitContext.restore();
     return hitContext.getImageData(0, 0, 1, 1).data[3] > 160;
   }
+  // Pick areas follow the drawn silhouettes (measured with scripts/hit-audit.js,
+  // plus a few units of margin) so anything painted can be clicked. Boxes are
+  // [left, right, top, bottom] relative to the ground point.
+  const UNIT_PICK = {
+    knight: [-26, 26, -52, 8],
+    standard: [-40, 16, -52, 8],
+    ram: [-46, 46, -58, 16],
+    ballista: [-42, 42, -62, 14],
+    trebuchet: [-64, 64, -108, 22],
+    pilgrim: [-38, 38, -46, 16],
+    merchant: [-38, 38, -46, 16],
+  };
+  const FOOT_PICK = [-15, 15, -38, 6];
+  const BUILDING_PICK = {
+    towncenter: [-60, 60, -90, 52],
+    fort: [-74, 74, -104, 70],
+    barracks: [-48, 48, -70, 42],
+    house: [-30, 30, -58, 28],
+    tower: [-26, 26, -75, 25],
+    watchtower: [-22, 22, -62, 22],
+    chapel: [-39, 39, -94, 50],
+    gate: [-58, 58, -120, 46],
+    bastiongate: [-58, 58, -120, 46],
+    stable: [-47, 47, -62, 42],
+    siegeworkshop: [-54, 54, -68, 43],
+    farm: [-48, 48, -46, 41],
+    mill: [-36, 43, -60, 34],
+    miningcamp: [-42, 42, -56, 38],
+    lumbercamp: [-42, 42, -56, 38],
+  };
+  // Soldiers and villagers are drawn as small clusters, so their pick area
+  // grows by the cluster's spread.
+  const CLUSTER = { x: 17, y: 10 };
+  A.pickBox = (u) => {
+    const base = UNIT_PICK[u.type] || FOOT_PICK;
+    if (
+      ["ram", "ballista", "trebuchet", "pilgrim", "merchant"].includes(u.type)
+    )
+      return base;
+    return [
+      base[0] - CLUSTER.x,
+      base[1] + CLUSTER.x,
+      base[2] - CLUSTER.y,
+      base[3] + CLUSTER.y,
+    ];
+  };
   A.hitStructure = (b, p, margin = 0) => {
-    const x = Math.abs(p.x - b.x),
+    const x = p.x - b.x,
       y = p.y - b.y;
-    if (x < b.w / 2 + margin && Math.abs(y) < b.h / 2 + margin) return true;
+    if (Math.abs(x) < b.w / 2 + margin && Math.abs(y) < b.h / 2 + margin)
+      return true;
+    const box =
+      b.wallAttachment && b.kind === "tower"
+        ? [-38, 38, -108, 27]
+        : BUILDING_PICK[b.kind];
+    if (b.kind === "wall") return false;
+    if (box)
+      return (
+        x >= box[0] - margin &&
+        x <= box[1] + margin &&
+        y >= box[2] - margin &&
+        y <= box[3] + margin
+      );
     if (x > b.w / 2 + 60 || y > 0 || y < -b.h / 2 - visualHeight(b) - 30)
       return false;
     return pixelHit(p, (g) => structure(g, b, 0));
   };
   A.hitUnit = (u, p, time = 0, radius = 27) => {
     const x = p.x - u.x,
-      y = p.y - u.y;
-    if (x * x + y * y < radius * radius) return true;
-    if (Math.abs(x) > 110 || y < -150 || y > 90) return false;
-    return pixelHit(p, (g) => {
-      g.translate(u.x, u.y);
-      const angle = u.visualAngle ?? u.angle ?? 0;
-      if (["ram", "ballista", "trebuchet"].includes(u.type))
-        A.siegeMachine(g, u, time, angle);
-      else {
-        g.scale(0.72, 0.72);
-        if (["pilgrim", "merchant"].includes(u.type))
-          caravan(g, u, time, angle);
-        else {
-          unit(g, u, time, angle);
-          if (u.type === "standard") A.armyStandard(g, u);
-        }
-      }
-    });
+      y = p.y - u.y,
+      box = A.pickBox(u);
+    if (x >= box[0] && x <= box[1] && y >= box[2] && y <= box[3]) return true;
+    return radius > 0 && x * x + y * y < radius * radius;
   };
   A.hitResource = (n, p) => {
     const x = p.x - n.x,

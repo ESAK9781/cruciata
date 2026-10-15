@@ -564,7 +564,7 @@
     terrain,
     decorations = [],
     nav = new window.CruciataNavigation(W, H),
-    spatial = new Map(),
+    unitTree = null,
     obstacleIndex = null,
     objectIndex = new Map(),
     combatStructures = null,
@@ -1280,14 +1280,12 @@
     combatStructureRadius = 0;
     for (const b of state.buildings)
       if (b.hp > 0 && b.team !== 2) {
-        let map = combatStructures.get(b.team);
-        if (!map) {
-          map = new Map();
-          combatStructures.set(b.team, map);
+        let tree = combatStructures.get(b.team);
+        if (!tree) {
+          tree = new window.CruciataQuadtree(W, H);
+          combatStructures.set(b.team, tree);
         }
-        const key = cellKey(Math.floor(b.x / 256), Math.floor(b.y / 256));
-        if (!map.has(key)) map.set(key, []);
-        map.get(key).push(b);
+        tree.insert(b);
         combatStructureRadius = Math.max(combatStructureRadius, b.r || 0);
       }
     function insert(map, o, rx, ry) {
@@ -1347,6 +1345,17 @@
       if (segment.hp > 0 && ["wall", "gate"].includes(segment.kind))
         insert(curtainBuckets, segment, segment.w / 2, segment.h / 2);
     for (const b of state.buildings) {
+      // Older saves (and old layouts) may hold a tower displaced from its wall
+      // line; the attachment records the true curtain position.
+      if (
+        b.wallAttachment &&
+        b.hp > 0 &&
+        (Math.abs(b.wallAttachment.x - b.x) > 0.5 ||
+          Math.abs(b.wallAttachment.y - b.y) > 0.5)
+      ) {
+        b.x = b.wallAttachment.x;
+        b.y = b.wallAttachment.y;
+      }
       const neighbors =
         curtainBuckets.get(
           cellKey(Math.floor(b.x / 128), Math.floor(b.y / 128)),
@@ -2051,7 +2060,7 @@
         u.home = null;
       }
       state.navDirty = true;
-      fog.update(state.units, state.buildings);
+      fog.update(state.units, state.buildings, siegeShots());
       toast(
         city.name +
           " captured! +1,800 food, +2,400 wood, +1,800 stone, +2,200 gold. Surviving defenders and buildings join your host.",
@@ -2086,6 +2095,12 @@
         );
       };
       const origin = { x: b.x, y: b.y };
+      // Towers attached to a curtain stay on the wall line; they overlap their
+      // neighbouring sections by design and must never be displaced.
+      if (b.wallAttachment) {
+        placed.push(b);
+        continue;
+      }
       if (!valid(origin)) {
         let found = false;
         for (let radius = 24; radius <= 1800 && !found; radius += 24)
@@ -3188,10 +3203,10 @@
     fog = new window.CruciataFog(W, H);
     enemyFog = new window.CruciataFog(W, H, null, 1);
     militiaFog = new window.CruciataFog(W, H, null, 3);
-    fog.update(state.units, state.buildings);
-    enemyFog.update(state.units, state.buildings);
+    fog.update(state.units, state.buildings, siegeShots());
+    enemyFog.update(state.units, state.buildings, siegeShots());
     militiaFog ||= new window.CruciataFog(W, H, null, 3);
-    militiaFog.update(state.units, state.buildings);
+    militiaFog.update(state.units, state.buildings, siegeShots());
     for (const team of [0, 1])
       workers(team).forEach((u, i) =>
         assignGather(
@@ -3427,10 +3442,10 @@
     fog = new window.CruciataFog(W, H, state.fog);
     enemyFog = new window.CruciataFog(W, H, state.enemyFog, 1);
     militiaFog = new window.CruciataFog(W, H, state.militiaFog, 3);
-    enemyFog.update(state.units, state.buildings);
+    enemyFog.update(state.units, state.buildings, siegeShots());
     militiaFog ||= new window.CruciataFog(W, H, null, 3);
-    militiaFog.update(state.units, state.buildings);
-    fog.update(state.units, state.buildings);
+    militiaFog.update(state.units, state.buildings, siegeShots());
+    fog.update(state.units, state.buildings, siegeShots());
     rebuildNavigation();
     state.roads = planRoads();
     ensureGroundCover();
@@ -3583,47 +3598,35 @@
       state.nodes.find((o) => o.id === id)
     );
   }
+  // Boulders and ballista bolts in flight grant their side ordinary sight.
+  function siegeShots() {
+    const shots = [...(state.boulders || [])];
+    for (const a of state.arrows || []) if (a.siege) shots.push(a);
+    return shots;
+  }
   function rebuildSpatial() {
-    for (const bucket of spatial.values()) bucket.length = 0;
+    if (!unitTree || unitTree.width !== W || unitTree.height !== H)
+      unitTree = new window.CruciataQuadtree(W, H);
+    unitTree.clear();
     objectIndex.clear();
     for (const list of [state.units, state.buildings, state.nodes])
       for (const o of list) objectIndex.set(o.id, o);
-    for (const u of state.units)
-      if (u.hp > 0) {
-        const key = cellKey(Math.floor(u.x / 200), Math.floor(u.y / 200));
-        if (!spatial.has(key)) spatial.set(key, []);
-        spatial.get(key).push(u);
-      }
+    for (const u of state.units) if (u.hp > 0) unitTree.insert(u);
   }
+  // Flocking and target searches query a quadtree of live units, which stays
+  // cheap both in dense melees and across empty ground.
   function nearby(u, r) {
-    const out = [],
-      sx = Math.floor((u.x - r) / 200),
-      ex = Math.floor((u.x + r) / 200),
-      sy = Math.floor((u.y - r) / 200),
-      ey = Math.floor((u.y + r) / 200);
-    for (let y = sy; y <= ey; y++)
-      for (let x = sx; x <= ex; x++)
-        for (const other of spatial.get(cellKey(x, y)) || [])
-          if (other.hp > 0 && distance(u, other) < r) out.push(other);
+    const out = unitTree.query(u.x, u.y, r, []);
+    for (let i = out.length - 1; i >= 0; i--)
+      if (out[i].hp <= 0) out.splice(i, 1);
     return out;
   }
   function nearbyStructures(p, r) {
     if (!combatStructures) return state.buildings;
     const out = [],
       reach = r + combatStructureRadius;
-    for (const [team, map] of combatStructures)
-      if (team !== p.team)
-        for (
-          let y = Math.floor((p.y - reach) / 256);
-          y <= Math.floor((p.y + reach) / 256);
-          y++
-        )
-          for (
-            let x = Math.floor((p.x - reach) / 256);
-            x <= Math.floor((p.x + reach) / 256);
-            x++
-          )
-            for (const b of map.get(cellKey(x, y)) || []) out.push(b);
+    for (const [team, tree] of combatStructures)
+      if (team !== p.team) tree.query(p.x, p.y, reach, out);
     return out;
   }
   function resourceCluster(target) {
@@ -4170,6 +4173,25 @@
       u.vy = 0;
       return true;
     }
+    // A swarm fills in from its shared point outward: a soldier that touches a
+    // settled ally nearer that point simply stops where it stands.
+    if (u.order?.swarm && distToGoal < u.order.arrive * 2.6) {
+      const blocked = nearby(u, 28).some(
+        (o) =>
+          o.id !== u.id &&
+          o.team === u.team &&
+          o.hp > 0 &&
+          !o.moving &&
+          !o.order &&
+          distance(o, p) < distToGoal,
+      );
+      if (blocked) {
+        u.moving = false;
+        u.vx = 0;
+        u.vy = 0;
+        return true;
+      }
+    }
     // Stall watchdog: a unit that is commanded to move but makes no headway
     // re-plans, and gives up gracefully only when it is already near its slot.
     const progress = u.progress;
@@ -4191,7 +4213,12 @@
       } else if (state.time - progress.t > 2.5) {
         progress.t = state.time;
         progress.stalled += 2.5;
-        if (distToGoal < 40 || (progress.stalled >= 7.5 && distToGoal < 150)) {
+        const swarmReach = u.order?.arrive || 0;
+        if (
+          distToGoal < Math.max(40, swarmReach) ||
+          (progress.stalled >= 7.5 &&
+            distToGoal < Math.max(150, swarmReach * 3))
+        ) {
           u.moving = false;
           u.vx = 0;
           u.vy = 0;
@@ -4241,14 +4268,15 @@
           !u.pathGoal ||
           distance(u.pathGoal, p) > 24
         ) {
-          // The first point is the company origin; join the nearest visible route entry.
+          // The first point is the company origin. Every unit joins the furthest
+          // route entry it can see, so nobody backtracks to a shared origin (which
+          // would pile the whole army onto one point).
           let entry = 0;
-          // Joining the shared route needs only a nearby visible entry, not a scan of the whole route.
           for (
             let scans = 0;
             scans < 12 &&
             entry + 1 < company.path.length &&
-            distance(u, company.path[entry + 1]) < 900 &&
+            distance(u, company.path[entry + 1]) < (entry ? 900 : 2600) &&
             nav.clearLine(u, company.path[entry + 1]);
             scans++
           )
@@ -4283,7 +4311,26 @@
             }
             route.unshift(...connector.slice(0, -1));
           }
-          u.path = [...route, p];
+          // Each soldier keeps to its own lane through shared corners, so an army
+          // streams past a waypoint instead of squeezing through one point.
+          const lane = ((u.id % 9) - 4) * 9;
+          let behind = { x: u.x, y: u.y };
+          const lanes = route.map((q, i) => {
+            const ahead = route[i + 1] || p,
+              len = Math.hypot(ahead.x - behind.x, ahead.y - behind.y) || 1,
+              shifted = {
+                x: q.x - ((ahead.y - behind.y) / len) * lane,
+                y: q.y + ((ahead.x - behind.x) / len) * lane,
+              };
+            const ok =
+              i < route.length - 1 + (route.length ? 0 : 1) &&
+              groundFree(shifted.x, shifted.y, 12) &&
+              nav.clearLine(behind, shifted);
+            const point = ok ? shifted : q;
+            behind = point;
+            return point;
+          });
+          u.path = [...lanes, p];
           u.pathGoal = p;
           u.pathRevision = company.revision;
           u.sharedRouteRevision = company.revision;
@@ -4701,7 +4748,7 @@
         u.y = ny;
       }
       u.moving = true;
-      if (visualActive(u)) u.anim += dt * 10;
+      if (visualActive(u) && motionVisible()) u.anim += dt * 10;
       u.stuck = 0;
       if (
         u.path[0] &&
@@ -5410,6 +5457,24 @@
     }
     updateUI();
   }
+  // The friendly unit whose drawn body (not merely its footprint) is under p;
+  // overlapping candidates are ranked by their visual centre.
+  function unitAt(p, pool = friendUnits()) {
+    let best = null,
+      score = Infinity;
+    for (const u of pool) {
+      if (!Art.hitUnit(u, p, state.time)) continue;
+      const box = Art.pickBox(u),
+        dx = p.x - u.x,
+        dy = p.y - (u.y + (box[2] + box[3]) * 0.5),
+        value = dx * dx + dy * dy;
+      if (value < score) {
+        score = value;
+        best = u;
+      }
+    }
+    return best;
+  }
   // The structure under a ground point. Walls are tested against their true
   // capsule (diagonals included) and unfinished work wins ties, so right-clicking
   // a wall section always finds the section the player meant.
@@ -5420,11 +5485,14 @@
       if (b.hp <= 0 || (own ? b.team !== 0 : b.team !== 0 && !playerSees(b)))
         continue;
       const wallish = b.kind === "wall" && Number.isFinite(b.wallAngle);
-      if (
-        !(wallish && surfaceDistance(p, b) <= margin + 5) &&
-        !Art.hitStructure(b, p, margin)
-      )
-        continue;
+      // A wall's visible face rises above its footing, so test the ground
+      // beneath the clicked height too.
+      const lift = wallish
+        ? [0, 12, b.fortified ? 24 : 15, b.fortified ? 36 : 25].find(
+            (z) => surfaceDistance({ x: p.x, y: p.y + z }, b) <= margin + 5,
+          )
+        : undefined;
+      if (lift === undefined && !Art.hitStructure(b, p, margin)) continue;
       const value =
         (wallish ? surfaceDistance(p, b) : distance(b, p) * 0.5) +
         (b.progress < 1 ? -40 : 0);
@@ -5482,6 +5550,8 @@
       }
       engine.attackTarget = enemy?.id || null;
       engine.fireTarget = enemy ? null : { x: p.x, y: p.y };
+      // An explicit order wakes a standing-down engine.
+      if (engine.stance === "stand-down") engine.stance = "fight";
       sound("attack", engine);
       toast(
         "Great siege engine target set. The platform will turn and fire when ready.",
@@ -5562,7 +5632,36 @@
         (a, b) => TYPES[a.type].rank - TYPES[b.type].rank,
       ),
       formationId = ++uid,
-      slots = [];
+      slots = [],
+      // Attack mode abandons the formation: everyone converges on the very same
+      // point and the flocking rules spread them out around it.
+      swarm = attack && !enemy && !escort,
+      arrive = swarm ? 14 * Math.sqrt(combat.length) : 0;
+    // Within each unit class the front-most soldier takes the front slot and rows
+    // keep their left-to-right order, so troops never cross through one another.
+    for (let start = 0; start < sorted.length;) {
+      let end = start;
+      while (
+        end < sorted.length &&
+        TYPES[sorted[end].type].rank === TYPES[sorted[start].type].rank
+      )
+        end++;
+      const ahead = (u) =>
+          (u.x - center.x) * front.x + (u.y - center.y) * front.y,
+        lateral = (u) => (u.x - center.x) * side.x + (u.y - center.y) * side.y,
+        group = sorted.slice(start, end).sort((a, b) => ahead(b) - ahead(a));
+      for (let k = 0; k < group.length;) {
+        let last = k + 1;
+        while (last < group.length && (start + last) % cols !== 0) last++;
+        const row = group
+          .slice(k, last)
+          .sort((a, b) => lateral(a) - lateral(b));
+        for (let j = 0; j < row.length; j++) group[k + j] = row[j];
+        k = last;
+      }
+      for (let k = 0; k < group.length; k++) sorted[start + k] = group[k];
+      start = end;
+    }
     sorted.forEach((u, i) => {
       u.autoScout = null;
       u.fireTarget = null;
@@ -5580,24 +5679,36 @@
                 ? 170
                 : 0
             : 0;
-      let goal = marchPoint({
-        x: p.x + side.x * column * spacing - front.x * (row * spacing + extra),
-        y: p.y + side.y * column * spacing - front.y * (row * spacing + extra),
-      });
-      if (u.type === "knight" && (attack || enemy)) {
+      let goal = swarm
+        ? marchPoint(p)
+        : marchPoint({
+            x:
+              p.x +
+              side.x * column * spacing -
+              front.x * (row * spacing + extra),
+            y:
+              p.y +
+              side.y * column * spacing -
+              front.y * (row * spacing + extra),
+          });
+      if (!swarm && u.type === "knight" && (attack || enemy)) {
         const flank = i % 2 ? -1 : 1;
         goal = findFree({
           x: goal.x + side.x * flank * 55,
           y: goal.y + side.y * flank * 55,
         });
       }
-      goal = reserveSlot(goal, slots, marchPoint(p));
+      if (!swarm) goal = reserveSlot(goal, slots, marchPoint(p));
       const order = {
         x: goal.x,
         y: goal.y,
         attack: attack || !!enemy || !!escort,
         formation: formationId,
       };
+      if (swarm) {
+        order.swarm = true;
+        order.arrive = arrive;
+      }
       u.target = u.type === "chaplain" ? null : enemy?.id || null;
       if (enemy) u.stance = "fight";
       u.manualTarget = !!enemy && u.type !== "chaplain";
@@ -5761,6 +5872,17 @@
       u.target = null;
       u.manualTarget = false;
       if (value === "stand-down") u.fireTarget = null;
+    }
+    // Permanent engines obey the same stances: Hold fires only at ordered
+    // targets and Stand down never fires.
+    for (const b of selectedStructures(
+      (b) => b.kind === "greatengine" && b.progress >= 1,
+    )) {
+      b.stance = value;
+      if (value === "stand-down") {
+        b.fireTarget = null;
+        b.attackTarget = null;
+      }
     }
     updateUI();
   }
@@ -6182,7 +6304,7 @@
           u.x = p.x;
           u.y = p.y;
           u.moving = true;
-          if (visualActive(u)) u.anim += dt * 10;
+          if (visualActive(u) && motionVisible()) u.anim += dt * 10;
           return;
         }
         if (farm || surfaceDistance(u, target) > 60) {
@@ -8344,10 +8466,10 @@
     state.time += dt;
     visionTimer -= dt;
     if (visionTimer <= 0) {
-      fog.update(state.units, state.buildings);
-      enemyFog.update(state.units, state.buildings);
+      fog.update(state.units, state.buildings, siegeShots());
+      enemyFog.update(state.units, state.buildings, siegeShots());
       militiaFog ||= new window.CruciataFog(W, H, null, 3);
-      militiaFog.update(state.units, state.buildings);
+      militiaFog.update(state.units, state.buildings, siegeShots());
       visionTimer = 0.2;
     }
     state.waveTimer -= dt;
@@ -8554,35 +8676,42 @@
       if (spec.range && b.team !== 2) {
         b.guardCooldown -= dt;
         if (b.guardCooldown <= 0) {
+          const engineStance = b.stance || "fight";
           let locked =
-            b.kind === "greatengine" ? getObject(b.attackTarget) : null;
+            b.kind === "greatengine" && engineStance !== "stand-down"
+              ? getObject(b.attackTarget)
+              : null;
           if (locked && (locked.team === b.team || locked.team === 2)) {
             b.attackTarget = null;
             locked = null;
           }
           const target =
             b.kind === "greatengine"
-              ? b.fireTarget
-                ? distance(b, b.fireTarget) >= spec.minRange &&
-                  distance(b, b.fireTarget) <= spec.range
-                  ? b.fireTarget
-                  : null
-                : locked
-                  ? distance(b, locked) >= spec.minRange &&
-                    distance(b, locked) <= spec.range
-                    ? locked
+              ? engineStance === "stand-down"
+                ? null
+                : b.fireTarget
+                  ? distance(b, b.fireTarget) >= spec.minRange &&
+                    distance(b, b.fireTarget) <= spec.range
+                    ? b.fireTarget
                     : null
-                  : state.buildings
-                      .filter(
-                        (e) =>
-                          e.team !== b.team &&
-                          e.team !== 2 &&
-                          e.hp > 0 &&
-                          distance(b, e) >= spec.minRange &&
-                          distance(b, e) <= spec.range &&
-                          observerSees(b, e),
-                      )
-                      .sort((a, c) => distance(a, b) - distance(c, b))[0]
+                  : locked
+                    ? distance(b, locked) >= spec.minRange &&
+                      distance(b, locked) <= spec.range
+                      ? locked
+                      : null
+                    : engineStance === "hold"
+                      ? null
+                      : state.buildings
+                          .filter(
+                            (e) =>
+                              e.team !== b.team &&
+                              e.team !== 2 &&
+                              e.hp > 0 &&
+                              distance(b, e) >= spec.minRange &&
+                              distance(b, e) <= spec.range &&
+                              observerSees(b, e),
+                          )
+                          .sort((a, c) => distance(a, b) - distance(c, b))[0]
               : nearby(b, spec.range)
                   .filter(
                     (u) =>
@@ -8699,9 +8828,16 @@
     }
     for (const u of state.units) {
       if (u.hp > 0 && u.type === "standard") {
-        if (visualActive(u)) Art.updateStandard(u, dt);
+        if (visualActive(u) && motionVisible()) Art.updateStandard(u, dt);
         else Art.suspendStandard(u);
       }
+      if (
+        u.hp > 0 &&
+        CLUSTERED.has(u.type) &&
+        view.scale >= CLUSTER_SCALE &&
+        visualActive(u)
+      )
+        updateCluster(u, dt);
       if (
         u.hp > 0 &&
         u.moving &&
@@ -8778,6 +8914,9 @@
           stone.sy +
           (stone.ty - stone.sy) * flight -
           Math.sin(flight * Math.PI) * (stone.heavy ? 340 : 150);
+      // The shot's ground track gives its side sight as it flies.
+      stone.x = stone.sx + (stone.tx - stone.sx) * flight;
+      stone.y = stone.sy + (stone.ty - stone.sy) * flight;
       emitParticle({
         x: px,
         y: py,
@@ -9212,14 +9351,18 @@
   const groupButtons = new Map();
   function updateUI() {
     if (!state) return;
-    const stanceUnits = fighters().filter((u) => selected.has(u.id));
+    const stanceUnits = fighters().filter((u) => selected.has(u.id)),
+      stanceEngines = selectedStructures(
+        (b) => b.kind === "greatengine" && b.progress >= 1,
+      ),
+      stanced = [...stanceUnits, ...stanceEngines];
     for (const stance of ["fight", "hold", "stand-down"]) {
       const button = $("stance-" + stance);
-      button.hidden = !stanceUnits.length;
+      button.hidden = !stanced.length;
       button.classList.toggle(
         "active",
-        !!stanceUnits.length &&
-          stanceUnits.every((u) => (u.stance || "fight") === stance),
+        !!stanced.length &&
+          stanced.every((u) => (u.stance || "fight") === stance),
       );
     }
     $("destroy-button").hidden = !selectedStructures((b) => !b.cityCenter)
@@ -9587,7 +9730,7 @@
     }
     if (b?.kind === "greatengine")
       $("selection-role").textContent =
-        "Permanent siege engine. Range 320-2200. Right-click ground to bombard it, or an enemy to lock bombardment. Reload: " +
+        "Permanent siege engine. Range 320-2200. Right-click ground to bombard it, or an enemy to lock bombardment. Hold fires only at ordered targets; Stand down ceases fire. Reload: " +
         Math.ceil(Math.max(0, b.guardCooldown || 0)) +
         "s. Keep friendly troops outside the huge impact zone.";
     if (isCapital(b))
@@ -9786,11 +9929,163 @@
       o.y - (o.ry || 0) <= view.y + view.h + margin
     );
   }
+  // True when any part of the segment a-b may cross the viewport.
+  function segmentVisible(a, b, margin = 60) {
+    return (
+      Math.max(a.x, b.x) >= view.x - margin &&
+      Math.min(a.x, b.x) <= view.x + view.w + margin &&
+      Math.max(a.y, b.y) >= view.y - margin &&
+      Math.min(a.y, b.y) <= view.y + view.h + margin
+    );
+  }
   function visualActive(o) {
     return onScreen(o, 130) && (o.team === 0 || playerSees(o));
   }
+  // Motion that would be smaller than a few pixels is never played: below this
+  // view scale figures hold a still pose and cosmetic effects are skipped.
+  const ANIM_SCALE = 0.5,
+    CLUSTER_SCALE = 0.25;
+  function motionVisible() {
+    return view.scale >= ANIM_SCALE;
+  }
   function visualParticle(p) {
-    return onScreen(p, Math.max(32, (p.r || 1) * (1 + (p.growth || 0))));
+    return (
+      motionVisible() &&
+      onScreen(p, Math.max(32, (p.r || 1) * (1 + (p.growth || 0))))
+    );
+  }
+  // Every non-siege unit is drawn as three people. They are boids that follow
+  // the unit's single simulation body with strong cohesion; only the drawn
+  // figures are affected, never movement, collision or health.
+  // Villagers, civilians, chaplains and bannermen stay single figures.
+  const CLUSTERED = new Set(["sword", "archer", "knight"]);
+  const PERSON = new Set([
+    "sword",
+    "archer",
+    "knight",
+    "chaplain",
+    "worker",
+    "civilian",
+  ]);
+  // A pre-rendered soft shadow: one image draw instead of a path fill per unit.
+  const shadowSprite = document.createElement("canvas");
+  shadowSprite.width = 64;
+  shadowSprite.height = 40;
+  {
+    const q = shadowSprite.getContext("2d");
+    q.fillStyle = "#314029";
+    q.globalAlpha = 0.26;
+    q.beginPath();
+    q.ellipse(32, 20, 30, 17, 0, 0, Math.PI * 2);
+    q.fill();
+  }
+  function drawShadow(g, x, y, rx, ry) {
+    g.drawImage(shadowSprite, x - rx, y - ry, rx * 2, ry * 2);
+  }
+  const clusterMap = new WeakMap(),
+    renderStats = { rallyLines: 0, orderLines: 0, siegeLinks: 0, figures: 0 };
+  function clusterOf(u) {
+    let c = clusterMap.get(u);
+    if (!c) {
+      c = {
+        ready: false,
+        figs: [0, 1, 2].map((k) => ({
+          x: u.x,
+          y: u.y,
+          vx: 0,
+          vy: 0,
+          k,
+          view: Object.create(u),
+        })),
+      };
+      clusterMap.set(u, c);
+    }
+    return c;
+  }
+  // Seed offsets scatter figures loosely (deterministically by unit id) so a
+  // massed army reads as one crowd, not as repeating triples.
+  function clusterSeed(u, k, out) {
+    const heavy = u.type === "knight" ? 1.5 : 1,
+      a = (u.id * 2.399 + k * 2.094) % (Math.PI * 2),
+      r = (6 + ((u.id * 7 + k * 5) % 9)) * heavy;
+    out[0] = Math.cos(a) * r;
+    out[1] = Math.sin(a) * r;
+    return out;
+  }
+  const seedScratch = [0, 0];
+  function updateCluster(u, dt) {
+    const c = clusterOf(u),
+      heavy = u.type === "knight" ? 1.5 : 1,
+      spacing = 8 * heavy,
+      comfort = 16 * heavy,
+      reach = 34 * heavy,
+      vx = u.moving ? u.vx || 0 : 0,
+      vy = u.moving ? u.vy || 0 : 0;
+    if (!c.ready || Math.hypot(c.figs[0].x - u.x, c.figs[0].y - u.y) > 90) {
+      c.figs.forEach((f, i) => {
+        clusterSeed(u, i, seedScratch);
+        f.x = u.x + seedScratch[0];
+        f.y = u.y + seedScratch[1];
+        f.vx = vx;
+        f.vy = vy;
+      });
+      c.ready = true;
+      return c;
+    }
+    const step = Math.min(dt, 0.1);
+    for (let i = 0; i < 3; i++) {
+      const f = c.figs[i],
+        dx0 = u.x - f.x,
+        dy0 = u.y - f.y,
+        d0 = Math.hypot(dx0, dy0) || 0.01;
+      // Cohesion is gentle while the figures share the same patch of ground and
+      // only firms up as they drift apart.
+      const pull = d0 < comfort ? 0.8 : 0.8 + (d0 - comfort) * 1.4;
+      let ax = (dx0 / d0) * pull * d0 * 0.5,
+        ay = (dy0 / d0) * pull * d0 * 0.5;
+      ax += (vx - f.vx) * 5;
+      ay += (vy - f.vy) * 5;
+      for (let j = 0; j < 3; j++) {
+        if (j === i) continue;
+        const o = c.figs[j],
+          dx = f.x - o.x,
+          dy = f.y - o.y,
+          d = Math.hypot(dx, dy) || 0.01;
+        if (d < spacing) {
+          ax += (dx / d) * (spacing - d) * 30;
+          ay += (dy / d) * (spacing - d) * 30;
+        }
+      }
+      f.vx += ax * step;
+      f.vy += ay * step;
+      const damp = Math.max(0, 1 - 3 * step);
+      f.vx *= damp;
+      f.vy *= damp;
+      f.x += f.vx * step;
+      f.y += f.vy * step;
+      const ox = f.x - u.x,
+        oy = f.y - u.y,
+        od = Math.hypot(ox, oy);
+      if (od > reach) {
+        f.x = u.x + (ox / od) * reach;
+        f.y = u.y + (oy / od) * reach;
+      }
+    }
+    return c;
+  }
+  // Fills each figure's draw view for this frame (pose phases and stillness).
+  function clusterFigures(u, motion) {
+    const c = clusterOf(u);
+    for (const f of c.figs) {
+      const v = f.view;
+      v.x = f.x;
+      v.y = f.y;
+      v.anim = motion ? (u.anim || 0) + f.k * 2.1 : 0;
+      v.workPhase = motion ? (u.workPhase || 0) + f.k * 0.31 : 0;
+      v.moving = motion ? u.moving : false;
+      v.strike = motion ? Math.max(0, (u.strike || 0) - f.k * 0.04) : 0;
+    }
+    return c.figs;
   }
   function emitParticle(p) {
     if (visualParticle(p)) state.particles.push(p);
@@ -9819,7 +10114,21 @@
     );
     ctx.clearRect(view.x - 40, view.y - 40, view.w + 80, view.h + 80);
     ctx.drawImage(terrain, 0, 0, W, H);
-    const time = state.time;
+    const baseMatrix = ctx.getTransform(),
+      baseTransform = {
+        a: baseMatrix.a,
+        d: baseMatrix.d,
+        e: baseMatrix.e,
+        f: baseMatrix.f,
+      };
+    renderStats.rallyLines =
+      renderStats.orderLines =
+      renderStats.siegeLinks =
+      renderStats.figures =
+        0;
+    const time = state.time,
+      motion = motionVisible(),
+      drawTime = motion ? time : 0;
     Art.beginFrame(ctx);
     for (const u of state.units) {
       if (!visualActive(u)) {
@@ -9854,7 +10163,7 @@
       biome,
       coastX,
       riverX,
-      time,
+      drawTime,
       bridgeY(),
       state.mode !== "quickmatch" && LEVELS[state.level].terrain === 0,
     );
@@ -9915,10 +10224,20 @@
         if (d.kind === "rockmass") Art.rockMass(ctx, d);
         else if (d.kind === "cliff") Art.cliff(ctx, d);
         else if (d.kind === "rock") Art.boulder(ctx, d);
-        else Art.tree(ctx, d.x, d.y, d.scale, LEVELS[state.level].terrain >= 3);
+        else
+          Art.treeFast(
+            ctx,
+            d.x,
+            d.y,
+            d.scale,
+            LEVELS[state.level].terrain >= 3,
+            false,
+            baseTransform,
+          );
       }
     for (const n of state.nodes)
-      if (n.remaining > 0 && onScreen(n)) Art.resource(ctx, n, time);
+      if (n.remaining > 0 && onScreen(n))
+        Art.resourceFast(ctx, n, baseTransform);
     for (const m of state.marks)
       if (m.kind === "scorch" && onScreen(m)) {
         const grow = 0.5 + Math.min(1, m.t * 3) * 0.5;
@@ -10000,21 +10319,7 @@
       .filter(Boolean);
     for (const b of knownBuildings)
       if (onScreen(b, Math.max(120, Art.visualHeight(b) + b.h / 2))) {
-        Art.structure(ctx, b, time);
-        if (
-          (selectedBuilding === b.id || selectedBuildings.has(b.id)) &&
-          b.rally
-        ) {
-          Art.banner(ctx, b.rally.x, b.rally.y, 0, time);
-          ctx.save();
-          ctx.setLineDash([6, 8]);
-          ctx.strokeStyle = "#edc57888";
-          ctx.beginPath();
-          ctx.moveTo(b.x, b.y);
-          ctx.lineTo(b.rally.x, b.rally.y);
-          ctx.stroke();
-          ctx.restore();
-        }
+        Art.structure(ctx, b, drawTime);
         if (selectedBuilding === b.id || selectedBuildings.has(b.id)) {
           ctx.strokeStyle = "#eed5a0";
           ctx.lineWidth = 2;
@@ -10040,6 +10345,26 @@
         if (b.progress < 1 && b.hp > 0) {
           healthBar(ctx, b.x, b.y - b.h / 2 - 12, b.progress, 70, 0);
         }
+      }
+    // A selected building's rally point and line show whenever any part of them
+    // is in view, even when the building itself is off-screen.
+    for (const b of knownBuildings)
+      if (
+        b.rally &&
+        b.hp > 0 &&
+        (selectedBuilding === b.id || selectedBuildings.has(b.id)) &&
+        segmentVisible(b, b.rally)
+      ) {
+        renderStats.rallyLines++;
+        Art.banner(ctx, b.rally.x, b.rally.y, 0, drawTime);
+        ctx.save();
+        ctx.setLineDash([6, 8]);
+        ctx.strokeStyle = "#edc57888";
+        ctx.beginPath();
+        ctx.moveTo(b.x, b.y);
+        ctx.lineTo(b.rally.x, b.rally.y);
+        ctx.stroke();
+        ctx.restore();
       }
     const engines = state.units.filter(
       (u) => u.team === 0 && u.type === "trebuchet" && selected.has(u.id),
@@ -10097,6 +10422,27 @@
       }
       ctx.restore();
     }
+    // Selected engines link to their targets even when the engine is off-screen.
+    const siegeLink = (from, to) => {
+      if (!to || !segmentVisible(from, to, 80)) return;
+      renderStats.siegeLinks++;
+      ctx.save();
+      ctx.globalAlpha = 0.6;
+      ctx.setLineDash([9, 9]);
+      ctx.lineDashOffset = -state.time * 24;
+      ctx.strokeStyle = "#f2aa4e";
+      ctx.lineWidth = 1.6;
+      ctx.beginPath();
+      ctx.moveTo(from.x, from.y);
+      ctx.lineTo(to.x, to.y);
+      ctx.stroke();
+      ctx.restore();
+    };
+    for (const u of engines) siegeLink(u, u.fireTarget || getObject(u.target));
+    for (const b of selectedStructures(
+      (b) => b.kind === "greatengine" && b.progress >= 1,
+    ))
+      siegeLink(b, b.fireTarget || getObject(b.attackTarget));
     for (const u of engines) {
       ctx.save();
       if (u.fireTarget) {
@@ -10169,21 +10515,52 @@
         (u) => u.hp > 0 && onScreen(u, 130) && (u.team === 0 || playerSees(u)),
       )
       .sort((a, b) => a.y - b.y);
+    // Very large armies draw fewer figures per soldier so frames stay smooth.
+    let crowd = 0;
+    for (const u of visible) if (CLUSTERED.has(u.type)) crowd++;
+    const perUnit = Math.max(
+      1,
+      Math.min(3, Math.floor(2400 / Math.max(1, crowd))),
+    );
     for (const u of visible) {
-      Art.ellipse(
-        ctx,
-        u.x + 3,
-        u.y + 4,
-        u.type === "knight"
-          ? 16
-          : u.type === "trebuchet"
-            ? 26
-            : u.type === "pilgrim" || u.type === "merchant"
-              ? 24
-              : 12,
-        u.type === "knight" ? 22 : 12,
-        "#31402930",
-      );
+      const clustered =
+        CLUSTERED.has(u.type) && view.scale >= CLUSTER_SCALE && perUnit > 1;
+      if (clustered && !clusterOf(u).ready) updateCluster(u, 0);
+      const figs = clustered ? clusterFigures(u, motion) : null;
+      if (crowd > 900 || view.scale < 0.4) {
+        // Dense or distant crowds skip ground shadows entirely.
+      } else if (clustered)
+        // One soft shadow under the whole crowd of figures is far cheaper than three.
+        drawShadow(
+          ctx,
+          u.x + 2,
+          u.y + 4,
+          u.type === "knight" ? 24 : 17,
+          u.type === "knight" ? 22 : 13,
+        );
+      else if (PERSON.has(u.type))
+        drawShadow(
+          ctx,
+          u.x + 3,
+          u.y + 4,
+          u.type === "knight" ? 16 : 12,
+          u.type === "knight" ? 22 : 12,
+        );
+      else
+        Art.ellipse(
+          ctx,
+          u.x + 3,
+          u.y + 4,
+          u.type === "knight"
+            ? 16
+            : u.type === "trebuchet"
+              ? 26
+              : u.type === "pilgrim" || u.type === "merchant"
+                ? 24
+                : 12,
+          u.type === "knight" ? 22 : 12,
+          "#31402930",
+        );
       if (selected.has(u.id)) {
         ctx.strokeStyle = "#ede1ae";
         ctx.lineWidth = 1.8;
@@ -10191,7 +10568,15 @@
         ctx.arc(
           u.x,
           u.y,
-          u.type === "trebuchet" ? 24 : u.type === "knight" ? 18 : 12,
+          clustered
+            ? u.type === "knight"
+              ? 24
+              : 16
+            : u.type === "trebuchet"
+              ? 24
+              : u.type === "knight"
+                ? 18
+                : 12,
           0,
           Math.PI * 2,
         );
@@ -10201,18 +10586,38 @@
         ctx.strokeStyle = "#ebcb78aa";
         ctx.lineWidth = 1.5;
         ctx.beginPath();
-        ctx.arc(u.x, u.y, 22, 0, Math.PI * 2);
+        ctx.arc(u.x, u.y, clustered ? 24 : 22, 0, Math.PI * 2);
         ctx.stroke();
       }
-      ctx.save();
-      ctx.translate(u.x, u.y);
-      drawUnit(ctx, u, time, u.visualAngle ?? u.angle);
-      ctx.restore();
+      if (clustered) {
+        // The painter queue depth-sorts the figures against everything else.
+        renderStats.figures += 3;
+        const angle = u.visualAngle ?? u.angle;
+        for (let i = 0; i < perUnit; i++) {
+          const f = figs[i];
+          Art.unitFigure(ctx, f.view, drawTime, angle, f.x, f.y, baseTransform);
+        }
+      } else if (PERSON.has(u.type)) {
+        Art.unitFigure(
+          ctx,
+          u,
+          drawTime,
+          u.visualAngle ?? u.angle,
+          u.x,
+          u.y,
+          baseTransform,
+        );
+      } else {
+        ctx.save();
+        ctx.translate(u.x, u.y);
+        drawUnit(ctx, u, drawTime, u.visualAngle ?? u.angle);
+        ctx.restore();
+      }
       if (selected.has(u.id) || u.hp < u.maxHp)
         healthBar(
           ctx,
           u.x,
-          u.y - 32,
+          (clustered ? Math.min(u.y, ...figs.map((f) => f.y)) : u.y) - 32,
           u.hp / u.maxHp,
           u.type === "trebuchet" ? 40 : 28,
           u.team,
@@ -10484,7 +10889,7 @@
           u.order &&
           selected.has(u.id) &&
           u.type !== "worker" &&
-          onScreen(u, 400)
+          (onScreen(u, 400) || segmentVisible(u, u.order, 40))
         ) {
           const key = u.order.formation || u.id,
             lane = lanes.get(key) || {
@@ -10497,6 +10902,7 @@
           lane.n++;
           lane.x += u.x;
           lane.y += u.y;
+          renderStats.orderLines++;
           lane.attack ||= !!u.order.attack;
           lanes.set(key, lane);
           ctx.fillStyle = u.order.attack ? "#d9604a" : "#efe2b0";
@@ -10729,9 +11135,7 @@
       selectedBuildings.clear();
     }
     if (clicked) {
-      const u = friendUnits()
-        .filter((u) => Art.hitUnit(u, d.end, state.time))
-        .sort((a, b) => distance(a, d.end) - distance(b, d.end))[0];
+      const u = unitAt(d.end);
       if (u) {
         if (d.shift && selected.has(u.id)) selected.delete(u.id);
         else selected.add(u.id);
@@ -10784,9 +11188,7 @@
   canvas.addEventListener("dblclick", (e) => {
     if (!playable() || mode !== "move") return;
     const p = point(e),
-      unit = friendUnits()
-        .filter((u) => Art.hitUnit(u, p, state.time))
-        .sort((a, b) => distance(a, p) - distance(b, p))[0];
+      unit = unitAt(p);
     if (!unit) return;
     for (const other of friendUnits())
       if (other.type === unit.type && onScreen(other, 0))
@@ -11388,10 +11790,10 @@
         }
         rebuildNavigation();
         rebuildSpatial();
-        fog.update(state.units, state.buildings);
-        enemyFog.update(state.units, state.buildings);
+        fog.update(state.units, state.buildings, siegeShots());
+        enemyFog.update(state.units, state.buildings, siegeShots());
         militiaFog ||= new window.CruciataFog(W, H, null, 3);
-        militiaFog.update(state.units, state.buildings);
+        militiaFog.update(state.units, state.buildings, siegeShots());
         updateUI();
       }
     },
@@ -11426,6 +11828,10 @@
             formationRoutes,
             combatAI,
             decorations: () => decorations,
+            clusterOf,
+            renderStats,
+            motionVisible,
+            unitTree: () => unitTree,
           }
         : null,
   };

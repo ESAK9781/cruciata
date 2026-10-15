@@ -101,7 +101,7 @@ test("right-click sends villagers to an unfinished wall section and to a tree", 
     const u = cruciata.internals().state.units.find((u) => u.id === id);
     return { x: u.x, y: u.y };
   }, setup.id);
-  const w = await screenOf(page, worker.x, worker.y);
+  const w = await screenOf(page, worker.x, worker.y - 14);
   await page.mouse.click(w.x, w.y);
   expect(await page.evaluate(() => cruciata.snapshot().selected)).toContain(
     setup.id,
