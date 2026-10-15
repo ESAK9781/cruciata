@@ -545,6 +545,7 @@
     middleDrag = null,
     lastTime = 0,
     accumulator = 0,
+    liveSim = false,
     uiClock = 0,
     fog,
     enemyFog,
@@ -4036,6 +4037,22 @@
       u.marchGoal = null;
     }
   }
+  // While a budgeted route is computing, head straight for the goal when the
+  // first stretch is clear so orders feel instant instead of stalling.
+  function provisionalPath(u, p) {
+    const d = distance(u, p);
+    if (d < 1) return false;
+    const reach = Math.min(d, 90),
+      probe = {
+        x: u.x + ((p.x - u.x) / d) * reach,
+        y: u.y + ((p.y - u.y) / d) * reach,
+      };
+    if (!nav.clearLine(u, probe)) return false;
+    u.path = [reach >= d ? { x: p.x, y: p.y } : probe];
+    u.pathGoal = p;
+    u.pathRevision = -1;
+    return true;
+  }
   function moveUnit(u, destination, dt, stop = 6) {
     if (!groundFree(u.x, u.y, 6)) {
       const exit = findFree(u);
@@ -4062,6 +4079,7 @@
       : 14;
     const reachDist = Math.max(20, unitR * 1.15);
 
+    let waitingForRoute = false;
     const company = formationRoutes.get(u.order?.formation);
     const shared =
       company?.sharedRoute &&
@@ -4069,54 +4087,62 @@
       distance(destination, u.order) < 1;
     if (shared && distToGoal >= 220) {
       if (!company.routeReady || !company.path.length) {
-        u.moving = false;
-        return false;
-      }
-      if (
-        u.sharedRouteRevision !== company.revision ||
-        !u.path?.length ||
-        !u.pathGoal ||
-        distance(u.pathGoal, p) > 24
-      ) {
-        // The first point is the company origin; join the nearest visible route entry.
-        let entry = 0;
-        while (
-          entry + 1 < company.path.length &&
-          nav.clearLine(u, company.path[entry + 1])
-        )
-          entry++;
-        const route = company.path.slice(entry);
-        if (route.length && !nav.clearLine(u, route[0])) {
-          if (
-            !u.pathRequest ||
-            u.pathRequest.revision !== company.revision ||
-            distance(u.pathRequest.goal, route[0]) > 1
-          )
-            u.pathRequest = {
-              start: { x: u.x, y: u.y },
-              goal: route[0],
-              revision: company.revision,
-            };
-          const connector = nav.query(u.pathRequest.start, u.pathRequest.goal, {
-            priority: u.team === 0 ? 2 : 0,
-            owner: "unit:" + u.id,
-          });
-          if (connector === null) {
-            u.moving = false;
-            return false;
-          }
-          if (!connector.length) {
-            u.moving = false;
-            return false;
-          }
-          route.unshift(...connector.slice(0, -1));
+        if (!provisionalPath(u, p)) {
+          u.moving = false;
+          return false;
         }
-        u.path = [...route, p];
-        u.pathGoal = p;
-        u.pathRevision = company.revision;
-        u.sharedRouteRevision = company.revision;
-        u.pathRequest = null;
-        u.stuck = 0;
+        waitingForRoute = true;
+      } else {
+        if (
+          u.sharedRouteRevision !== company.revision ||
+          !u.path?.length ||
+          !u.pathGoal ||
+          distance(u.pathGoal, p) > 24
+        ) {
+          // The first point is the company origin; join the nearest visible route entry.
+          let entry = 0;
+          while (
+            entry + 1 < company.path.length &&
+            nav.clearLine(u, company.path[entry + 1])
+          )
+            entry++;
+          const route = company.path.slice(entry);
+          if (route.length && !nav.clearLine(u, route[0])) {
+            if (
+              !u.pathRequest ||
+              u.pathRequest.revision !== company.revision ||
+              distance(u.pathRequest.goal, route[0]) > 1
+            )
+              u.pathRequest = {
+                start: { x: u.x, y: u.y },
+                goal: route[0],
+                revision: company.revision,
+              };
+            const connector = nav.query(
+              u.pathRequest.start,
+              u.pathRequest.goal,
+              {
+                priority: u.team === 0 ? 2 : 0,
+                owner: "unit:" + u.id,
+              },
+            );
+            if (connector === null) {
+              u.moving = false;
+              return false;
+            }
+            if (!connector.length) {
+              u.moving = false;
+              return false;
+            }
+            route.unshift(...connector.slice(0, -1));
+          }
+          u.path = [...route, p];
+          u.pathGoal = p;
+          u.pathRevision = company.revision;
+          u.sharedRouteRevision = company.revision;
+          u.pathRequest = null;
+          u.stuck = 0;
+        }
       }
     }
     // Direct line-of-sight shortcuts directly to destination
@@ -4136,7 +4162,7 @@
     const needsNewPath =
       !hasValidPath || !sameGoal || !sameRevision || (!notStuck && !shared);
 
-    if (needsNewPath) {
+    if (needsNewPath && !waitingForRoute) {
       if (
         !u.pathRequest ||
         u.pathRequest.revision !== nav.revision ||
@@ -4153,7 +4179,10 @@
       });
       if (path === null) {
         // Keep valid existing route while replacement is being computed
-        if (u.pathRevision !== nav.revision || !u.path?.length) {
+        if (
+          (u.pathRevision !== nav.revision || !u.path?.length) &&
+          !provisionalPath(u, p)
+        ) {
           u.moving = false;
           return false;
         }
@@ -8281,7 +8310,7 @@
       finish(false);
       return;
     }
-    if (TEST) nav.process(Infinity, 32);
+    if (TEST && !liveSim) nav.process(Infinity, 32);
     if (objectiveState().won) finish(true);
     if (state.saveTimer <= 0) {
       state.saveTimer = 20;
@@ -10227,7 +10256,7 @@
       if (!TEST) update(STEP * (DEBUG_MODE ? state.cheats?.speed || 1 : 1));
       accumulator -= STEP;
     }
-    if (!TEST && playable()) nav.process(3);
+    if (!TEST && playable()) nav.process(nav.urgent() ? 6 : 3);
     uiClock += dt;
     if (uiClock > 0.2) {
       uiClock = 0;
@@ -10450,7 +10479,22 @@
           objective: objectiveState(),
         }),
       ),
+    // Emulates production frames (budgeted navigation) for responsiveness tests.
+    liveFrame: (frames = 1, dt = STEP) => {
+      if (!TEST) return null;
+      liveSim = true;
+      const costs = [];
+      for (let i = 0; i < frames; i++) {
+        const t = performance.now();
+        update(dt);
+        nav.process(nav.urgent() ? 6 : 3);
+        costs.push(performance.now() - t);
+      }
+      updateUI();
+      return costs;
+    },
     step: (seconds) => {
+      liveSim = false;
       if (TEST)
         for (let i = 0; i < Math.ceil(seconds / STEP); i++) update(STEP);
       updateUI();

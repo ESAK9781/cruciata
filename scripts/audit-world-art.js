@@ -31,7 +31,9 @@ const { chromium } = require("@playwright/test"),
         node: s.nodes[0],
       };
     });
+    const filter = process.argv[2] ? new RegExp(process.argv[2]) : null;
     const capture = async (name, scene) => {
+      if (filter && !filter.test(name)) return;
       await page.evaluate((scene) => {
         document.body.classList.add("art-audit-stage");
         const { unit, building, node } = window.auditTemplates;

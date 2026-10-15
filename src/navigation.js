@@ -629,6 +629,12 @@
         this.jobs.sort((a, b) => (b.priority || 0) - (a.priority || 0));
       return null;
     }
+    // True while a player-priority route is waiting, so frames may spend more time.
+    urgent() {
+      if (this.activeJob && (this.activeJob.priority || 0) > 0) return true;
+      for (const job of this.jobs) if ((job.priority || 0) > 0) return true;
+      return false;
+    }
     process(budget = 3, workLimit = Infinity) {
       const deadline = performance.now() + budget;
       let work = 0;

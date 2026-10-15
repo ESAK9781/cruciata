@@ -372,99 +372,210 @@
       m.dome(x, y, height + 9, w * 0.38, 9, "#6c9580");
     }
   }
+  // Curtains are true projected prisms in world units (arms are world offsets to
+  // the seam shared with each neighbour), so every heading lines up with the
+  // collision footprint and with adjoining segments, towers and gates.
+  function curtainLayout(b) {
+    const fort = !!b.fortified,
+      hw = fort ? 24 : 15,
+      arms = Object.entries(b.links || {}).map(([key, p]) => {
+        if (Math.hypot(p.x, p.y) >= 1) return { x: p.x, y: p.y };
+        // A zero arm abuts a gatehouse: run the curtain flush to that seam.
+        const dx = (key.includes("e") ? 1 : 0) - (key.includes("w") ? 1 : 0),
+          dy = (key.includes("s") ? 1 : 0) - (key.includes("n") ? 1 : 0),
+          n = Math.hypot(dx, dy) || 1;
+        return { x: (dx / n) * 16, y: (dy / n) * 16 };
+      }),
+      real = arms.filter((p) => Math.hypot(p.x, p.y) >= 1),
+      angle = Number.isFinite(b.wallAngle) ? b.wallAngle : 0;
+    if (real.length === 1 && arms.length === 1)
+      real.push({ x: -real[0].x, y: -real[0].y });
+    if (!real.length)
+      real.push(
+        { x: Math.cos(angle) * 16, y: Math.sin(angle) * 16 },
+        { x: -Math.cos(angle) * 16, y: -Math.sin(angle) * 16 },
+      );
+    const pieces = real.map((a) => {
+      const length = Math.hypot(a.x, a.y);
+      return { x: a.x, y: a.y, length, ux: a.x / length, uy: a.y / length };
+    });
+    // Pieces that meet others at an angle reach back to square the outer corner.
+    for (const piece of pieces)
+      piece.back = pieces.some(
+        (o) =>
+          o !== piece &&
+          Math.abs(piece.ux * o.uy - piece.uy * o.ux) > 0.2 &&
+          piece.ux * o.ux + piece.uy * o.uy > -0.97,
+      )
+        ? hw
+        : 0;
+    return { fort, hw, height: fort ? 38 : 27, pieces };
+  }
   function wall(g, b) {
-    const arms = Object.values(b.links || {}),
-      key = `curtain:${!!b.fortified}:${b.wallAngle || 0}:${arms
-        .map((p) => p.x + "," + p.y)
+    const { hw, height, pieces } = curtainLayout(b),
+      reach = Math.max(hw * 2, ...pieces.map((p) => p.length + hw)) + 10,
+      key = `curtain2:${!!b.fortified}:${pieces
+        .map((p) => p.x.toFixed(1) + "," + p.y.toFixed(1))
         .sort()
         .join(";")}`,
-      rx = Math.max(20, ...arms.map((p) => Math.abs(p.x))) + 35,
-      ry = Math.max(20, ...arms.map((p) => Math.abs(p.y))) + 35;
-    sprite(g, key, rx * 2, ry * 2 + 60, rx, ry + 60, (q) => wallModel(q, b));
+      ground = reach * 0.72,
+      oy = ground + height + 16;
+    sprite(g, key, reach * 2, oy + ground + 8, reach, oy, (q) =>
+      wallModel(q, b),
+    );
   }
   function wallModel(g, b) {
-    const arms = Object.values(b.links || {}).map((p) => ({ ...p })),
-      width = b.fortified ? 48 : 30,
-      height = b.fortified ? 38 : 27;
-    if (arms.length === 1) arms.push({ x: -arms[0].x, y: -arms[0].y });
-    if (!arms.length) {
-      const a = b.wallAngle || 0;
-      arms.push(
-        { x: Math.cos(a) * 16, y: Math.sin(a) * 16 },
-        { x: -Math.cos(a) * 16, y: -Math.sin(a) * 16 },
-      );
-    }
-    const stone = b.fortified ? P.bastion : P.stone;
-    const spans =
-      arms.length === 2
-        ? [
-            [
-              [arms[0].x, arms[0].y],
-              [0, 0],
-              [arms[1].x, arms[1].y],
-            ],
-          ]
-        : arms.map((a) => [
-            [0, 0],
-            [a.x, a.y],
-          ]);
-    // The vertical curtain is swept continuously, including corner joins.
-    g.lineCap = "butt";
-    g.lineJoin = "bevel";
-    function band(points, w, c) {
-      g.beginPath();
-      points.forEach(([x, y], i) => (i ? g.lineTo(x, y) : g.moveTo(x, y)));
-      g.strokeStyle = c;
-      g.lineWidth = w;
-      g.stroke();
-    }
-    for (let z = 0; z <= height; z += 2)
-      for (const s of spans)
-        band(
-          s.map(([x, y]) => [x, y - z]),
-          width,
-          shade(stone, 0.69),
-        );
-    for (const s of spans) {
-      band(
-        s.map(([x, y]) => [x, y - height]),
-        width,
-        shade(stone, 1.08),
-      );
-      band(
-        s.map(([x, y]) => [x, y - height]),
-        width - 12,
-        shade(stone, 0.78),
-      );
-    }
-    const m = model(g);
-    for (const arm of arms) {
-      const length = Math.hypot(arm.x, arm.y);
-      const dx = length ? arm.x / length : Math.cos(b.wallAngle || 0),
-        dy = length ? arm.y / length : Math.sin(b.wallAngle || 0);
-      for (let d = 5; d < Math.max(12, length); d += 12)
-        for (const sign of [-1, 1]) {
-          const x = dx * d - dy * sign * (width / 2 - 3),
-            y = dy * d + dx * sign * (width / 2 - 3);
-          m.box(x, y / 0.72, height, 6, 7, 6, stone);
-        }
-      for (let z = 7; z < height; z += 8) {
-        const side = dx >= 0 ? 1 : -1;
-        const x = (-dy * side * width) / 2,
-          y = (dx * side * width) / 2;
-        m.stroke(
+    const { fort, hw, height, pieces } = curtainLayout(b),
+      stone = fort ? P.bastion : P.stone,
+      m = model(g);
+    const rect = (piece, from, to, half) => {
+      const nx = -piece.uy,
+        ny = piece.ux,
+        at = (t, o) => [piece.ux * t + nx * o, piece.uy * t + ny * o];
+      return [at(from, -half), at(to, -half), at(to, half), at(from, half)];
+    };
+    const prism = (poly, z, h, color, lit = null) => {
+      const area = poly.reduce((s, p, i) => {
+        const q = poly[(i + 1) % poly.length];
+        return s + p[0] * q[1] - q[0] * p[1];
+      }, 0);
+      const ring = area < 0 ? [...poly].reverse() : poly;
+      for (let i = 0; i < ring.length; i++) {
+        const j = (i + 1) % ring.length;
+        m.face(
           [
-            [x, y / 0.72, z],
-            [arm.x + x, (arm.y + y) / 0.72, z],
+            [ring[i][0], ring[i][1], z],
+            [ring[j][0], ring[j][1], z],
+            [ring[j][0], ring[j][1], z + h],
+            [ring[i][0], ring[i][1], z + h],
           ],
-          0.7,
-          shade(stone, 0.5),
+          color,
+          false,
+          lit,
+          true,
         );
       }
+      m.face(
+        ring.map((p) => [p[0], p[1], z + h]),
+        color,
+        false,
+        lit,
+        true,
+      );
+    };
+    // Local test: is a point inside another piece's solid body?
+    const covered = (self, x, y, margin) =>
+      pieces.some((o) => {
+        if (o === self) return false;
+        const nx = -o.uy,
+          ny = o.ux,
+          t = x * o.ux + y * o.uy,
+          d = x * nx + y * ny;
+        return (
+          t > -o.back + margin &&
+          t < o.length - margin &&
+          Math.abs(d) < hw - margin
+        );
+      });
+    const runs = (piece, offset, step = 1.5) => {
+      const out = [];
+      let start = null;
+      for (let t = -piece.back; t <= piece.length + 0.01; t += step) {
+        const nx = -piece.uy * offset,
+          ny = piece.ux * offset,
+          open = !covered(piece, piece.ux * t + nx, piece.uy * t + ny, 1);
+        if (open && start === null) start = t;
+        if ((!open || t + step > piece.length + 0.01) && start !== null) {
+          out.push([start, open ? t : t - step]);
+          start = null;
+        }
+      }
+      return out.filter(([a, c]) => c - a > 2);
+    };
+    // Stepped plinth, curtain body and walkway.
+    for (const piece of pieces) {
+      prism(
+        rect(piece, -piece.back, piece.length, hw + 1.5),
+        0,
+        3,
+        shade(stone, 0.8),
+      );
     }
-    // A zero-length gate abutment still needs a solid square curtain end.
-    if (arms.some((a) => Math.hypot(a.x, a.y) < 1))
-      m.box(0, 0, 0, 32, width / 0.72, height, stone);
+    for (const piece of pieces)
+      prism(rect(piece, -piece.back, piece.length, hw), 2, height - 2, stone);
+    for (const piece of pieces) {
+      m.face(
+        rect(piece, -piece.back, piece.length, hw - 5).map(([x, y]) => [
+          x,
+          y,
+          height + 0.35,
+        ]),
+        shade(stone, 0.82),
+        false,
+        1,
+      );
+    }
+    // Parapet lips and merlons only where another curtain does not cross them.
+    for (const piece of pieces)
+      for (const side of [-1, 1]) {
+        const offset = side * (hw - 2);
+        for (const [a, c] of runs(piece, offset)) {
+          prism(lipRect(piece, a, c, offset), height, 2.2, shade(stone, 1.05));
+          for (let t = a + 3; t < c - 4; t += 11)
+            prism(lipRect(piece, t, t + 6.5, offset, 2.6), height, 7, stone);
+        }
+      }
+    function lipRect(piece, from, to, offset, half = 1.5) {
+      const nx = -piece.uy,
+        ny = piece.ux;
+      return [
+        [
+          piece.ux * from + nx * (offset - half),
+          piece.uy * from + ny * (offset - half),
+        ],
+        [
+          piece.ux * to + nx * (offset - half),
+          piece.uy * to + ny * (offset - half),
+        ],
+        [
+          piece.ux * to + nx * (offset + half),
+          piece.uy * to + ny * (offset + half),
+        ],
+        [
+          piece.ux * from + nx * (offset + half),
+          piece.uy * from + ny * (offset + half),
+        ],
+      ];
+    }
+    // Mortar courses and block joints on the faces the camera can see.
+    for (const piece of pieces)
+      for (const side of [-1, 1]) {
+        const outward = side * piece.ux;
+        if (outward <= 0.05) continue;
+        const offset = side * (hw + 0.2);
+        for (const [a, c] of runs(piece, side * hw, 3))
+          for (let z = 8, row = 0; z < height; z += 8, row++) {
+            const nx = -piece.uy * offset,
+              ny = piece.ux * offset;
+            m.stroke(
+              [
+                [piece.ux * a + nx, piece.uy * a + ny, z],
+                [piece.ux * c + nx, piece.uy * c + ny, z],
+              ],
+              0.6,
+              shade(stone, 0.55),
+            );
+            for (let t = a + 4 + (row % 2) * 7; t < c - 1; t += 14)
+              m.stroke(
+                [
+                  [piece.ux * t + nx, piece.uy * t + ny, z - 7],
+                  [piece.ux * t + nx, piece.uy * t + ny, z],
+                ],
+                0.55,
+                shade(stone, 0.62),
+              );
+          }
+      }
     m.paint();
   }
   function buildingCamera(g, b, rise = 1) {
