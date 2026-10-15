@@ -64,8 +64,7 @@ test("building and mixed groups append selections, survive saves, and ignore los
   expect(
     await page.evaluate(() => cruciata.snapshot().selectedBuildings),
   ).toEqual([95001, 95002]);
-  // Training rotates among the selected producers, one operation per click.
-  await page.locator("#recruit-sword").click();
+  // One click trains one unit at each selected producer.
   await page.locator("#recruit-sword").click();
   expect(
     await page.evaluate(() =>

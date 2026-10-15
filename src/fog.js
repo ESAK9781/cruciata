@@ -51,7 +51,7 @@
         }));
       for (const shot of projectiles)
         if (shot.team === this.team && !shot.hit)
-          sources.push({ x: shot.x, y: shot.y, vision: 440 });
+          sources.push({ x: shot.x, y: shot.y, vision: shot.vision ?? 440 });
       // Sites the rules reveal to this side (the enemy's Colossus).
       for (const r of reveals) sources.push(r);
       for (const b of buildings)

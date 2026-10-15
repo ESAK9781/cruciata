@@ -126,7 +126,7 @@ test("hotbar follows selected unit and building capabilities", async ({
   ).toHaveCount(0);
 });
 
-test("multi-building training and demolition perform one action per click", async ({
+test("multi-building training queues one per building and demolition acts once per click", async ({
   page,
 }) => {
   await begin(page);
@@ -159,14 +159,6 @@ test("multi-building training and demolition perform one action per click", asyn
   );
   await page.locator("#recruit-sword").click();
   let queues = await page.evaluate(() =>
-    cruciata
-      .snapshot()
-      .buildings.filter((b) => b.id >= 99920)
-      .map((b) => b.queue.length),
-  );
-  expect(queues).toEqual([1, 0]);
-  await page.locator("#recruit-sword").click();
-  queues = await page.evaluate(() =>
     cruciata
       .snapshot()
       .buildings.filter((b) => b.id >= 99920)
@@ -220,7 +212,14 @@ test("mixed producers combine training and rotate past full queues", async ({
   await expect(page.locator("#recruit-sword")).toBeVisible();
   await expect(page.locator("#recruit-knight")).toBeVisible();
   await page.locator("#recruit-sword").click();
-  await page.locator("#recruit-sword").click();
+  expect(
+    await page.evaluate(() =>
+      cruciata
+        .snapshot()
+        .buildings.filter((b) => b.id >= 99820 && b.id <= 99823)
+        .map((b) => b.queue.length),
+    ),
+  ).toEqual([1, 1, 1, 0]);
   await page.evaluate(() =>
     cruciata.scenario((s) => {
       const b = s.buildings.find((b) => b.id === 99821);
@@ -241,7 +240,7 @@ test("mixed producers combine training and rotate past full queues", async ({
         .buildings.filter((b) => b.id >= 99820 && b.id <= 99823)
         .map((b) => b.queue.length),
     ),
-  ).toEqual([1, 8, 1, 0]);
+  ).toEqual([2, 8, 2, 0]);
   await page.locator("#recruit-knight").click();
   expect(
     await page.evaluate(

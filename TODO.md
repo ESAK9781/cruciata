@@ -95,3 +95,13 @@ Verification: all 20 campaign-scale checks passed in Chromium and Firefox. Twelv
 - [x] Both sides are warned and shown the site (toast, horn, banner, minimap marker, world beacon, fog reveal) from the moment it is begun.
 - [x] Crew UI (Man engine / Release crew, crew counter, build-card rules), scatter circle while targeting, AI build/crew/bombard.
 - [x] `tests/colossus.spec.js`; full Chromium suite and docs.
+
+# Colossus polish, construction sites and command tooltips
+
+- [x] Click picking: trees use silhouette boxes (no atlas pixel read), a resource only beats a structure when drawn in front of it, and large structures score by footprint, so the Colossus and trees select with a plain click.
+- [x] Colossus: scatter halved (`20 + 0.045 d`), 700-unit minimum range (order refused, ring drawn, AI skips closer targets), darker bastion-stone/dark-timber palette, gilded bands, braziers, struts and pennants.
+- [x] Construction: finished art is revealed course by course behind a scaffold with deck, ladder, hoist, material piles and dust (all buildings, walls, gates, engines).
+- [x] Training with several producers selected queues one unit at each; the card shows a x-N badge and tooltip.
+- [x] Costs and descriptions live in one hover tooltip; selection text auto-fits its panel.
+- [x] `tests/selection-sites.spec.js`, updated colossus/group/revision/control-group specs.
+

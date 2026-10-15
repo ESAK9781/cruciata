@@ -316,7 +316,7 @@
       "Massive permanent counterweight engine. Villagers build it on site. Range 320-2200; huge blasts also hit nearby friendly troops.",
   };
   // The Colossus: an enormous permanent engine that reaches anywhere on the
-  // map. Only one per side; it fires only where ordered and needs a crew.
+  // map. Only one per side; it fires only where ordered.
   BUILDINGS.colossus = {
     name: "Colossal siege engine",
     cost: { wood: 6000, stone: 3500, gold: 2500 },
@@ -326,9 +326,8 @@
     time: 2400,
     damage: 650,
     reload: 18,
-    crew: 5,
     description:
-      "Only one per side. Unlimited range: shots scatter further the farther they fly. Never fires on its own and needs 5 villagers working its winches. The enemy is told the moment it is begun.",
+      "Only one per side. Unlimited range beyond a 700-unit minimum: shots scatter further the farther they fly. Never fires on its own. The enemy is told the moment it is begun.",
   };
   for (const [key, b] of Object.entries(BUILDINGS)) {
     if (!["wall", "gate", "bastionwall"].includes(key)) {
@@ -3629,9 +3628,19 @@
     );
   }
   // Boulders and ballista bolts in flight grant their side ordinary sight.
+  const SHOT_SIGHT_HOLD = 3,
+    SHOT_SIGHT_FADE = 5;
   function siegeShots() {
     const shots = [...(state.boulders || [])];
     for (const a of state.arrows || []) if (a.siege) shots.push(a);
+    for (const w of state.shotSights || [])
+      shots.push({
+        x: w.x,
+        y: w.y,
+        team: w.team,
+        vision:
+          440 * clamp(1 - (w.t - SHOT_SIGHT_HOLD) / SHOT_SIGHT_FADE, 0, 1),
+      });
     return shots;
   }
   function rebuildSpatial() {
@@ -4778,7 +4787,8 @@
         u.y = ny;
       }
       u.moving = true;
-      if (visualActive(u) && motionVisible()) u.anim += dt * 10;
+      if (visualActive(u) && (motionVisible() || SIEGE_UNITS.has(u.type)))
+        u.anim += dt * 10;
       u.stuck = 0;
       if (
         u.path[0] &&
@@ -4841,40 +4851,71 @@
       completeBuildings(kind).sort((a, b) => a.queue.length - b.queue.length)[0]
     );
   }
+  // Every completed, non-full structure of the right kind in the selection
+  // trains the unit (one each); with nothing selected the quietest one does.
+  function trainers(type) {
+    const t = TYPES[type];
+    if (selectedStructures().length)
+      return selectedStructures(
+        (b) => b.kind === t.producer && b.progress >= 1 && b.queue.length < 8,
+      );
+    const b = completeBuildings(t.producer).sort(
+      (a, c) => a.queue.length - c.queue.length,
+    )[0];
+    return b && b.queue.length < 8 ? [b] : [];
+  }
   function recruit(type, assignedProducer = null) {
     if (!playable()) return false;
     const t = TYPES[type],
-      b = assignedProducer || producerFor(type),
-      pop = population();
-    if (!b) {
+      targets = assignedProducer ? [assignedProducer] : trainers(type);
+    if (!targets.length) {
       toast(
-        `Build a ${BUILDINGS[t.producer].name.toLowerCase()} to train ${t.name.toLowerCase()}s.`,
+        selectedStructures((b) => b.kind === t.producer && b.progress >= 1)
+          .length
+          ? "This structure already has a full training queue."
+          : `Build a ${BUILDINGS[t.producer].name.toLowerCase()} to train ${t.name.toLowerCase()}s.`,
       );
       return false;
     }
-    if (!afford(t.cost)) {
-      toast("Your storehouses do not have enough resources.");
+    let made = 0,
+      reason = "";
+    for (const b of targets) {
+      const pop = population();
+      if (!afford(t.cost)) {
+        reason = "Your storehouses do not have enough resources.";
+        break;
+      }
+      if (pop.used + pop.queued >= pop.cap) {
+        reason = "Build a house to expand your population capacity.";
+        break;
+      }
+      if (b.queue.length >= 8) {
+        reason = "This structure already has a full training queue.";
+        continue;
+      }
+      pay(t.cost);
+      actionTurns.set("train:" + type, b.id);
+      b.queue.push({
+        kind: "unit",
+        type,
+        time: 0,
+        duration: t.train,
+        cost: { ...t.cost },
+      });
+      made++;
+    }
+    if (!made) {
+      toast(reason);
       return false;
     }
-    if (pop.used + pop.queued >= pop.cap) {
-      toast("Build a house to expand your population capacity.");
-      return false;
-    }
-    if (b.queue.length >= 8) {
-      toast("This structure already has a full training queue.");
-      return false;
-    }
-    pay(t.cost);
-    actionTurns.set("train:" + type, b.id);
-    b.queue.push({
-      kind: "unit",
-      type,
-      time: 0,
-      duration: t.train,
-      cost: { ...t.cost },
-    });
     sound("recruit");
-    toast(`${t.name} training at the ${BUILDINGS[b.kind].name.toLowerCase()}.`);
+    const name = BUILDINGS[targets[0].kind].name.toLowerCase();
+    toast(
+      made > 1
+        ? `${t.name} training: one queued at each of ${made} selected structures.` +
+            (made < targets.length ? ` ${reason}` : "")
+        : `${t.name} training at the ${name}.`,
+    );
     updateUI();
     return true;
   }
@@ -5425,8 +5466,11 @@
   }
   // Radius of the disc a shot may land in: accuracy falls with distance.
   function colossusScatter(d) {
-    return 40 + d * 0.09;
+    return 20 + d * 0.045;
   }
+  // Nothing closer than this can be targeted: the 230-unit blast would reach
+  // the engine itself and the ground around it.
+  const COLOSSUS_MIN_RANGE = 700;
   function colossusImpact(b, target) {
     const d = distance(b, target),
       radius = colossusScatter(d),
@@ -5454,20 +5498,6 @@
       );
   }
   function colossusTick(b, dt) {
-    const need = BUILDINGS.colossus.crew;
-    let crew = 0;
-    for (const u of state.units)
-      if (
-        u.hp > 0 &&
-        u.team === b.team &&
-        u.working &&
-        u.job?.kind === "crew" &&
-        u.job.target === b.id
-      )
-        crew++;
-    b.crew = crew;
-    // Without a full crew the winches stand idle and the reload stops.
-    if (crew < need) return;
     b.guardCooldown = Math.max(0, (b.guardCooldown ?? 0) - dt);
     let target = b.fireTarget;
     if (b.attackTarget) {
@@ -5482,6 +5512,8 @@
       else target = locked;
     }
     if (!target) return;
+    // A target that has come inside the minimum range is never fired upon.
+    if (distance(b, target) < COLOSSUS_MIN_RANGE) return;
     const aim = Math.atan2(target.y - b.y, target.x - b.x);
     b.aimAngle ??= -Math.PI / 2;
     const delta = Math.atan2(
@@ -5501,6 +5533,7 @@
       tx: hit.x,
       ty: hit.y,
       sx: b.x,
+      lift: 300,
       sy: b.y,
       t: 0,
       duration: 3.6 + distance(b, hit) / 1500,
@@ -5510,56 +5543,6 @@
       damage: BUILDINGS.colossus.damage,
       r: 230,
     });
-  }
-  // Sends the nearest villagers to the winches of the selected Colossus.
-  function manColossus() {
-    if (!playable()) return;
-    const engine = selectedStructures(
-      (b) => b.kind === "colossus" && b.progress >= 1,
-    )[0];
-    if (!engine) return;
-    const need = BUILDINGS.colossus.crew,
-      crewing = (u) => u.job?.kind === "crew" && u.job.target === engine.id,
-      have = workers().filter(crewing).length;
-    if (have >= need) {
-      toast(`The Colossus already has its crew of ${need}.`);
-      return;
-    }
-    const pool = workers()
-      .filter((u) => !crewing(u) && !u.autoScout)
-      .sort(
-        (a, c) =>
-          (a.job ? 1 : 0) * 600 +
-          distance(a, engine) -
-          ((c.job ? 1 : 0) * 600 + distance(c, engine)),
-      )
-      .slice(0, need - have);
-    for (const u of pool) {
-      u.job = { kind: "crew", target: engine.id };
-      u.order = null;
-      u.pathTimer = 0;
-      u.hold = false;
-    }
-    toast(
-      pool.length + have >= need
-        ? `${pool.length} villagers sent to man the Colossus.`
-        : `Only ${pool.length + have} villagers are available; the Colossus needs ${need}.`,
-    );
-    updateUI();
-  }
-  function releaseColossusCrew() {
-    if (!playable()) return;
-    const ids = new Set(
-      selectedStructures((b) => b.kind === "colossus").map((b) => b.id),
-    );
-    let n = 0;
-    for (const u of workers())
-      if (u.job?.kind === "crew" && ids.has(u.job.target)) {
-        u.job = null;
-        n++;
-      }
-    toast(n ? "Colossus crew released to other work." : "No crew to release.");
-    updateUI();
   }
   function cancelSiegeTargeting() {
     if (!playable()) return;
@@ -5700,7 +5683,9 @@
         : undefined;
       if (lift === undefined && !Art.hitStructure(b, p, margin)) continue;
       const value =
-        (wallish ? surfaceDistance(p, b) : distance(b, p) * 0.5) +
+        (wallish
+          ? surfaceDistance(p, b)
+          : distance(b, p) * 0.5 * Math.min(1, 60 / Math.max(60, b.w / 2))) +
         (b.progress < 1 ? -40 : 0);
       if (value < score) {
         score = value;
@@ -5769,13 +5754,17 @@
     for (const engine of colossi) {
       const hit = enemy || p,
         scatter = Math.round(colossusScatter(distance(engine, hit)));
+      if (distance(engine, hit) < COLOSSUS_MIN_RANGE) {
+        toast(
+          `Too close: the Colossus cannot fire within ${COLOSSUS_MIN_RANGE} units of itself.`,
+        );
+        continue;
+      }
       engine.attackTarget = enemy?.id || null;
       engine.fireTarget = enemy ? null : { x: p.x, y: p.y };
       sound("attack", engine);
       toast(
-        (engine.crew || 0) >= BUILDINGS.colossus.crew
-          ? `Colossus ordered to bombard this target. Shots land within ${scatter} units and repeat every ${BUILDINGS.colossus.reload}s until cancelled.`
-          : `Colossus target set (scatter ${scatter}), but only ${engine.crew || 0} of ${BUILDINGS.colossus.crew} crew are at the winches. Right-click the engine with villagers to man it.`,
+        `Colossus ordered to bombard this target. Shots land within ${scatter} units and repeat every ${BUILDINGS.colossus.reload}s until cancelled.`,
       );
     }
     if (!units.length) {
@@ -5788,6 +5777,8 @@
           Object.values(TYPES).some((t) => t.producer === b.kind),
       );
       for (const b of producers) b.rally = findFree(p);
+      // The Colossus has already announced its own order (or refusal).
+      if (colossi.length && !producers.length) return;
       toast(
         producers.length
           ? "New troops from selected training buildings will rally here."
@@ -6010,14 +6001,6 @@
             surfaceDistance(p, work))
       ) {
         assignGather(u, node.kind === "farm" ? "food" : node.kind, node);
-      } else if (
-        building?.team === 0 &&
-        building.kind === "colossus" &&
-        building.progress >= 1
-      ) {
-        u.job = { kind: "crew", target: building.id };
-        u.order = null;
-        u.pathTimer = 0;
       } else if (
         building?.team === 0 &&
         building.progress >= 1 &&
@@ -6294,11 +6277,16 @@
     }
     if (!u.job || u.hold) return;
     const job = u.job;
-    if (job.kind === "build" || job.kind === "repair" || job.kind === "crew") {
+    // Older saves may carry a retired Colossus crew job.
+    if (job.kind === "crew") {
+      u.job = null;
+      return;
+    }
+    if (job.kind === "build" || job.kind === "repair") {
       const b = state.buildings.find(
         (b) => b.id === job.target && b.hp > 0 && b.team === u.team,
       );
-      if (!b || (job.kind === "crew" && b.progress < 1)) {
+      if (!b) {
         u.job = null;
         return;
       }
@@ -6361,19 +6349,7 @@
               if (groundFree(p.x, p.y, 6)) candidates.push(p);
             }
           }
-          // Crew members take their own stations around the engine.
-          const station =
-              job.kind === "crew" ? (u.id * 2.399) % (Math.PI * 2) : null,
-            spread = (c) => {
-              const d = Math.abs(Math.atan2(c.y - b.y, c.x - b.x) - station),
-                m = d % (Math.PI * 2);
-              return Math.min(m, Math.PI * 2 - m);
-            };
-          candidates.sort((a, c) =>
-            station === null
-              ? distance(u, a) - distance(u, c)
-              : spread(a) - spread(c),
-          );
+          candidates.sort((a, c) => distance(u, a) - distance(u, c));
           const point = candidates.find((p) => routePossible(u, p));
           contact = u.buildContact = point
             ? {
@@ -6419,15 +6395,6 @@
           });
       }
       u.angle = Math.atan2(b.y - u.y, b.x - u.x);
-      if (job.kind === "crew") {
-        // Winding the winches also keeps the timbers in repair.
-        const repair = Math.min(6 * dt, b.maxHp - b.hp);
-        if (repair > 0 && stock(u.team).wood >= repair * 0.08) {
-          pay({ wood: repair * 0.08 }, 1, u.team);
-          b.hp += repair;
-        }
-        return;
-      }
       if (job.kind === "build") {
         if (b.progress >= 1) {
           constructionFinished(u, b);
@@ -6447,7 +6414,7 @@
               BUILDINGS[b.kind].name +
                 " is complete." +
                 (b.kind === "colossus"
-                  ? " Right-click it with 5 villagers to crew it, then right-click anywhere to fire."
+                  ? " Select it, then right-click anywhere to fire."
                   : ""),
             );
           else if (b.kind === "colossus") {
@@ -6569,7 +6536,8 @@
           u.x = p.x;
           u.y = p.y;
           u.moving = true;
-          if (visualActive(u) && motionVisible()) u.anim += dt * 10;
+          if (visualActive(u) && (motionVisible() || SIEGE_UNITS.has(u.type)))
+            u.anim += dt * 10;
           return;
         }
         if (farm || surfaceDistance(u, target) > 60) {
@@ -7082,6 +7050,7 @@
           tx: target.x,
           ty: target.y,
           sx: u.x,
+          lift: 75,
           sy: u.y,
           t: 0,
           duration: 2.1,
@@ -7815,18 +7784,14 @@
         }
       }
     }
-    // A rich enemy late in the game raises its own Colossus, crews it with five
-    // villagers and bombards the most valuable structure it knows.
+    // A rich enemy late in the game raises its own Colossus and bombards the
+    // most valuable structure it knows.
     function colossusAI() {
       const mine = colossusOf(1),
-        need = BUILDINGS.colossus.crew,
         idle = () =>
           ws.filter(
             (u) =>
-              u.job?.kind !== "crew" &&
-              u.job?.kind !== "build" &&
-              !u.order &&
-              u.stance !== "stand-down",
+              u.job?.kind !== "build" && !u.order && u.stance !== "stand-down",
           );
       if (!mine) {
         if (
@@ -7858,19 +7823,6 @@
           queueConstruction(idle().slice(0, 8 - crew), [mine.id], false);
         return;
       }
-      const crewing = ws.filter(
-        (u) => u.job?.kind === "crew" && u.job.target === mine.id,
-      ).length;
-      if (crewing < need)
-        for (const u of ws
-          .filter((u) => u.job?.kind !== "crew")
-          .sort((a, c) => distance(a, mine) - distance(c, mine))
-          .slice(0, need - crewing)) {
-          u.job = { kind: "crew", target: mine.id };
-          u.order = null;
-          u.pathTimer = 0;
-          u.hold = false;
-        }
       const current = getObject(mine.attackTarget);
       if (current && current.hp > 0) return;
       const value = (b) =>
@@ -7890,7 +7842,13 @@
         })[b.kind] ?? 20;
       const pick = known
         .map((k) => getObject(k.id))
-        .filter((b) => b && b.hp > 0 && b.team === 0)
+        .filter(
+          (b) =>
+            b &&
+            b.hp > 0 &&
+            b.team === 0 &&
+            distance(b, mine) >= COLOSSUS_MIN_RANGE,
+        )
         .sort(
           (a, c) =>
             value(c) - value(a) || distance(a, mine) - distance(c, mine),
@@ -9103,6 +9061,7 @@
                 tx: target.x,
                 ty: target.y,
                 sx: b.x,
+                lift: 150,
                 sy: b.y,
                 t: 0,
                 duration: 3.6 + distance(b, target) / 1500,
@@ -9278,7 +9237,8 @@
         py =
           stone.sy +
           (stone.ty - stone.sy) * flight -
-          Math.sin(flight * Math.PI) * (stone.heavy ? 340 : 150);
+          Math.sin(flight * Math.PI) * (stone.heavy ? 340 : 150) -
+          (stone.lift || 0) * (1 - flight);
       // The shot's ground track gives its side sight as it flies.
       stone.x = stone.sx + (stone.tx - stone.sx) * flight;
       stone.y = stone.sy + (stone.ty - stone.sy) * flight;
@@ -9297,6 +9257,13 @@
       });
       if (stone.t >= stone.duration && !stone.hit) {
         stone.hit = true;
+        // The landing site stays in sight for three seconds, then fades.
+        (state.shotSights ||= []).push({
+          x: stone.tx,
+          y: stone.ty,
+          team: stone.team,
+          t: 0,
+        });
         const source = { id: stone.source, team: stone.team };
         for (const target of [...state.units, ...state.buildings])
           if (target.hp > 0 && target.team !== 2) {
@@ -9395,6 +9362,12 @@
       }
     }
     state.boulders = state.boulders.filter((s) => !s.hit);
+    if (state.shotSights?.length) {
+      for (const w of state.shotSights) w.t += dt;
+      state.shotSights = state.shotSights.filter(
+        (w) => w.t < SHOT_SIGHT_HOLD + SHOT_SIGHT_FADE,
+      );
+    }
     mark("projectiles");
     captureCities(dt);
     mark("cities");
@@ -9555,12 +9528,110 @@
     ])
       $(list + "-list").classList.toggle("hidden", name !== value);
   }
+  // One floating tooltip serves every command card: name, the cost (red for
+  // anything the treasury cannot cover) and what the option does.
+  const tip = document.getElementById("tooltip");
+  // The selection column is fixed in height: shrink its text a little, then
+  // let it scroll, so nothing is ever clipped by the panel edge.
+  let fitSignature = "";
+  function fitSelectionText() {
+    const col = $("selection-title").parentElement,
+      panel = col.closest(".command-panel");
+    if (!panel) return;
+    const parts = [
+        "selection-title",
+        "selection-detail",
+        "selection-role",
+        "queue-detail",
+      ].map($),
+      signature =
+        parts.map((p) => p.textContent).join("|") +
+        panel.clientHeight +
+        "x" +
+        panel.clientWidth;
+    if (signature === fitSignature) return;
+    fitSignature = signature;
+    for (const p of parts) p.style.fontSize = "";
+    col.style.maxHeight = "";
+    const base = parts.map((p) => parseFloat(getComputedStyle(p).fontSize)),
+      room = Math.max(
+        60,
+        panel.getBoundingClientRect().bottom -
+          col.getBoundingClientRect().top -
+          8,
+      );
+    for (
+      let k = 1;
+      k >= 0.76 && col.getBoundingClientRect().height > room;
+      k -= 0.04
+    )
+      parts.forEach(
+        (p, i) => (p.style.fontSize = (base[i] * k).toFixed(2) + "px"),
+      );
+    col.style.maxHeight = room + "px";
+    col.style.overflowY = "auto";
+  }
+  function showTip(card) {
+    if (!tip || !card.isConnected) return;
+    tip.replaceChildren();
+    const multi = Number(card.dataset.multi || 1),
+      head = document.createElement("strong");
+    head.textContent = card.dataset.name;
+    tip.append(head);
+    const cost = card._cost;
+    if (cost && Object.keys(cost).length) {
+      const row = document.createElement("div");
+      row.className = "tip-cost";
+      for (const [r, n] of Object.entries(cost)) {
+        const total = n * multi,
+          part = document.createElement("span");
+        part.textContent = `${total} ${r}`;
+        if (stock(0)[r] < total) part.className = "short";
+        row.append(part);
+      }
+      if (multi > 1) {
+        const note = document.createElement("em");
+        note.textContent = ` (${multi} \u00d7 each)`;
+        row.append(note);
+      }
+      tip.append(row);
+    }
+    if (multi > 1) {
+      const line = document.createElement("div");
+      line.className = "tip-multi";
+      line.textContent = `Queues one at each of the ${multi} selected buildings that can train it.`;
+      tip.append(line);
+    }
+    if (card.dataset.tip) {
+      const text = document.createElement("p");
+      text.textContent = card.dataset.tip;
+      tip.append(text);
+    }
+    tip.hidden = false;
+    const r = card.getBoundingClientRect(),
+      w = tip.offsetWidth,
+      h = tip.offsetHeight;
+    tip.style.left =
+      Math.max(6, Math.min(innerWidth - w - 6, r.left + r.width / 2 - w / 2)) +
+      "px";
+    tip.style.top = (r.top - h - 8 < 6 ? r.bottom + 8 : r.top - h - 8) + "px";
+  }
+  function hideTip() {
+    if (tip) tip.hidden = true;
+  }
   function actionCard(id, name, cost, art, action, tooltip) {
     const b = document.createElement("button");
     b.id = id;
     b.className = "action-card";
-    b.title = tooltip || name;
+    b.dataset.tip = tooltip || "";
+    b.dataset.name = name;
+    b._cost = cost;
     b.addEventListener("click", action);
+    b.addEventListener("pointerenter", () => showTip(b));
+    b.addEventListener("pointerleave", hideTip);
+    b.addEventListener("focus", () => showTip(b));
+    b.addEventListener("blur", hideTip);
+    b.addEventListener("click", hideTip);
     const c = document.createElement("canvas");
     c.width = 90;
     c.height = 80;
@@ -9632,12 +9703,12 @@
       role.className = "role";
       role.textContent = ROLES[art.type].label;
       b.append(role);
-      b.title += " " + ROLES[art.type].description;
+      b.dataset.tip += " " + ROLES[art.type].description;
     }
     if (art.kind === "colossus") {
       const role = document.createElement("span");
       role.className = "role";
-      role.textContent = "One per side \u00b7 5 crew \u00b7 enemy is warned";
+      role.textContent = "One per side \u00b7 enemy is warned";
       b.append(role);
     }
     return b;
@@ -9672,7 +9743,7 @@
           t.cost,
           { type: key },
           () => recruit(key),
-          `${t.name}: ${costText(t.cost)}. Trained at ${BUILDINGS[t.producer].name}.`,
+          `Trained at the ${BUILDINGS[t.producer].name.toLowerCase()}.`,
         ),
       );
     }
@@ -9707,7 +9778,7 @@
             t.cost,
             { kind: k },
             () => beginBuild(k),
-            `${t.name}: ${costText(t.cost)}. ${t.time}s per villager. ${t.description || ""}`,
+            `${t.time}s per villager. ${t.description || ""}`,
           ),
         );
       }
@@ -10075,7 +10146,7 @@
       $("selection-title").textContent =
         buildings.length + " selected structures";
       $("selection-detail").textContent =
-        "Training and building actions take turns among compatible selected structures.";
+        "Training queues one unit at every selected structure that can make it; building actions take turns.";
       $("queue-detail").textContent =
         buildings.reduce((n, b) => n + b.queue.length, 0) + " total queued";
     }
@@ -10121,16 +10192,12 @@
         ": fortified city. Reach the capital with a combat troop to capture it immediately. Claim 1,800 food, 2,400 wood, 1,800 stone, 2,200 gold, and all surviving buildings and defenders.";
     }
     if (b?.kind === "colossus") {
-      const need = BUILDINGS.colossus.crew,
-        crew = b.crew || 0;
       $("selection-role").textContent =
         b.progress < 1
-          ? `${Math.floor(b.progress * 100)}% built. One per side; the enemy knows where it stands. Needs ${need} villagers to operate.`
-          : crew >= need
-            ? `Crew ${crew}/${need}. Reload ${Math.ceil(Math.max(0, b.guardCooldown || 0))}s. Right-click to bombard; the circle shows where shots may land.`
-            : `Needs ${need} villagers at its winches (${crew}/${need}). Press Man engine, then right-click to bombard.`;
+          ? `${Math.floor(b.progress * 100)}% built. One per side; the enemy knows where it stands.`
+          : `Reload ${Math.ceil(Math.max(0, b.guardCooldown || 0))}s. Right-click to bombard; the circle shows where shots may land.`;
       $("selection-role").title =
-        `Unlimited range, but shots scatter farther the farther they fly. The engine never fires on its own: right-click a point or an enemy and it repeats every ${BUILDINGS.colossus.reload}s until Cancel target. It reloads and fires only while ${need} villagers work its winches. Blasts also hit friendly troops.`;
+        `Unlimited range beyond a ${COLOSSUS_MIN_RANGE}-unit minimum (it cannot hit itself), but shots scatter farther the farther they fly. The engine never fires on its own: right-click a point or an enemy and it repeats every ${BUILDINGS.colossus.reload}s until Cancel target. Blasts also hit friendly troops.`;
     } else $("selection-role").removeAttribute("title");
     if (b?.kind === "greatengine")
       $("selection-role").textContent =
@@ -10151,18 +10218,6 @@
     const selectedColossi = selectedStructures(
       (b) => b.kind === "colossus" && b.progress >= 1,
     );
-    $("crew-button").hidden = !selectedColossi.length;
-    $("release-crew-button").hidden = !selectedColossi.length;
-    if (selectedColossi.length) {
-      const engine = selectedColossi[0],
-        assigned = workers().filter(
-          (u) => u.job?.kind === "crew" && u.job.target === engine.id,
-        ).length;
-      $("crew-button").textContent =
-        `Man engine (${Math.min(assigned, BUILDINGS.colossus.crew)}/${BUILDINGS.colossus.crew})`;
-      $("crew-button").disabled = assigned >= BUILDINGS.colossus.crew;
-      $("release-crew-button").disabled = !assigned;
-    }
     $("cancel-targeting-button").hidden =
       !selectedSiege.length && !selectedGreat.length && !selectedColossi.length;
     $("cancel-targeting-button").disabled =
@@ -10212,6 +10267,19 @@
         producer = producerFor(key);
       $("recruit-" + key).querySelector("strong").textContent =
         VARIANTS[key]?.[rankFor(key)] || t.short || t.name;
+      const crowd = selectedStructures().length ? trainers(key).length : 0,
+        card = $("recruit-" + key);
+      card.dataset.multi = crowd > 1 ? crowd : "";
+      card.dataset.name = VARIANTS[key]?.[rankFor(key)] || t.short || t.name;
+      let badge = card.querySelector(".multi");
+      if (crowd > 1) {
+        if (!badge) {
+          badge = document.createElement("span");
+          badge.className = "multi";
+          card.append(badge);
+        }
+        badge.textContent = "\u00d7" + crowd;
+      } else badge?.remove();
       $("recruit-" + key).disabled =
         !producer ||
         !afford(t.cost) ||
@@ -10239,6 +10307,7 @@
         !!state.result;
       $("research-" + k).classList.toggle("completed", !!state.techs[k]);
     }
+    fitSelectionText();
   }
 
   const siegeOverlay = {
@@ -10366,7 +10435,9 @@
   }
   // Motion that would be smaller than a few pixels is never played: below this
   // view scale figures hold a still pose and cosmetic effects are skipped.
-  const ANIM_SCALE = 0.5,
+  // Machines keep animating (wheels, arms, reloads) at any zoom while visible.
+  const SIEGE_UNITS = new Set(["trebuchet", "ram", "ballista"]),
+    ANIM_SCALE = 0.5,
     CLUSTER_SCALE = 0.25;
   function motionVisible() {
     return view.scale >= ANIM_SCALE;
@@ -10727,7 +10798,11 @@
       .filter(Boolean);
     for (const b of knownBuildings)
       if (onScreen(b, Math.max(120, Art.visualHeight(b) + b.h / 2))) {
-        Art.structure(ctx, b, drawTime);
+        Art.structure(
+          ctx,
+          b,
+          b.kind === "greatengine" || b.kind === "colossus" ? time : drawTime,
+        );
         if (selectedBuilding === b.id || selectedBuildings.has(b.id)) {
           ctx.strokeStyle = "#eed5a0";
           ctx.lineWidth = 2;
@@ -10774,113 +10849,138 @@
         ctx.stroke();
         ctx.restore();
       }
+    // Range rings and targeting circles draw after the fog so they stay
+    // readable over unexplored ground.
     const engines = state.units.filter(
       (u) => u.team === 0 && u.type === "trebuchet" && selected.has(u.id),
     );
-    if (engines.length) {
-      drawSiegeUnion(engines);
-      ctx.font = "12px Georgia";
-      ctx.fillStyle = "#f5d497";
-      ctx.fillText(
-        "Combined siege range 180-690",
-        engines[0].x + 190,
-        engines[0].y,
-      );
-    }
-    for (const b of selectedStructures(
-      (b) => b.kind === "greatengine" && b.progress >= 1,
-    )) {
-      ctx.save();
-      ctx.strokeStyle = "#e8b64bcc";
-      ctx.fillStyle = "#d7a34b10";
-      ctx.lineWidth = 2;
-      ctx.beginPath();
-      ctx.arc(b.x, b.y, 2200, 0, Math.PI * 2);
-      ctx.arc(b.x, b.y, 320, 0, Math.PI * 2, true);
-      ctx.fill("evenodd");
-      ctx.stroke();
-      ctx.setLineDash([14, 10]);
-      ctx.strokeStyle = "#d96b4f99";
-      ctx.beginPath();
-      ctx.arc(b.x, b.y, 320, 0, Math.PI * 2);
-      ctx.stroke();
-      ctx.setLineDash([]);
-      ctx.fillStyle = "#f5d497";
-      ctx.font = "bold 13px Georgia";
-      ctx.fillText("GREAT ENGINE | 320-2200", b.x + 140, b.y - 100);
-      if (b.fireTarget) {
-        Art.line(
-          ctx,
-          [
-            [b.fireTarget.x - 14, b.fireTarget.y],
-            [b.fireTarget.x + 14, b.fireTarget.y],
-          ],
-          2,
-          "#f2aa4e",
-        );
-        Art.line(
-          ctx,
-          [
-            [b.fireTarget.x, b.fireTarget.y - 14],
-            [b.fireTarget.x, b.fireTarget.y + 14],
-          ],
-          2,
-          "#f2aa4e",
+    const siegeOverlays = () => {
+      if (engines.length) {
+        drawSiegeUnion(engines);
+        ctx.font = "12px Georgia";
+        ctx.fillStyle = "#f5d497";
+        ctx.fillText(
+          "Combined siege range 180-690",
+          engines[0].x + 190,
+          engines[0].y,
         );
       }
-      ctx.restore();
-    }
-    // A Colossus has no range ring: a scatter disc shows where a shot at the
-    // pointer (and at the current order) may land, widening with distance.
-    for (const b of selectedStructures(
-      (b) => b.kind === "colossus" && b.progress >= 1,
-    )) {
-      const need = BUILDINGS.colossus.crew,
-        manned = (b.crew || 0) >= need,
-        aims = [];
-      if (pointerOnMap && mouse && !placement) aims.push([mouse, true]);
-      const ordered = b.attackTarget ? getObject(b.attackTarget) : b.fireTarget;
-      if (ordered) aims.push([ordered, false]);
-      for (const [p, hover] of aims) {
-        const d = distance(b, p),
-          r = colossusScatter(d);
+      for (const b of selectedStructures(
+        (b) => b.kind === "greatengine" && b.progress >= 1,
+      )) {
         ctx.save();
-        ctx.lineWidth = 2 / Math.max(0.4, view.scale);
-        ctx.fillStyle = hover ? "#e8b64b18" : "#d9573b24";
-        ctx.strokeStyle = hover ? "#f2c669" : "#e2674a";
-        ctx.setLineDash([16, 10]);
+        ctx.strokeStyle = "#e8b64bcc";
+        ctx.fillStyle = "#d7a34b10";
+        ctx.lineWidth = 2;
         ctx.beginPath();
-        ctx.arc(p.x, p.y, r, 0, Math.PI * 2);
-        ctx.fill();
+        ctx.arc(b.x, b.y, 2200, 0, Math.PI * 2);
+        ctx.arc(b.x, b.y, 320, 0, Math.PI * 2, true);
+        ctx.fill("evenodd");
+        ctx.stroke();
+        ctx.setLineDash([14, 10]);
+        ctx.strokeStyle = "#d96b4f99";
+        ctx.beginPath();
+        ctx.arc(b.x, b.y, 320, 0, Math.PI * 2);
         ctx.stroke();
         ctx.setLineDash([]);
-        ctx.globalAlpha = 0.7;
+        ctx.fillStyle = "#f5d497";
+        ctx.font = "bold 13px Georgia";
+        ctx.fillText("GREAT ENGINE | 320-2200", b.x + 140, b.y - 100);
+        if (b.fireTarget) {
+          Art.line(
+            ctx,
+            [
+              [b.fireTarget.x - 14, b.fireTarget.y],
+              [b.fireTarget.x + 14, b.fireTarget.y],
+            ],
+            2,
+            "#f2aa4e",
+          );
+          Art.line(
+            ctx,
+            [
+              [b.fireTarget.x, b.fireTarget.y - 14],
+              [b.fireTarget.x, b.fireTarget.y + 14],
+            ],
+            2,
+            "#f2aa4e",
+          );
+        }
+        ctx.restore();
+      }
+      // A Colossus has no range ring: a scatter disc shows where a shot at the
+      // pointer (and at the current order) may land, widening with distance.
+      for (const b of selectedStructures(
+        (b) => b.kind === "colossus" && b.progress >= 1,
+      )) {
+        const aims = [];
+        if (pointerOnMap && mouse && !placement) aims.push([mouse, true]);
+        const ordered = b.attackTarget
+          ? getObject(b.attackTarget)
+          : b.fireTarget;
+        if (ordered) aims.push([ordered, false]);
+        for (const [p, hover] of aims) {
+          const d = distance(b, p),
+            r = colossusScatter(d),
+            tooClose = d < COLOSSUS_MIN_RANGE;
+          ctx.save();
+          ctx.lineWidth = 2 / Math.max(0.4, view.scale);
+          ctx.fillStyle = tooClose
+            ? "#80808020"
+            : hover
+              ? "#e8b64b18"
+              : "#d9573b24";
+          ctx.strokeStyle = hover ? "#f2c669" : "#e2674a";
+          ctx.setLineDash([16, 10]);
+          ctx.beginPath();
+          ctx.arc(p.x, p.y, r, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.stroke();
+          ctx.setLineDash([]);
+          ctx.globalAlpha = 0.7;
+          ctx.beginPath();
+          ctx.arc(p.x, p.y, 8, 0, Math.PI * 2);
+          ctx.stroke();
+          ctx.globalAlpha = 1;
+          ctx.fillStyle = "#fff1c9";
+          ctx.font = `bold ${Math.round(13 / Math.max(0.5, view.scale))}px Georgia`;
+          ctx.fillText(
+            tooClose
+              ? `Too close (minimum ${COLOSSUS_MIN_RANGE})`
+              : `Shot lands within ${Math.round(r)} units`,
+            p.x + 14,
+            p.y - r - 8,
+          );
+          ctx.restore();
+        }
+        ctx.save();
+        ctx.strokeStyle = "#ffb08a99";
+        ctx.lineWidth = 2 / Math.max(0.4, view.scale);
+        ctx.setLineDash([6, 12]);
         ctx.beginPath();
-        ctx.arc(p.x, p.y, 8, 0, Math.PI * 2);
+        ctx.ellipse(
+          b.x,
+          b.y,
+          COLOSSUS_MIN_RANGE,
+          COLOSSUS_MIN_RANGE,
+          0,
+          0,
+          Math.PI * 2,
+        );
         ctx.stroke();
-        ctx.globalAlpha = 1;
-        ctx.fillStyle = "#fff1c9";
-        ctx.font = `bold ${Math.round(13 / Math.max(0.5, view.scale))}px Georgia`;
+        ctx.restore();
+        ctx.save();
+        ctx.fillStyle = "#f5d497";
+        ctx.font = "bold 14px Georgia";
+        ctx.textAlign = "center";
         ctx.fillText(
-          `Shot lands within ${Math.round(r)} units`,
-          p.x + 14,
-          p.y - r - 8,
+          `COLOSSUS | RELOAD ${Math.ceil(Math.max(0, b.guardCooldown || 0))}s`,
+          b.x,
+          b.y - 250,
         );
         ctx.restore();
       }
-      ctx.save();
-      ctx.fillStyle = manned ? "#f5d497" : "#ff9b80";
-      ctx.font = "bold 14px Georgia";
-      ctx.textAlign = "center";
-      ctx.fillText(
-        manned
-          ? `COLOSSUS | CREW ${b.crew}/${need} | RELOAD ${Math.ceil(Math.max(0, b.guardCooldown || 0))}s`
-          : `COLOSSUS | CREW ${b.crew || 0}/${need} | NEEDS ${need} VILLAGERS`,
-        b.x,
-        b.y - 250,
-      );
-      ctx.restore();
-    }
+    };
     // Every Colossus is marked on the world map, even from the other side.
     for (const b of state.buildings)
       if (
@@ -11066,7 +11166,12 @@
       } else {
         ctx.save();
         ctx.translate(u.x, u.y);
-        drawUnit(ctx, u, drawTime, u.visualAngle ?? u.angle);
+        drawUnit(
+          ctx,
+          u,
+          SIEGE_UNITS.has(u.type) ? time : drawTime,
+          u.visualAngle ?? u.angle,
+        );
         ctx.restore();
       }
       if (selected.has(u.id) || u.hp < u.maxHp)
@@ -11181,7 +11286,9 @@
       const t = b.t / b.duration,
         x = b.sx + (b.tx - b.sx) * t,
         y = b.sy + (b.ty - b.sy) * t,
-        height = Math.sin(t * Math.PI) * (b.heavy ? 340 : 150),
+        height =
+          Math.sin(t * Math.PI) * (b.heavy ? 340 : 150) +
+          (b.lift || 0) * (1 - Math.min(1, t)),
         fy = y - height;
       if (onScreen({ x: b.tx, y: b.ty }, b.r)) {
         ctx.strokeStyle = "#b99a6477";
@@ -11253,6 +11360,7 @@
       }
     ctx.globalAlpha = 1;
     if (!state.cheats?.reveal || !DEBUG_MODE) fog.paint(ctx, W, H);
+    siegeOverlays();
     if (drag && distance(drag.start, drag.end) > 4) {
       ctx.fillStyle = "#eed7a122";
       ctx.strokeStyle = "#efdaa7";
@@ -11599,8 +11707,15 @@
       distance(d.start, d.end) * view.scale <
       (e.pointerType === "touch" ? 14 : 7);
     if (clicked) d.end = d.start;
-    const clickedNode =
+    // A resource only wins the click when it is drawn in front of any
+    // structure under the pointer, so trees cannot swallow clicks aimed at a
+    // large building behind them.
+    let clickedNode =
       clicked && playerRemembers(d.end) ? resourceAt(d.end) : null;
+    if (clickedNode && clickedNode.kind !== "farm") {
+      const behind = structureAt(d.end, 0, true);
+      if (behind && behind.y + behind.h / 2 > clickedNode.y) clickedNode = null;
+    }
     selectedNode = clickedNode?.id || null;
     if (!d.shift && !clickedNode) {
       selected.clear();
@@ -11616,7 +11731,7 @@
       } else {
         const b = structureAt(d.end, 0);
         if (!b && playerRemembers(d.end))
-          selectedNode = resourceAt(d.end)?.id || null;
+          selectedNode = clickedNode?.id || resourceAt(d.end)?.id || null;
         if (b) {
           if (d.shift && selectedBuildings.has(b.id))
             selectedBuildings.delete(b.id);
@@ -11886,8 +12001,6 @@
     ["deploy-button", toggleDeployment],
     ["cancel-button", cancel],
     ["cancel-targeting-button", cancelSiegeTargeting],
-    ["crew-button", manColossus],
-    ["release-crew-button", releaseColossusCrew],
     ["pause-button", togglePause],
     ["save-button", () => saveGame(true)],
     ["restart-button", () => startLevel(state.level)],

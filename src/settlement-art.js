@@ -329,26 +329,43 @@
         // Keep it continuous and layer a round fighting platform over its face.
         const radius = fortified ? 27 : 23,
           height = fortified ? 46 : 40,
-          top = height + 4,
+          rim = height + 6,
+          floor = rim + 1.5,
           trim = fortified ? "#778075" : "#e1d4b4";
+        // Stacked drums never share a coplanar face: shaft to height + 2, a
+        // wider corbel ring to the rim, then a thinner floor slab above it.
         m.cylinder(0, 0, 2, radius + 3, height, stone, 36);
         m.cylinder(0, 0, height + 2, radius + 5, 4, tint(stone, 0.78), 36);
-        m.cylinder(0, 0, top, radius, 2, islamic ? "#c6b58f" : "#d1c6ab", 36);
-        // Radial merlons leave a readable circular silhouette from every side.
+        m.cylinder(
+          0,
+          0,
+          rim,
+          radius + 1,
+          1.5,
+          islamic ? "#c6b58f" : "#d1c6ab",
+          36,
+        );
+        // Merlons are tangent blocks seated on the rim, so they follow the
+        // circle instead of forming a jagged ring of axis-aligned boxes.
         for (let i = 0; i < 12; i++) {
           const angle = (i * Math.PI * 2) / 12,
-            x = Math.cos(angle) * (radius - 2),
-            y = Math.sin(angle) * (radius - 2);
-          m.box(x, y, top + 5, 7, 7, 8, trim);
+            half = 0.2,
+            r = radius + 3.2;
+          m.beam(
+            [Math.cos(angle - half) * r, Math.sin(angle - half) * r, rim + 3.5],
+            [Math.cos(angle + half) * r, Math.sin(angle + half) * r, rim + 3.5],
+            6,
+            trim,
+          );
         }
         if (islamic) {
-          m.cylinder(0, 0, top + 2, 12, 2, "#8e9a81", 24);
-          m.dome(0, 0, top + 4, 9, 9, P.turquoise, 24);
-          m.cylinder(0, 0, top + 13, 1, 5, "#d2b46c", 12);
+          m.cylinder(0, 0, floor, 12, 1.5, "#8e9a81", 24);
+          m.dome(0, 0, floor + 1.5, 9, 9, P.turquoise, 24);
+          m.cylinder(0, 0, floor + 10, 1, 5, "#d2b46c", 12);
         }
         // A small, high-contrast sentry and bow make the tower's purpose legible.
         const archerY = radius * 0.22,
-          archerZ = top + 3;
+          archerZ = floor;
         m.box(
           0,
           archerY,

@@ -892,48 +892,361 @@
     }
     m.paint();
   }
+  // ---- Construction sites -------------------------------------------------
+  // A building under construction is the finished artwork revealed course by
+  // course from the foundation upward, behind a timber scaffold with a working
+  // platform, ladder and hoist. Materials are stacked beside it and shrink as
+  // the work advances; dust rises from the fresh masonry. All motion is a pure
+  // function of progress and time, so nothing here touches the simulation.
+  const SITE_WOOD = "#8d6a3e";
+  function siteRise(p) {
+    return Math.min(1, Math.max(0, (p - 0.05) / 0.88));
+  }
+  function siteScaffold(g, b, o, zc, fade, bucket) {
+    const lift = o.H > 200 ? 38 : 24,
+      hw = o.halfW + 7,
+      hd = o.halfD / 0.72 + 6,
+      top = Math.max(18, (zc + 20) * fade),
+      W = Math.ceil(o.halfW * 2 + 140),
+      oy = o.halfD + o.H + 80,
+      key = `site:${o.round ? "r" : "b"}:${Math.round(o.halfW)}:${Math.round(o.halfD)}:${Math.round(o.H)}:${bucket}`;
+    sprite(g, key, W, Math.ceil(oy + o.halfD + 50), W / 2, oy, (q) => {
+      const m = model(q, 0, 0.72),
+        posts = [];
+      if (o.round) {
+        for (let i = 0; i < 10; i++) {
+          const a = (i * Math.PI * 2) / 10;
+          posts.push([Math.cos(a) * hw * 0.95, Math.sin(a) * hd * 0.95]);
+        }
+      } else {
+        const nx = Math.max(1, Math.round(hw / 46));
+        for (let i = 0; i <= nx; i++) {
+          const x = -hw + (2 * hw * i) / nx;
+          posts.push([x, hd]);
+          posts.push([x, -hd]);
+        }
+        const ny = Math.max(1, Math.round(hd / 40));
+        for (let i = 1; i < ny; i++) {
+          posts.push([-hw, -hd + (2 * hd * i) / ny]);
+          posts.push([hw, -hd + (2 * hd * i) / ny]);
+        }
+      }
+      for (const [x, y] of posts)
+        m.beam([x, y, 0], [x, y, top], 3.4, SITE_WOOD);
+      const loop = o.round
+        ? posts
+        : [
+            [-hw, -hd],
+            [hw, -hd],
+            [hw, hd],
+            [-hw, hd],
+          ];
+      for (let z = 22; z <= top - 2; z += lift)
+        for (let i = 0; i < loop.length; i++) {
+          const a = loop[i],
+            c = loop[(i + 1) % loop.length];
+          m.beam([a[0], a[1], z], [c[0], c[1], z], 2.4, "#a88251");
+        }
+      if (!o.round) {
+        const rows = Math.floor((top - 4) / lift);
+        for (let r = 0; r < rows; r++) {
+          const z = 22 + r * lift,
+            flip = r % 2 ? -1 : 1;
+          m.beam(
+            [-hw * flip, hd, z],
+            [hw * flip, hd, z + lift],
+            1.8,
+            "#c19b63",
+          );
+          m.beam(
+            [hw, -hd * flip, z],
+            [hw, hd * flip, z + lift],
+            1.8,
+            "#c19b63",
+          );
+        }
+      }
+      // Working deck just beneath the freshly laid course.
+      const deck = Math.max(10, Math.floor((zc - 6) / lift) * lift + 22);
+      if (deck <= top - 2) {
+        const rim = o.round ? hw * 0.98 : hw;
+        for (let i = 0; i < 7; i++) {
+          const x = -rim + (2 * rim * (i + 0.5)) / 7,
+            y = o.round ? hd * Math.sqrt(Math.max(0, 1 - (x / rim) ** 2)) : hd;
+          m.box(x, y - 3, deck, (2 * rim) / 7 - 1.5, 9, 2.2, SITE_WOOD);
+        }
+        m.box(-hw * 0.4, hd - 4, deck + 2.2, 16, 5, 3, "#c9b48a");
+      }
+      const lx = Math.min(hw - 6, hw * 0.8),
+        reach = Math.max(deck, 24);
+      for (const dx of [-3.5, 3.5])
+        m.beam([lx + dx, hd + 9, 0], [lx + dx, hd + 2, reach], 1.8, "#c9a46a");
+      for (let z = 6; z < reach; z += 8)
+        m.beam(
+          [lx - 3.5, hd + 8 - z * 0.06, z],
+          [lx + 3.5, hd + 8 - z * 0.06, z],
+          1.4,
+          "#d9b97d",
+        );
+      m.paint();
+    });
+  }
+  function sitePiles(g, left, bucket) {
+    sprite(g, `sitePile:${left}:${bucket}`, 130, 100, 65, 70, (q) => {
+      const m = model(q, 0, 0.72);
+      if (left) {
+        const rows = 1 + Math.min(3, Math.ceil(bucket / 2));
+        for (let r = 0; r < rows; r++)
+          for (let i = 0; i < rows + 1 - r; i++)
+            m.beam(
+              [-26 + r * 5 + i * 10, -11, 4 + r * 7],
+              [-26 + r * 5 + i * 10, 11, 4 + r * 7],
+              6.5,
+              r % 2 ? "#a8824e" : "#8d6a3e",
+            );
+        m.box(14, 0, 0, 14, 20, 3 + (bucket % 3), "#b79a68");
+      } else {
+        const n = 1 + bucket;
+        for (let i = 0; i < n; i++)
+          m.box(
+            -22 + (i % 3) * 15,
+            -6 + Math.floor(i / 3) * 12,
+            Math.floor(i / 6) * 8,
+            13,
+            10,
+            8,
+            "#bcae8b",
+          );
+        m.box(24, 6, 0, 12, 10, 8, "#cdbf99");
+      }
+      m.paint();
+    });
+  }
+  function constructionSite(g, b, time, drawFinished, o) {
+    const p = b.progress,
+      rise = siteRise(p),
+      front = o.halfD + 6,
+      top = -(o.halfD + o.H),
+      cutY = front - (front - top) * rise,
+      // Scaffold height follows the building's own height (about 80% of the
+      // artwork, which also spans the footprint's depth), not the whole sprite.
+      zc =
+        (o.H *
+          0.8 *
+          Math.min(1, Math.max(0, (o.halfD - cutY) / (front - top)))) /
+        0.72,
+      hw = o.halfW + 7;
+    if (!o.light) {
+      A.ellipse(
+        g,
+        0,
+        3,
+        o.halfW * 1.22 + 12,
+        o.halfD * 1.28 + 10,
+        "#7a6742",
+        "#58492c",
+      );
+      A.ellipse(g, 0, 2, o.halfW * 1.02 + 6, o.halfD * 1.06 + 6, "#8d7a50");
+      const stakes = [
+        [-o.halfW - 6, -o.halfD - 4],
+        [o.halfW + 6, -o.halfD - 4],
+        [o.halfW + 6, o.halfD + 4],
+        [-o.halfW - 6, o.halfD + 4],
+      ];
+      if (p < 0.2) {
+        for (let i = 0; i < 4; i++)
+          A.line(g, [stakes[i], stakes[(i + 1) % 4]], 1.2, "#e4d7ae");
+        for (const [x, y] of stakes)
+          A.line(
+            g,
+            [
+              [x, y],
+              [x, y - 12],
+            ],
+            2.6,
+            "#7b5a34",
+          );
+      }
+      if (p > 0.015) {
+        const k = Math.round(Math.min(1, p / 0.05) * 4),
+          f = o.round ? 0.86 : 0.94,
+          W = Math.ceil(o.halfW * 2 + 40),
+          Hh = Math.ceil(o.halfD * 2 + 40);
+        sprite(
+          g,
+          `siteFooting:${o.round ? "r" : "b"}:${Math.round(o.halfW)}:${Math.round(o.halfD)}:${k}`,
+          W,
+          Hh,
+          W / 2,
+          Hh / 2,
+          (q) => {
+            const m = model(q, 0, 0.72),
+              t = 0.4 + 0.15 * k;
+            m.box(
+              0,
+              0,
+              0,
+              o.halfW * 2 * f * t,
+              ((o.halfD * 2) / 0.72) * f * t,
+              4,
+              "#a79a78",
+            );
+            m.paint();
+          },
+        );
+      }
+    }
+    if (rise > 0) {
+      g.save();
+      g.beginPath();
+      g.rect(-o.halfW - 220, cutY, o.halfW * 2 + 440, front - cutY + 140);
+      g.clip();
+      drawFinished();
+      g.restore();
+      if (!o.round && !o.light && rise < 0.8) {
+        const x0 = -o.halfW * 0.86,
+          x1 = o.halfW * 0.86;
+        A.polygon(
+          g,
+          [
+            [x0, cutY - 3],
+            [x1, cutY - 3],
+            [x1 + 3, cutY + 3],
+            [x0 - 3, cutY + 3],
+          ],
+          "#d6c9a4",
+          "#6f6347",
+        );
+        for (let x = x0 + 8; x < x1; x += 14)
+          A.line(
+            g,
+            [
+              [x, cutY - 3],
+              [x - 1, cutY + 3],
+            ],
+            1,
+            "#8a7d5d",
+          );
+      }
+    }
+    if (!o.light && p > 0.04 && p < 0.995) {
+      const fade = p > 0.9 ? 1 - ((p - 0.9) / 0.1) * 0.75 : 1;
+      siteScaffold(
+        g,
+        b,
+        o,
+        zc,
+        fade,
+        Math.round(zc / 6) + ":" + Math.round(fade * 8),
+      );
+    }
+    if (!o.light && p < 0.97) {
+      const left = Math.ceil((1 - p) * 5);
+      g.save();
+      g.translate(-hw - 6, o.halfD + 4);
+      sitePiles(g, true, left);
+      g.restore();
+      g.save();
+      g.translate(hw + 4, o.halfD + 8);
+      sitePiles(g, false, left);
+      g.restore();
+    }
+    if (o.light) {
+      A.polygon(
+        g,
+        [
+          [-18, 10],
+          [-9, 10],
+          [-9, 16],
+          [-18, 16],
+        ],
+        "#c4b690",
+        "#6f6347",
+      );
+      A.polygon(
+        g,
+        [
+          [10, 12],
+          [22, 12],
+          [22, 17],
+          [10, 17],
+        ],
+        "#b9ab86",
+        "#6f6347",
+      );
+    }
+    // Hoist on the front-right corner: a block rises and falls on a rope.
+    if (!o.light && p > 0.07 && p < 0.9) {
+      const post = Math.min(hw - 8, hw * 0.85),
+        yTop = o.halfD - (zc + 20) * 0.72,
+        t = (1 - Math.cos(time * 1.2 + (b.id || 0))) / 2,
+        ground = o.halfD + 6,
+        by = ground + (yTop + 16 - ground) * t;
+      A.line(
+        g,
+        [
+          [post, yTop],
+          [post + 24, yTop + 3],
+        ],
+        3,
+        "#6a4d2d",
+      );
+      A.line(
+        g,
+        [
+          [post + 24, yTop + 3],
+          [post + 24, by],
+        ],
+        1,
+        "#e9ddb8",
+      );
+      A.polygon(
+        g,
+        [
+          [post + 17, by],
+          [post + 31, by],
+          [post + 31, by + 9],
+          [post + 17, by + 9],
+        ],
+        "#c4b690",
+        "#5f553d",
+      );
+    }
+    if (p > 0.03 && p < 0.985)
+      for (let i = 0; i < 6; i++) {
+        const c = (time * 0.7 + i / 6 + ((b.id || 0) % 7) * 0.13) % 1,
+          x = Math.sin(i * 2.7 + (b.id || 0)) * o.halfW * 0.8 + c * 6,
+          y = cutY - c * 26 + 3;
+        A.ellipse(
+          g,
+          x,
+          y,
+          3 + c * 6,
+          2 + c * 3.5,
+          `rgba(226,212,172,${(0.4 * (1 - c)).toFixed(2)})`,
+        );
+      }
+  }
   function structure(g, b, time) {
     if (b.kind === "bastionwall") b = { ...b, kind: "wall", fortified: true };
     if (b.wallAttachment?.fortified && !b.fortified)
       b = { ...b, fortified: true };
     if ((b.kind === "greatengine" || b.kind === "colossus") && b.hp > 0) {
-      const k = b.kind === "colossus" ? 2 : 1;
       if (b.progress >= 1) A.greatEngine(g, b, time);
       else {
+        const big = b.kind === "colossus";
         g.save();
         g.translate(b.x, b.y);
-        g.save();
-        g.beginPath();
-        g.rect(-150 * k, (-25 - 150 * b.progress) * k, 300 * k, 200 * k);
-        g.clip();
-        A.greatEngine(g, { ...b, x: 0, y: 0 }, time);
-        g.restore();
-        sprite(
+        constructionSite(
           g,
-          `engineScaffold:${k}:${Math.floor(b.progress * 20)}`,
-          320 * k,
-          330 * k,
-          160 * k,
-          230 * k,
-          (g) => {
-            const m = model(g);
-            for (let i = 0; i < 8; i++) {
-              const a = (i * Math.PI) / 4,
-                x = Math.cos(a) * b.w * 0.42,
-                y = (Math.sin(a) * b.h * 0.42) / 0.72;
-              m.beam([x, y, 0], [x, y, (55 + b.progress * 40) * k], 3);
-              const next = ((i + 1) * Math.PI) / 4;
-              m.beam(
-                [x, y, 40 * k],
-                [
-                  Math.cos(next) * b.w * 0.42,
-                  (Math.sin(next) * b.h * 0.42) / 0.72,
-                  40 * k,
-                ],
-                3,
-              );
-            }
-            m.paint();
+          b,
+          time,
+          () => A.greatEngine(g, { ...b, x: 0, y: 0, progress: 1 }, time),
+          {
+            halfW: b.w * 0.5,
+            halfD: b.h * 0.5,
+            H: big ? 300 : 150,
+            round: true,
           },
         );
         g.restore();
@@ -945,7 +1258,14 @@
     // Curtains are already composed sprites. Do not cache another canvas around
     // an atlas page that may still be decoding, or the wrapper can stay empty.
     if (b.kind === "wall" && b.hp > 0) {
-      wall(g, b);
+      if (b.progress < 1)
+        constructionSite(g, b, time, () => wall(g, b), {
+          halfW: 26,
+          halfD: b.fortified ? 24 : 15,
+          H: b.fortified ? 62 : 50,
+          light: true,
+        });
+      else wall(g, b);
       g.restore();
       return;
     }
@@ -966,24 +1286,34 @@
       b.architecture || (b.team === 1 ? "islamic" : "christian"),
       !!b.fortified,
       !!b.bastionGate,
-      b.wallAttachment ? "attached5" : false,
+      b.wallAttachment ? "attached6" : false,
       b.closed !== false,
       b.gateAngle || 0,
       b.rotation || 0,
       links,
       b.wallAngle || 0,
       b.hp > 0,
-      Math.floor((b.progress ?? 1) * 20),
+      20,
       b.hp <= 0 ? (b.id || 0) % 3 : 0,
     ].join(":");
     const width = Math.max(200, b.w + 120),
       height = Math.max(240, b.h + visualHeight(b) + 90),
       originY = b.h / 2 + visualHeight(b) + 55;
-    sprite(g, "building:" + key, width, height, width / 2, originY, (q) =>
-      b.hp <= 0
-        ? rubble(q, { ...b, id: (b.id || 0) % 3 })
-        : buildingModel(q, b),
-    );
+    const building = () =>
+      sprite(g, "building:" + key, width, height, width / 2, originY, (q) =>
+        b.hp <= 0
+          ? rubble(q, { ...b, id: (b.id || 0) % 3 })
+          : buildingModel(q, { ...b, progress: 1 }),
+      );
+    if (b.hp > 0 && b.progress < 1) {
+      const turned = b.rotation === 90 || b.gateAngle === Math.PI / 2;
+      constructionSite(g, b, time, building, {
+        halfW: (turned ? b.h : b.w) * 0.5,
+        halfD: (turned ? b.w : b.h) * 0.5,
+        H: visualHeight(b) + 14,
+        round: false,
+      });
+    } else building();
     if (
       b.hp > 0 &&
       b.progress >= 1 &&
@@ -992,7 +1322,7 @@
       const frame = Math.floor(((time * 0.7) / (Math.PI * 2)) * 24) % 24;
       sprite(
         g,
-        `buildingMotion:${b.kind}:${b.w}:${b.h}:${b.team}:${b.architecture || (b.team === 1 ? "islamic" : "christian")}:${b.wallAttachment ? "attached5" : false}:${!!b.fortified}:${frame}`,
+        `buildingMotion:${b.kind}:${b.w}:${b.h}:${b.team}:${b.architecture || (b.team === 1 ? "islamic" : "christian")}:${b.wallAttachment ? "attached6" : false}:${!!b.fortified}:${frame}`,
         width,
         height,
         width / 2,
@@ -2114,13 +2444,20 @@
     if (x >= box[0] && x <= box[1] && y >= box[2] && y <= box[3]) return true;
     return radius > 0 && x * x + y * y < radius * radius;
   };
+  // Resources use fixed silhouette boxes like units and buildings: trees are
+  // tall, narrow shapes and a pixel read of the loading atlas missed them.
   A.hitResource = (n, p) => {
     const x = p.x - n.x,
       y = p.y - n.y,
       r = (n.r || 24) + 15;
     if (x * x + y * y < r * r) return true;
-    if (Math.abs(x) > 65 || y < -120 || y > 35) return false;
-    return pixelHit(p, (g) => resource(g, n));
+    const box =
+      n.kind === "wood"
+        ? n.palm
+          ? [-46, 46, -96, 10]
+          : [-40, 40, -108, 10]
+        : [-42, 42, -48, 14];
+    return x >= box[0] && x <= box[1] && y >= box[2] && y <= box[3];
   };
   A.projectedModel = model;
   A.stylePalette = P;

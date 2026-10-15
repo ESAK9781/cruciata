@@ -125,7 +125,7 @@ Verification for this pass: `npm run check`, `npm run build`, and the full `npx 
 
 `enemyEconomy` launches assaults through `launchAssault` and tracks them in `state.enemy.assault` (`id`, `size`, `at`, `continueAt`); participants carry `u.assault`. Objectives use `targetWeight` (distance, with walls/gates/curtain towers strongly de-prioritised and production/town centres favoured). Idle raiders (at least half of the survivors, checked every 8 s) press on to the next known objective, and the remainder fall back together when fewer than 35 percent survive after 30 s, after 300 s, or when no objectives remain. Losses increment `ai.failures`, which raises the next wave's required size by 15 percent per failure (cap 50 percent); a clean finish resets it. `ai.intel` decays over time and records only player troop types the enemy has seen; `counter` tilts recruitment toward counters. All fields are optional for older saves. `scripts/ai-watch.js <level> <seconds>` prints the assault timeline.
 
-Attached guard-tower art renders at the curtain's full vertical scale (rise 1, not 0.72), has no square footing slab, and uses the `attached5` sprite key so no atlas rebake is needed.
+Attached guard-tower art renders at the curtain's full vertical scale (rise 1, not 0.72), has no square footing slab, and uses the `attached6` sprite key so no atlas rebake is needed.
 
 ## Selection, builders and enemy economy
 
@@ -174,3 +174,25 @@ Verification: `tests/quadtree-navigation.spec.js`, `tests/army-orders.spec.js`, 
 - **Saves.** `crew`, `shots`, `announced` and the `crew` job kind are optional and persisted with ordinary state.
 
 Verification: `npx playwright test tests/colossus.spec.js` (crew requirement, no automatic fire, reload/damage/flight parity, scatter bounds and unlimited range, one per side, notification and reveal, Man engine/Release crew UI, AI build/crew, drawing), `npm run check`, `npm run build`.
+
+## Colossus polish, construction sites and tooltips
+
+- **Picking.** `Art.hitResource` uses fixed silhouette boxes (tree: 80x118, palm 92x106, others 84x62) plus the circular ground area. On click, a resource only wins if no own structure under the pointer extends further forward (`behind.y + h/2 > node.y`). `structureAt` scores non-wall structures by `distance * 0.5 * min(1, 60 / (w/2))`, so huge footprints (Colossus) beat neighbours.
+- **Colossus tuning.** `colossusScatter(d) = 20 + 0.045 d`; `COLOSSUS_MIN_RANGE = 700`: orders inside it are refused with a toast, `colossusTick` never fires at a target that has come inside it, a dashed ring marks it while selected, and the AI skips such targets. Art uses a bastion-stone plinth (five tiers with crenellations), dark timber and steel palettes (`workshop(g, angle, scale, wood)`), gilded bands/crest, braziers with glow, buttress struts and darker pennants.
+- **Construction sites.** `constructionSite` in `src/isometric-art.js` draws every unfinished non-curtain structure (and walls/gates/engines): dirt, stakes and rope, a stone sill, then the finished sprite clipped from the ground up (`siteRise`), a mortar course at the cut, a `site:` scaffold sprite (posts, rails, braces, deck under the cut, ladder; bucketed by height), shrinking timber/stone piles, an animated hoist block and dust. Finished building sprites no longer key on progress. Motion is a function of time only.
+- **Training.** `trainers(type)` lists the selected completed producers with room; `recruit` queues one unit at each (as resources and population allow, with a combined toast); nothing selected still uses the quietest producer. Cards show a `.multi` badge (x2, x3...).
+- **Tooltips.** Command cards carry `data-name`/`data-tip` and a hidden `.cost`/`.role`; one `#tooltip` element shows name, cost (red when short, totals for multi-train) and the description on hover/focus. `fitSelectionText` shrinks and then scrolls the selection column so nothing is clipped.
+
+Verification: `npx playwright test tests/selection-sites.spec.js tests/colossus.spec.js tests/group-orders.spec.js tests/revision.spec.js tests/control-groups.spec.js`, `npm run check`, `npm run build`.
+
+## Colossus follow-ups
+
+- **No crew.** The Colossus needs no villagers: once finished it reloads and fires on its own timer whenever it holds a legal order (`fireTarget`/`attackTarget`), still never automatically. The crew job kind is retired (old saves clear it in `workerAI`); the Man engine/Release crew buttons are gone.
+- **Launch height.** Boulders carry `lift` (Colossus 300, great engine 150, trebuchet 75): they leave the throwing arm's height and descend into the normal arc (`height + lift * (1 - t)`).
+- **Faction banners.** Colossus pennants are camera-facing flags: red field with a cream cross for Christians, green with a crescent for Islamic; layer 1 holds the emblem.
+- **Overlays above fog.** Trebuchet union range, great-engine rings and Colossus scatter/minimum-range circles draw through `siegeOverlays()` after `fog.paint`.
+- **Animation at any zoom.** Great engines, the Colossus and siege units (`SIEGE_UNITS`) always use real time and advance `u.anim` while visible, even below `ANIM_SCALE`.
+- **Landing sight.** A landed boulder leaves a `state.shotSights` entry: 440-unit vision for 3 s, then a 5 s linear fade (`siegeShots()` passes `vision` to `fog.update`).
+- **Attached tower tops.** Drum, corbel ring and floor slab no longer share coplanar faces; merlons are tangent beams seated on the rim.
+- **Scaffold height.** Scaffold posts follow about 80% of the art height (`constructionSite` `zc`), not the whole sprite span.
+

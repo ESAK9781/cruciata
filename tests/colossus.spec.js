@@ -17,52 +17,31 @@ async function begin(page, level = 0) {
   await page.setViewportSize({ width: 1440, height: 900 });
 }
 
-// A finished player Colossus with `crew` villagers already at its winches.
-async function colossus(page, crew, extra = {}) {
-  await page.evaluate(
-    ({ crew, extra }) => {
-      cruciata.scenario((s) => {
-        const template = JSON.parse(JSON.stringify(s.buildings[0])),
-          worker = JSON.parse(
-            JSON.stringify(
-              s.units.find((u) => u.team === 0 && u.type === "worker"),
-            ),
-          );
-        if (crew)
-          s.units = s.units.filter((u) => u.team !== 0 || u.type !== "worker");
-        s.buildings.push({
-          ...template,
-          id: 99500,
-          kind: "colossus",
-          team: 0,
-          x: 1500,
-          y: 2600,
-          w: 320,
-          h: 276,
-          r: 160,
-          hp: 16000,
-          maxHp: 16000,
-          progress: 1,
-          guardCooldown: 0,
-          queue: [],
-          rally: null,
-          ...extra,
-        });
-        for (let i = 0; i < crew; i++)
-          s.units.push({
-            ...worker,
-            id: 99600 + i,
-            x: 1500 + Math.cos(i * 1.3) * 190,
-            y: 2600 + Math.sin(i * 1.3) * 160,
-            job: { kind: "crew", target: 99500 },
-            order: null,
-            buildQueue: [],
-            fleeUntil: 0,
-          });
+// A finished player Colossus (the second argument is kept for call sites).
+async function colossus(page, _unused, extra = {}) {
+  await page.evaluate((extra) => {
+    cruciata.scenario((s) => {
+      const template = JSON.parse(JSON.stringify(s.buildings[0]));
+      s.buildings.push({
+        ...template,
+        id: 99500,
+        kind: "colossus",
+        team: 0,
+        x: 1500,
+        y: 2600,
+        w: 320,
+        h: 276,
+        r: 160,
+        hp: 16000,
+        maxHp: 16000,
+        progress: 1,
+        guardCooldown: 0,
+        queue: [],
+        rally: null,
+        ...extra,
       });
-    },
-    { crew, extra },
-  );
+    });
+  }, extra);
 }
 
 // Runs the simulation and returns the time of every Colossus shot.
@@ -93,7 +72,7 @@ async function shots(page, seconds) {
   }, seconds);
 }
 
-test("the build menu states the colossus cost, crew need, warning and range rules", async ({
+test("the build menu states the colossus cost, warning and range rules", async ({
   page,
 }) => {
   await begin(page);
@@ -102,8 +81,7 @@ test("the build menu states the colossus cost, crew need, warning and range rule
   await expect(card).toBeVisible();
   await expect(card).toContainText("One per side");
   await expect(card).toContainText("6000 wood");
-  const title = await card.getAttribute("title");
-  expect(title).toContain("5 villagers");
+  const title = await card.getAttribute("data-tip");
   expect(title).toContain("Unlimited range");
   expect(title).toContain("told");
 });
@@ -140,19 +118,7 @@ test("only one colossus per side, even while it is a foundation", async ({
   await expect(page.locator("#build-colossus")).toBeDisabled();
 });
 
-test("without five villagers working it the colossus neither reloads nor fires", async ({
-  page,
-}) => {
-  await begin(page);
-  await colossus(page, 4, { fireTarget: { x: 4000, y: 2600 } });
-  expect(await shots(page, 25)).toHaveLength(0);
-  const crew = await page.evaluate(
-    () => cruciata.internals().state.buildings.find((b) => b.id === 99500).crew,
-  );
-  expect(crew).toBeLessThan(5);
-});
-
-test("a full crew fires only at the ordered point, with the great engine's reload, damage and flight", async ({
+test("it fires only at the ordered point, with the great engine's reload, damage and flight", async ({
   page,
 }) => {
   await begin(page);
@@ -168,10 +134,6 @@ test("a full crew fires only at the ordered point, with the great engine's reloa
   }
   expect(fired[1].t - fired[0].t).toBeGreaterThan(17.8);
   expect(fired[1].t - fired[0].t).toBeLessThan(18.5);
-  const crew = await page.evaluate(
-    () => cruciata.internals().state.buildings.find((b) => b.id === 99500).crew,
-  );
-  expect(crew).toBe(5);
 });
 
 test("it never fires without orders, even with enemies in plain view", async ({
@@ -223,8 +185,8 @@ test("range is unlimited but accuracy falls with distance", async ({
   const miss = (s, t) => Math.hypot(s.tx - t.x, s.ty - t.y);
   const dNear = Math.hypot(800, 0),
     dFar = Math.hypot(5500, 4400);
-  const rNear = 40 + dNear * 0.09,
-    rFar = 40 + dFar * 0.09;
+  const rNear = 20 + dNear * 0.045,
+    rFar = 20 + dFar * 0.045;
   expect(miss(near[0], { x: 2300, y: 2600 })).toBeLessThanOrEqual(rNear + 1);
   expect(miss(far[0], { x: 7000, y: 7000 })).toBeLessThanOrEqual(rFar + 1);
   expect(rFar).toBeGreaterThan(rNear * 3);
@@ -252,57 +214,24 @@ test("shots really scatter: repeated volleys land in different places inside the
   expect(new Set(landed.map((p) => p.join(","))).size).toBeGreaterThan(10);
 });
 
-test("selecting the colossus explains the crew rule, and Man engine sends five villagers", async ({
+test("selecting the colossus explains how it fires and has no crew controls", async ({
   page,
 }) => {
   await begin(page);
   await colossus(page, 0);
-  await page.evaluate(() => {
-    cruciata.scenario((s) => {
-      const worker = s.units.find((u) => u.team === 0 && u.type === "worker");
-      for (let i = 0; i < 7; i++)
-        s.units.push({
-          ...JSON.parse(JSON.stringify(worker)),
-          id: 99700 + i,
-          x: 1000 + i * 30,
-          y: 2900,
-          job: null,
-          order: null,
-        });
-    });
-    cruciata.camera(1500, 2500);
-  });
+  await page.evaluate(() => cruciata.camera(1500, 2500));
   await page.waitForTimeout(150);
   const p = await page.evaluate(() => cruciata.project(1500, 2500));
   await page.mouse.click(p.x, p.y);
   await expect(page.locator("#selection-title")).toContainText("Colossal");
   const role = page.locator("#selection-role");
-  await expect(role).toContainText("5 villagers");
+  await expect(role).toContainText("Right-click to bombard");
   const help = await role.getAttribute("title");
   expect(help).toContain("never fires on its own");
   expect(help).toContain("scatter");
   expect(help).toContain("Unlimited range");
-  await expect(page.locator("#crew-button")).toBeVisible();
-  await expect(page.locator("#release-crew-button")).toBeVisible();
-  await page.locator("#crew-button").click();
-  await page.evaluate(() => cruciata.step(25));
-  await expect(role).toContainText("Crew 5/5");
-  const working = await page.evaluate(
-    () =>
-      cruciata
-        .internals()
-        .state.units.filter(
-          (u) => u.job?.kind === "crew" && u.working && u.team === 0,
-        ).length,
-  );
-  expect(working).toBe(5);
-  await page.locator("#release-crew-button").click();
-  const left = await page.evaluate(
-    () =>
-      cruciata.internals().state.units.filter((u) => u.job?.kind === "crew")
-        .length,
-  );
-  expect(left).toBe(0);
+  await expect(page.locator("#crew-button")).toHaveCount(0);
+  await expect(page.locator("#cancel-targeting-button")).toBeVisible();
 });
 
 test("right-clicking a ground point with the colossus selected orders a bombardment anywhere", async ({
@@ -310,11 +239,11 @@ test("right-clicking a ground point with the colossus selected orders a bombardm
 }) => {
   await begin(page);
   await colossus(page, 5);
-  await page.evaluate(() => cruciata.camera(1500, 2500));
+  await page.evaluate(() => cruciata.camera(1950, 2500));
   await page.waitForTimeout(150);
   const p = await page.evaluate(() => cruciata.project(1500, 2500));
   await page.mouse.click(p.x, p.y);
-  const target = await page.evaluate(() => cruciata.project(1900, 2650));
+  const target = await page.evaluate(() => cruciata.project(2250, 2450));
   await page.mouse.click(target.x, target.y, { button: "right" });
   const order = await page.evaluate(
     () =>
@@ -322,7 +251,7 @@ test("right-clicking a ground point with the colossus selected orders a bombardm
         .fireTarget,
   );
   expect(order).toBeTruthy();
-  expect(Math.abs(order.x - 1900)).toBeLessThan(40);
+  expect(Math.abs(order.x - 2250)).toBeLessThan(40);
   await expect(page.locator("#cancel-targeting-button")).toBeEnabled();
   await page.locator("#cancel-targeting-button").click();
   const cleared = await page.evaluate(
@@ -380,7 +309,7 @@ test("the other side is warned and shown the site the moment a colossus is begun
   expect(Math.hypot(cam.x - 6200, cam.y - 6200)).toBeLessThan(400);
 });
 
-test("the enemy announces its own colossus when it begins one, and builds, mans and fires it", async ({
+test("the enemy announces its own colossus when it begins one, and builds and fires it", async ({
   page,
 }) => {
   await begin(page);
@@ -439,15 +368,11 @@ test("the enemy announces its own colossus when it begins one, and builds, mans 
     const b = S.buildings.find((b) => b.kind === "colossus" && b.team === 1);
     return {
       progress: b.progress,
-      crew: S.units.filter(
-        (u) => u.team === 1 && u.job?.kind === "crew" && u.job.target === b.id,
-      ).length,
       count: S.buildings.filter((x) => x.kind === "colossus" && x.team === 1)
         .length,
     };
   });
   expect(done.progress).toBe(1);
-  expect(done.crew).toBe(5);
   expect(done.count).toBe(1);
 });
 
@@ -516,4 +441,61 @@ test("the colossus is drawn at full size, finished and as a foundation", async (
   expect(errors).toEqual([]);
   const shot = await page.screenshot();
   expect(shot.length).toBeGreaterThan(5000);
+});
+
+test("it cannot target or fire at anything inside its minimum range", async ({
+  page,
+}) => {
+  await begin(page);
+  await colossus(page, 5);
+  await page.evaluate(() => cruciata.camera(1950, 2500));
+  await page.waitForTimeout(150);
+  const p = await page.evaluate(() => cruciata.project(1500, 2500));
+  await page.mouse.click(p.x, p.y);
+  const near = await page.evaluate(() => cruciata.project(1900, 2650));
+  await page.mouse.click(near.x, near.y, { button: "right" });
+  const order = await page.evaluate(
+    () =>
+      cruciata.internals().state.buildings.find((b) => b.id === 99500)
+        .fireTarget,
+  );
+  expect(order ?? null).toBeNull();
+  await expect(page.locator("#toast")).toContainText("Too close");
+  // A target that was legal but is now too close (set directly) never fires.
+  await page.evaluate(() => {
+    const b = cruciata.internals().state.buildings.find((x) => x.id === 99500);
+    b.fireTarget = { x: 1900, y: 2650 };
+    b.guardCooldown = 0;
+  });
+  expect((await shots(page, 6)).length).toBe(0);
+});
+
+test("the landing site stays in sight for three seconds, then fades out", async ({
+  page,
+}) => {
+  await begin(page);
+  await page.evaluate(() =>
+    cruciata.scenario((s) => {
+      s.cheats = { reveal: false };
+    }),
+  );
+  await colossus(page, 0, { fireTarget: { x: 3100, y: 2600 } });
+  const seen = await page.evaluate(() => {
+    const S = cruciata.internals().state,
+      out = {};
+    let landed = null;
+    for (let i = 0; i < 400 && !landed; i++) {
+      cruciata.step(0.1);
+      if (S.shotSights?.length) landed = S.shotSights[0];
+    }
+    const at = { x: landed.x, y: landed.y };
+    cruciata.step(0.3);
+    out.landed = cruciata.vision(at).visible;
+    cruciata.step(2.4);
+    out.held = cruciata.vision(at).visible;
+    cruciata.step(7);
+    out.faded = cruciata.vision(at).visible;
+    return out;
+  });
+  expect(seen).toEqual({ landed: true, held: true, faded: false });
 });

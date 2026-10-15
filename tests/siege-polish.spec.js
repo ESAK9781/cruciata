@@ -79,10 +79,10 @@ test("construction categories include a cheap unarmed long-range lookout and tri
     "Military",
     "Fortification",
   ]);
-  await expect(page.locator("#build-watchtower")).toHaveAttribute(
-    "title",
-    /35 wood.*1100/,
-  );
+  await page.locator("#settlement-tab").click();
+  await page.locator("#build-watchtower").hover();
+  await expect(page.locator("#tooltip")).toContainText(/35 wood/);
+  await expect(page.locator("#tooltip")).toContainText(/1100/);
   const result = await page.evaluate(() => {
     const s = cruciata.snapshot();
     const reserves = s.nodes.every(

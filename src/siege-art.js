@@ -1,7 +1,7 @@
 /* Original projected timber machinery. Height is a real model coordinate. */
 (() => {
   "use strict";
-  function workshop(g, angle, heightScale = 1) {
+  function workshop(g, angle, heightScale = 1, wood = null) {
     const A = window.CruciataArt,
       ca = Math.cos(angle),
       sa = Math.sin(angle),
@@ -53,7 +53,7 @@
       a,
       b,
       size = 9,
-      colors = ["#a58351", "#775935", "#c4a26a"],
+      colors = wood || ["#a58351", "#775935", "#c4a26a"],
     ) => {
       const axis = normalized(b.map((n, i) => n - a[i])),
         u = normalized(
@@ -182,8 +182,13 @@
     // buttresses and a second hoop; its crew are real villagers beside it.
     g.scale(big ? 1.4 : 0.7, big ? 1.4 : 0.7);
     // A stationary circular stone drum and toothed bearing support the turret.
-    for (let y = 17; y >= -4; y -= 7) {
-      A.ellipse(g, 0, y, 116, 84, y === -4 ? "#a7a180" : "#6f715a", "#414d3f");
+    const stoneTop = big ? "#6f7b6c" : "#a7a180",
+      stoneSide = big ? "#475246" : "#6f715a",
+      stoneEdge = big ? "#262e27" : "#414d3f",
+      gold = ["#d7b24a", "#8f7424", "#f5df8a"];
+    // The Colossus stands on a taller, darker bastion-stone plinth.
+    for (let y = big ? 31 : 17; y >= -4; y -= 7) {
+      A.ellipse(g, 0, y, 116, 84, y === -4 ? stoneTop : stoneSide, stoneEdge);
       for (let i = 0; i < 20; i++) {
         const a = (i * Math.PI) / 10;
         A.line(
@@ -197,14 +202,55 @@
         );
       }
     }
-    A.ellipse(g, 0, -7, 104, 75, "#414e44", "#bcb187");
-    A.ellipse(g, 0, -9, 89, 62, "#8d825e", "#283b2e");
+    A.ellipse(
+      g,
+      0,
+      -7,
+      104,
+      75,
+      big ? "#2d372f" : "#414e44",
+      big ? "#c9a84a" : "#bcb187",
+    );
+    A.ellipse(
+      g,
+      0,
+      -9,
+      89,
+      62,
+      big ? "#5b5a43" : "#8d825e",
+      big ? "#1c2a20" : "#283b2e",
+    );
     for (let i = 0; i < 48; i++) {
       const a = (i * Math.PI) / 24;
-      A.ellipse(g, Math.cos(a) * 99, -8 + Math.sin(a) * 71, 2, 1.6, "#c4b681");
+      A.ellipse(
+        g,
+        Math.cos(a) * 99,
+        -8 + Math.sin(a) * 71,
+        2,
+        1.6,
+        big ? "#d2b25a" : "#c4b681",
+      );
     }
-    const m = workshop(g, turn),
-      steel = ["#566058", "#303e35", "#a6ac95"];
+    if (big)
+      // Crenellations around the rim of the plinth.
+      for (let i = 0; i < 36; i++) {
+        const a = (i * Math.PI) / 18,
+          x = Math.cos(a) * 112,
+          y = Math.sin(a) * 81;
+        if (y > -30) {
+          A.ellipse(g, x, y - 2, 4.5, 3.4, "#5d6a5b", "#232b24");
+          A.ellipse(g, x, y - 6, 4.5, 3.4, "#7c897a", "#232b24");
+        }
+      }
+    const m = workshop(
+        g,
+        turn,
+        1,
+        big ? ["#5b422b", "#352619", "#7f6040"] : null,
+      ),
+      steel = big
+        ? ["#3b433e", "#202923", "#79826f"]
+        : ["#566058", "#303e35", "#a6ac95"];
     // The machine itself is a circular cage on radial bearings. Its tall hoops
     // and inward-sloping uprights establish a round, raised silhouette.
     for (let x = -65; x <= 65; x += 13) {
@@ -316,27 +362,94 @@
         "#454d43",
         "#c0b99b",
       ]);
+    const flames = [];
     if (big) {
-      ring(40, 104, 7, steel);
-      const gold = ["#d7b24a", "#8f7424", "#f5df8a"],
-        cloth = b.team === 1 ? "#8d2a1f" : "#b0322a";
+      const stone = ["#59644f", "#2f3a30", "#85917e"];
+      ring(40, 104, 7, gold);
+      ring(31, 116, 5, steel);
+      // Gilded bands on the throwing arm and a golden crest on the axle.
+      for (const f of [0.18, 0.42, 0.66, 0.9])
+        m.bar(
+          [0, tip[1] * f, 122 + (tip[2] - 122) * f],
+          [0, tip[1] * (f + 0.05), 122 + (tip[2] - 122) * (f + 0.05)],
+          18,
+          gold,
+        );
+      m.box(0, 0, 118, 16, 16, 12, gold);
+      // Gilded bands on the counterweight.
+      for (const z of [weightZ + 2, weightZ + 22])
+        m.bar([-16, tail[1], z], [16, tail[1], z], 28, gold);
       for (let i = 0; i < 12; i++) {
         const a = (i * Math.PI) / 6 + Math.PI / 12,
           x = Math.cos(a) * 103,
           y = Math.sin(a) * 103;
-        m.box(x, y, 0, 15, 15, 36, ["#8b8a72", "#565f50", "#c0b995"]);
-        m.box(x, y, 36, 10, 10, 6, gold);
+        m.box(x, y, 0, 17, 17, 44, stone);
+        m.box(x, y, 44, 12, 12, 6, gold);
+        // Every buttress is braced to the middle hoop by a timber strut.
+        m.bar(
+          [x * 0.97, y * 0.97, 46],
+          [Math.cos(a) * 49, Math.sin(a) * 49, 78],
+          6,
+        );
         if (i % 3 === 0) {
-          m.bar([x, y, 42], [x, y, 84], 3, steel);
+          m.bar([x, y, 50], [x, y, 128], 3, steel);
+          m.box(x, y, 126, 6, 6, 6, gold);
+          // Faction banner, turned to face the camera: the Christian red field
+          // with its cream cross, or the Islamic green field with a crescent.
+          const ux = Math.cos(turn),
+            uy = -Math.sin(turn),
+            at = (s, z) => [x + ux * s, y + uy * s, z],
+            islamic = b.team === 1,
+            field = islamic ? "#2b6a4e" : "#a3342a",
+            cream = "#efe2bf";
+          m.face(
+            [at(0, 126), at(40, 123), at(40, 95), at(0, 98)],
+            field,
+            "#1b1410",
+          );
+          m.setLayer(1);
+          if (islamic) {
+            const arc = [];
+            for (let k = 0; k <= 10; k++) {
+              const t = 0.8 + (k / 10) * 4.7;
+              arc.push(at(21 + Math.cos(t) * 8, 111 + Math.sin(t) * 8));
+            }
+            m.stroke(arc, 3, cream);
+          } else {
+            m.face(
+              [at(18.5, 122), at(22.5, 122), at(22.5, 100), at(18.5, 100)],
+              cream,
+              false,
+            );
+            m.face(
+              [at(11, 114), at(31, 114), at(31, 109), at(11, 109)],
+              cream,
+              false,
+            );
+          }
+          m.setLayer(0);
+        } else {
+          // Iron braziers burn atop the remaining buttresses.
+          m.box(x, y, 50, 11, 11, 7, steel);
           m.face(
             [
-              [x, y, 84],
-              [x + 3, y + 22, 78],
-              [x, y, 70],
+              [x - 4, y, 57],
+              [x + 4, y, 57],
+              [x + 1, y, 74 + (i % 2) * 5],
             ],
-            cloth,
-            "#3b1d18",
+            "#f4872a",
+            false,
           );
+          m.face(
+            [
+              [x - 2, y, 57],
+              [x + 2, y, 57],
+              [x, y, 67],
+            ],
+            "#ffe08a",
+            false,
+          );
+          flames.push([x, y, 62]);
         }
       }
     } else {
@@ -344,6 +457,11 @@
       m.person(96, 38, 1, b.team);
     }
     m.paint();
+    for (const f of flames) {
+      const [px, py] = m.project(f);
+      A.ellipse(g, px, py, 14, 9, "#ffa83a33");
+      A.ellipse(g, px, py, 7, 5, "#ffcf6a4d");
+    }
     g.restore();
   }
   function drawSiegeMachine(g, u, time, angle = u.angle || 0) {

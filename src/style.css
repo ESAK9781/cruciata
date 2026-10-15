@@ -2816,3 +2816,64 @@ main {
     font-size: 10px;
   }
 }
+
+/* Command cards stay compact: costs and descriptions live in the tooltip. */
+.action-card .cost,
+.action-card .role {
+  display: none !important;
+}
+.action-card .multi {
+  position: absolute;
+  top: 3px;
+  right: 4px;
+  padding: 0 4px;
+  border-radius: 8px;
+  background: #d0ad6b;
+  color: #2a1d10;
+  font:
+    700 10px/14px Georgia,
+    serif;
+}
+#tooltip {
+  position: fixed;
+  z-index: 1000;
+  max-width: 300px;
+  padding: 8px 10px;
+  border: 1px solid #d0ad6b;
+  background: #2b2016f2;
+  color: #f3e5c0;
+  font-size: 12px;
+  line-height: 1.4;
+  pointer-events: none;
+  box-shadow: 0 6px 18px #0009;
+  overflow-wrap: anywhere;
+}
+#tooltip[hidden] {
+  display: none;
+}
+#tooltip strong {
+  display: block;
+  font:
+    14px "IM Fell English",
+    serif;
+  color: #ffe9ad;
+}
+#tooltip .tip-cost {
+  margin: 3px 0;
+  color: #ebc79a;
+}
+#tooltip .tip-cost span + span::before {
+  content: " \00b7 ";
+  color: #bdab80;
+}
+#tooltip .tip-cost .short {
+  color: #ff8f75;
+}
+#tooltip .tip-multi {
+  color: #b9e0a0;
+  margin-bottom: 3px;
+}
+#tooltip p {
+  margin: 4px 0 0;
+  color: #e2d3ad;
+}

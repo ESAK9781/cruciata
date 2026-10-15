@@ -327,7 +327,7 @@ test("rectangle selection cancels foundations one at a time without rubble", asy
   expect(s.buildings.some((b) => ids.includes(b.id))).toBe(false);
 });
 
-test("bulk selection rotates individual recruits and cancellations among compatible producers", async ({
+test("bulk selection trains at every compatible producer and rotates cancellations among compatible producers", async ({
   page,
 }) => {
   await begin(page);
@@ -346,11 +346,10 @@ test("bulk selection rotates individual recruits and cancellations among compati
   await expect(page.locator("#selection-title")).toHaveText(
     "2 selected structures",
   );
+  // One click trains one unit at every selected barracks, and the card says so.
+  await expect(page.locator("#recruit-sword .multi")).toHaveText("×2");
   await page.locator("#recruit-sword").click();
   let s = await page.evaluate(() => cruciata.snapshot());
-  expect(s.buildings.slice(-2).map((b) => b.queue.length)).toEqual([1, 0]);
-  await page.locator("#recruit-sword").click();
-  s = await page.evaluate(() => cruciata.snapshot());
   expect(s.buildings.slice(-2).map((b) => b.queue.length)).toEqual([1, 1]);
   await page.locator("#cancel-button").click();
   await page.locator("#cancel-button").click();
