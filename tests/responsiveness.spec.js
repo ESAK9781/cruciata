@@ -344,3 +344,25 @@ test("attacks outside the view raise an alert that the Z key jumps to", async ({
   const view = await page.evaluate(() => cruciata.snapshot().camera);
   expect(Math.hypot(view.x - 3000, view.y - 3000)).toBeLessThan(200);
 });
+
+test("an enemy assault with no survivors is recorded as a failure and the next wave grows", async ({
+  page,
+}) => {
+  await begin(page, 1);
+  const result = await page.evaluate(() => {
+    cruciata.scenario((s) => {
+      s.enemy.assault = {
+        id: 424242,
+        size: 20,
+        at: s.time - 60,
+        continueAt: 0,
+      };
+      s.enemy.think = 0;
+    });
+    cruciata.step(2);
+    const { state } = cruciata.internals();
+    return { assault: state.enemy.assault, failures: state.enemy.failures };
+  });
+  expect(result.assault).toBeNull();
+  expect(result.failures).toBe(1);
+});

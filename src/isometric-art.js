@@ -965,7 +965,7 @@
       b.architecture || (b.team === 1 ? "islamic" : "christian"),
       !!b.fortified,
       !!b.bastionGate,
-      b.wallAttachment ? "attached4" : false,
+      b.wallAttachment ? "attached5" : false,
       b.closed !== false,
       b.gateAngle || 0,
       b.rotation || 0,
@@ -991,7 +991,7 @@
       const frame = Math.floor(((time * 0.7) / (Math.PI * 2)) * 24) % 24;
       sprite(
         g,
-        `buildingMotion:${b.kind}:${b.w}:${b.h}:${b.team}:${b.architecture || (b.team === 1 ? "islamic" : "christian")}:${b.wallAttachment ? "attached4" : false}:${!!b.fortified}:${frame}`,
+        `buildingMotion:${b.kind}:${b.w}:${b.h}:${b.team}:${b.architecture || (b.team === 1 ? "islamic" : "christian")}:${b.wallAttachment ? "attached5" : false}:${!!b.fortified}:${frame}`,
         width,
         height,
         width / 2,
@@ -1010,7 +1010,7 @@
                     ? 68
                     : ["tower", "watchtower"].includes(b.kind)
                       ? b.wallAttachment
-                        ? 91
+                        ? 108
                         : 64
                       : 40;
           const flag = buildingCamera(g, b).project([

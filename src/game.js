@@ -7382,8 +7382,27 @@
       "ram",
       "ballista",
     ];
+    // Remember what the player fields (only what the enemy has actually seen)
+    // and tilt recruitment toward its counters.
+    const intel = (ai.intel ||= { sword: 0, archer: 0, knight: 0 });
+    for (const k of Object.keys(intel)) intel[k] *= 0.85;
+    const sighted = { sword: 0, archer: 0, knight: 0 };
+    for (const e of state.units)
+      if (e.team === 0 && e.hp > 0 && e.type in sighted && enemyFog.sees(e))
+        sighted[e.type]++;
+    for (const k of Object.keys(intel))
+      intel[k] = Math.max(intel[k], sighted[k]);
+    const seen = intel.sword + intel.archer + intel.knight;
+    function counter(type, i) {
+      if (seen < 6 || i % 2) return type;
+      if (type === "sword" && intel.archer > seen * 0.4) return "knight";
+      if (type === "archer" && intel.knight > seen * 0.35) return "sword";
+      if (type === "knight" && intel.knight > seen * 0.4) return "sword";
+      if (type === "sword" && intel.sword > seen * 0.55) return "archer";
+      return type;
+    }
     for (let i = 0; i < (state.difficulty === "hard" ? 4 : 2); i++)
-      train(cycle[(army.length + i) % cycle.length]);
+      train(counter(cycle[(army.length + i) % cycle.length], i));
     if (state.difficulty !== "easy" && state.time > 300) {
       for (const type of ["sword", "archer", "knight"]) {
         const t = TECHS[type + (rankFor(type, 1) + 1)],
@@ -7512,66 +7531,21 @@
       }
       return;
     }
-    const healthy = active.filter(
-      (u) =>
-        !u.garrisonBase &&
-        !u.campaignPost &&
-        !u.fixedDefense &&
-        !u.curtainGuard &&
-        !u.regionalMission &&
-        !u.order?.formation &&
-        u.hp / u.maxHp > plan.retreat &&
-        distance(u, base) < 1200,
-    );
-    // Reinforcements muster at home instead of trickling into the battle.
-    for (const u of active)
-      if (!u.order && !u.target && !u.hold) {
-        u.home ||= findFree({
-          x: base.x - 180 + (u.id % 6) * 26,
-          y: base.y + 180 + Math.floor((u.id % 24) / 6) * 26,
-        });
-      }
-    for (const u of active)
-      if (u.hp / u.maxHp < plan.retreat) {
-        u.target = null;
-        u.order = {
-          ...findFree({ x: base.x - 100, y: base.y + 120 }),
-          attack: false,
-        };
-        u.squad = null;
-      }
-    if (
-      known.length &&
-      healthy.length >= plan.attack &&
-      state.time >= plan.grace &&
-      state.time - ai.attack > 65
-    ) {
-      ai.attack = state.time;
-      if (ai.faith >= 30 && state.difficulty !== "easy") {
-        ai.faith -= 30;
-        for (const u of healthy) {
-          u.blessed = 15;
-          u.hp = Math.min(u.maxHp, u.hp + 30);
-        }
-      }
-      const target = known.sort(
-        (a, b) =>
-          (a.kind === "tower" ? 500 : 0) +
-          distance(a, base) -
-          ((b.kind === "tower" ? 500 : 0) + distance(b, base)),
-      )[0];
-      const center = healthy.reduce(
-        (p, u) => ({
-          x: p.x + u.x / healthy.length,
-          y: p.y + u.y / healthy.length,
-        }),
-        { x: 0, y: 0 },
+    // Walls and gates are poor objectives: strike economy and production first.
+    function targetWeight(b, from = base) {
+      const wallish =
+        b.kind === "wall" || b.kind === "gate" || b.wallAttachment;
+      return (
+        distance(b, from) +
+        (b.kind === "tower" ? 500 : 0) +
+        (wallish ? 1800 : 0) +
+        (["barracks", "stable", "siegeworkshop"].includes(b.kind) ? -150 : 0) +
+        (b.kind === "towncenter" ? -100 : 0)
       );
+    }
+    function launchAssault(group, target, center) {
       const a = Math.atan2(target.y - center.y, target.x - center.x),
-        group = healthy
-          .sort((a, b) => TYPES[a.type].rank - TYPES[b.type].rank)
-          .slice(0, -plan.reserve);
-      const formationId = ++uid,
+        formationId = ++uid,
         destination = findFree({
           x: target.x - Math.cos(a) * (target.r + 80),
           y: target.y - Math.sin(a) * (target.r + 80),
@@ -7613,21 +7587,143 @@
           u.order = null;
         }
       });
-      if (group.length)
-        state.formations.push({
-          id: formationId,
-          members: group.map((u) => u.id),
-          anchor: { ...center },
-          routeStart: findFree(center),
-          sharedRoute: true,
-          routeReady: false,
-          destination,
-          path: [],
-          revision: nav.revision,
-          speed: Math.min(...group.map((u) => TYPES[u.type].speed)),
-          arrived: false,
-          wait: 0,
+      state.formations.push({
+        id: formationId,
+        members: group.map((u) => u.id),
+        anchor: { ...center },
+        routeStart: findFree(center),
+        sharedRoute: true,
+        routeReady: false,
+        destination,
+        path: [],
+        revision: nav.revision,
+        speed: Math.min(...group.map((u) => TYPES[u.type].speed)),
+        arrived: false,
+        wait: 0,
+      });
+      return formationId;
+    }
+    // An assault presses on to the next known objective while it is strong,
+    // and falls back as one body when it has been bled white.
+    if (ai.assault) {
+      const raiders = active.filter((u) => u.assault === ai.assault.id);
+      const recall = (failed) => {
+        for (const u of raiders) {
+          delete u.assault;
+          if (u.type === "trebuchet") continue;
+          u.target = null;
+          u.order = {
+            ...findFree({ x: base.x - 100 + (u.id % 5) * 30, y: base.y + 150 }),
+            attack: false,
+          };
+          u.path = [];
+        }
+        if (failed) ai.failures = (ai.failures || 0) + 1;
+        else ai.failures = 0;
+        ai.assault = null;
+      };
+      if (!raiders.length) recall(true);
+      else if (state.time - ai.assault.at > 300) recall(false);
+      else if (
+        state.time - ai.assault.at > 30 &&
+        raiders.length < ai.assault.size * 0.35
+      )
+        recall(true);
+      else if (state.time >= ai.assault.continueAt) {
+        ai.assault.continueAt = state.time + 8;
+        const idle = raiders.filter(
+          (u) =>
+            !u.order &&
+            !u.target &&
+            !u.pendingOrder &&
+            u.deployment !== "setting-up" &&
+            u.deployment !== "packing",
+        );
+        if (idle.length >= Math.max(3, raiders.length * 0.5)) {
+          const middle = idle.reduce(
+            (p, u) => ({
+              x: p.x + u.x / idle.length,
+              y: p.y + u.y / idle.length,
+            }),
+            { x: 0, y: 0 },
+          );
+          const next = known
+            .filter((b) => b.hp > 0)
+            .sort(
+              (a, b) => targetWeight(a, middle) - targetWeight(b, middle),
+            )[0];
+          if (next) launchAssault(idle, next, middle);
+          else recall(false);
+        }
+      }
+    }
+    const healthy = active.filter(
+      (u) =>
+        !u.garrisonBase &&
+        !u.campaignPost &&
+        !u.fixedDefense &&
+        !u.curtainGuard &&
+        !u.regionalMission &&
+        !u.order?.formation &&
+        u.hp / u.maxHp > plan.retreat &&
+        distance(u, base) < 1200,
+    );
+    // Reinforcements muster at home instead of trickling into the battle.
+    for (const u of active)
+      if (!u.order && !u.target && !u.hold && !u.assault) {
+        u.home ||= findFree({
+          x: base.x - 180 + (u.id % 6) * 26,
+          y: base.y + 180 + Math.floor((u.id % 24) / 6) * 26,
         });
+      }
+    for (const u of active)
+      if (u.hp / u.maxHp < plan.retreat) {
+        delete u.assault;
+        u.target = null;
+        u.order = {
+          ...findFree({ x: base.x - 100, y: base.y + 120 }),
+          attack: false,
+        };
+        u.squad = null;
+      }
+    if (
+      known.length &&
+      !ai.assault &&
+      healthy.length >=
+        Math.round(
+          plan.attack * (1 + Math.min(0.5, 0.15 * (ai.failures || 0))),
+        ) &&
+      state.time >= plan.grace &&
+      state.time - ai.attack > 65
+    ) {
+      ai.attack = state.time;
+      if (ai.faith >= 30 && state.difficulty !== "easy") {
+        ai.faith -= 30;
+        for (const u of healthy) {
+          u.blessed = 15;
+          u.hp = Math.min(u.maxHp, u.hp + 30);
+        }
+      }
+      const target = known.sort((a, b) => targetWeight(a) - targetWeight(b))[0];
+      const center = healthy.reduce(
+        (p, u) => ({
+          x: p.x + u.x / healthy.length,
+          y: p.y + u.y / healthy.length,
+        }),
+        { x: 0, y: 0 },
+      );
+      const group = healthy
+        .sort((a, b) => TYPES[a.type].rank - TYPES[b.type].rank)
+        .slice(0, -plan.reserve);
+      if (group.length) {
+        ai.assault = {
+          id: launchAssault(group, target, center),
+          size: group.length,
+          at: state.time,
+          continueAt: state.time + 12,
+        };
+        for (const u of group) u.assault = ai.assault.id;
+      }
     }
   }
   function regionalCompany(members, destination, base) {

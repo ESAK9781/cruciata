@@ -26,7 +26,11 @@
     const fortified = !!(b.fortified || b.wallAttachment?.fortified),
       stone = fortified ? P.bastion : P.limestone;
     const progress = b.progress < 1 ? 0.3 + 0.7 * b.progress : 1,
-      m = A.projectedModel(g, 0, 0.72 * progress);
+      m = A.projectedModel(
+        g,
+        0,
+        (b.kind === "tower" && b.wallAttachment ? 1 : 0.72) * progress,
+      );
     const tint = (hex, factor) => {
       const n = parseInt(hex.slice(1), 16);
       return (
@@ -280,15 +284,8 @@
       m.dome(x, y, z + h, 5.5, 8, P.turquoise, 24);
       m.beam([x, y, z + h + 8], [x, y, z + h + 13], 0.8, "#c6a454");
     }
-    m.box(
-      0,
-      0,
-      0,
-      w,
-      d,
-      2,
-      b.wallAttachment ? stone : islamic ? "#c7ba95" : "#ada285",
-    );
+    if (!(b.kind === "tower" && b.wallAttachment))
+      m.box(0, 0, 0, w, d, 2, islamic ? "#c7ba95" : "#ada285");
     if (b.kind === "farm") {
       m.box(0, 0, 2, w - 4, d - 4, 1, "#74603a");
       for (let y = -d / 2 + 6; y < d / 2 - 4; y += 8) {
