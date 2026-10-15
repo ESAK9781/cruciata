@@ -21,12 +21,21 @@ const { chromium } = require("@playwright/test");
             min: m + 1,
             result: s.result || null,
             mine: s.units.filter((u) => u.team === 0).length,
-            army: s.units.filter((u) => u.team === 0 && !["worker", "civilian"].includes(u.type)).length,
+            army: s.units.filter(
+              (u) => u.team === 0 && !["worker", "civilian"].includes(u.type),
+            ).length,
             foes: s.units.filter((u) => u.team === 1).length,
             myB: s.buildings.filter((b) => b.team === 0 && b.hp > 0).length,
             foeB: s.buildings.filter((b) => b.team === 1 && b.hp > 0).length,
-            food: Math.round(s.food), wood: Math.round(s.wood), gold: Math.round(s.gold), stone: Math.round(s.stone),
-            objective: s.objective && (s.objective.text || s.objective.label || JSON.stringify(s.objective).slice(0, 80)),
+            food: Math.round(s.food),
+            wood: Math.round(s.wood),
+            gold: Math.round(s.gold),
+            stone: Math.round(s.stone),
+            objective:
+              s.objective &&
+              (s.objective.text ||
+                s.objective.label ||
+                JSON.stringify(s.objective).slice(0, 80)),
           });
           if (s.result) break;
         }

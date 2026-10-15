@@ -1205,9 +1205,11 @@
     }
     return false;
   }
+  // Integer grid keys avoid building a string for every spatial lookup.
+  const cellKey = (gx, gy) => (gx + 1024) * 4096 + (gy + 1024);
   function groundFree(x, y, margin = 10, ignore = null, adjacentWalls = false) {
     if (!landFree(x, y, margin)) return false;
-    const bucket = Math.floor(x / 128) + "," + Math.floor(y / 128),
+    const bucket = cellKey(Math.floor(x / 128), Math.floor(y / 128)),
       index =
         obstacleIndex && !state.navDirty && margin <= 64 ? obstacleIndex : null;
     for (const b of index
@@ -1278,7 +1280,7 @@
           map = new Map();
           combatStructures.set(b.team, map);
         }
-        const key = Math.floor(b.x / 256) + "," + Math.floor(b.y / 256);
+        const key = cellKey(Math.floor(b.x / 256), Math.floor(b.y / 256));
         if (!map.has(key)) map.set(key, []);
         map.get(key).push(b);
         combatStructureRadius = Math.max(combatStructureRadius, b.r || 0);
@@ -1294,7 +1296,7 @@
           x <= Math.floor((o.x + rx + 64) / 128);
           x++
         ) {
-          const key = x + "," + y;
+          const key = cellKey(x, y);
           if (!map.has(key)) map.set(key, []);
           map.get(key).push(o);
         }
@@ -1342,7 +1344,7 @@
     for (const b of state.buildings) {
       const neighbors =
         curtainBuckets.get(
-          Math.floor(b.x / 128) + "," + Math.floor(b.y / 128),
+          cellKey(Math.floor(b.x / 128), Math.floor(b.y / 128)),
         ) || [];
       if (b.kind === "wall" && b.hp > 0)
         b.links = wallConnections(b, neighbors);
@@ -1890,6 +1892,17 @@
       );
     return id;
   }
+  // The river's only crossing must stay open: keep neutral masonry off the bridge.
+  function nearBridge(p, pad = 200) {
+    const river = state.config
+      ? state.config.biome === 1
+      : LEVELS[state.level].terrain === 1;
+    return (
+      river &&
+      Math.abs(p.y - bridgeY()) < pad &&
+      Math.abs(p.x - riverX(p.y)) < pad + 60
+    );
+  }
   function addSiegeCity(x, y, name) {
     x = Math.round(x / 32) * 32;
     y = Math.round(y / 32) * 32;
@@ -1925,18 +1938,11 @@
           : ["barracks", "stable", "chapel", "siegeworkshop", "farm", "mill"][
               i % 6
             ];
-      state.buildings.push(
-        makeBuilding(
-          kind,
-          3,
-          x + Math.cos(angle) * r,
-          y + Math.sin(angle) * r,
-          1,
-          extra,
-        ),
-      );
+      const spot = { x: x + Math.cos(angle) * r, y: y + Math.sin(angle) * r };
+      if (nearBridge(spot, 260)) continue;
+      state.buildings.push(makeBuilding(kind, 3, spot.x, spot.y, 1, extra));
     }
-    for (const p of defensivePlots(city, 960))
+    for (const p of defensivePlots(city, 960).filter((p) => !nearBridge(p)))
       state.buildings.push(
         makeBuilding(p.kind, 3, p.x, p.y, 1, {
           ...extra,
@@ -3579,7 +3585,7 @@
       for (const o of list) objectIndex.set(o.id, o);
     for (const u of state.units)
       if (u.hp > 0) {
-        const key = Math.floor(u.x / 200) + "," + Math.floor(u.y / 200);
+        const key = cellKey(Math.floor(u.x / 200), Math.floor(u.y / 200));
         if (!spatial.has(key)) spatial.set(key, []);
         spatial.get(key).push(u);
       }
@@ -3592,7 +3598,7 @@
       ey = Math.floor((u.y + r) / 200);
     for (let y = sy; y <= ey; y++)
       for (let x = sx; x <= ex; x++)
-        for (const other of spatial.get(x + "," + y) || [])
+        for (const other of spatial.get(cellKey(x, y)) || [])
           if (other.hp > 0 && distance(u, other) < r) out.push(other);
     return out;
   }
@@ -3612,7 +3618,7 @@
             x <= Math.floor((p.x + reach) / 256);
             x++
           )
-            for (const b of map.get(x + "," + y) || []) out.push(b);
+            for (const b of map.get(cellKey(x, y)) || []) out.push(b);
     return out;
   }
   function resourceCluster(target) {
@@ -4084,6 +4090,31 @@
       u.marchGoal = null;
     }
   }
+  // Line-of-sight answers rarely change within a fifth of a second; remember them
+  // per unit and per slot so marching armies do not rescan the same ground.
+  const clearMemo = new WeakMap();
+  function clearCached(u, slot, a, b) {
+    let memo = clearMemo.get(u);
+    if (!memo) clearMemo.set(u, (memo = {}));
+    const hit = memo[slot];
+    if (
+      hit &&
+      hit.revision === nav.revision &&
+      state.time - hit.t < 0.2 + (u.id % 5) * 0.02 &&
+      Math.abs(hit.x - b.x) < 2 &&
+      Math.abs(hit.y - b.y) < 2
+    )
+      return hit.value;
+    const value = nav.clearLine(a, b);
+    memo[slot] = {
+      revision: nav.revision,
+      t: state.time,
+      x: b.x,
+      y: b.y,
+      value,
+    };
+    return value;
+  }
   // While a budgeted route is computing, head straight for the goal when the
   // first stretch is clear so orders feel instant instead of stalling.
   function provisionalPath(u, p) {
@@ -4244,7 +4275,11 @@
       }
     }
     // Direct line-of-sight shortcuts directly to destination
-    if (distToGoal < 220 && nav.clearLine(u, p)) {
+    if (
+      distToGoal < 220 &&
+      !(u.path?.length === 1 && u.path[0].x === p.x && u.path[0].y === p.y) &&
+      clearCached(u, "goal", u, p)
+    ) {
       u.path = [p];
       u.pathGoal = p;
       u.pathRequest = null;
@@ -4316,7 +4351,7 @@
       const distToCur = distance(u, cur);
       if (
         distToCur < reachDist &&
-        (u.path.length < 2 || nav.clearLine(u, u.path[1]))
+        (u.path.length < 2 || clearCached(u, "next", u, u.path[1]))
       ) {
         u.path.shift();
         continue;
@@ -4326,11 +4361,11 @@
         const segX = nextWp.x - cur.x,
           segY = nextWp.y - cur.y;
         const dot = (u.x - cur.x) * segX + (u.y - cur.y) * segY;
-        if (dot > 0 && nav.clearLine(u, nextWp)) {
+        if (dot > 0 && clearCached(u, "next", u, nextWp)) {
           u.path.shift();
           continue;
         }
-        if (distance(u, nextWp) < 220 && nav.clearLine(u, nextWp)) {
+        if (distance(u, nextWp) < 220 && clearCached(u, "next", u, nextWp)) {
           u.path.shift();
           continue;
         }
@@ -4376,7 +4411,7 @@
       ? state.formations.find((f) => f.id === u.order.formation)
       : null;
     const cohTarget = formation?.anchor;
-    if (cohTarget && distToGoal > 220 && nav.clearLine(u, cohTarget)) {
+    if (cohTarget && distToGoal > 220 && clearCached(u, "coh", u, cohTarget)) {
       const cdx = cohTarget.x - u.x,
         cdy = cohTarget.y - u.y,
         cd = Math.hypot(cdx, cdy);
@@ -5180,7 +5215,7 @@
           y = b.y + Math.sin(angle) * length;
         const local = obstacleIndex
           ? obstacleIndex.decorations.get(
-              Math.floor(x / 128) + "," + Math.floor(y / 128),
+              cellKey(Math.floor(x / 128), Math.floor(y / 128)),
             ) || []
           : decorations;
         const terrainBlocked =
@@ -6658,11 +6693,15 @@
             ? Math.min(220, TYPES[u.type].range + 50)
             : 310;
       if (
-        !formation ||
-        distance(u, formation.anchor) < 270 ||
-        u.lastHit > state.time - 2
-      )
+        (!formation ||
+          distance(u, formation.anchor) < 270 ||
+          u.lastHit > state.time - 2) &&
+        // Searching every frame is wasteful; stagger scans a fifth of a second apart.
+        (state.time >= (u.acquireAt || 0) || u.lastHit > state.time - 0.5)
+      ) {
+        u.acquireAt = state.time + 0.18 + (u.id % 7) * 0.03;
         target = acquire(u, !autonomous ? TYPES[u.type].range + 35 : r);
+      }
       if (
         !autonomous &&
         target &&
@@ -10354,6 +10393,19 @@
     sound("select");
     updateUI();
   });
+  // Double-click a unit to select every unit of its type on screen.
+  canvas.addEventListener("dblclick", (e) => {
+    if (!playable() || mode !== "move") return;
+    const p = point(e),
+      unit = friendUnits()
+        .filter((u) => Art.hitUnit(u, p, state.time))
+        .sort((a, b) => distance(a, p) - distance(b, p))[0];
+    if (!unit) return;
+    for (const other of friendUnits())
+      if (other.type === unit.type && onScreen(other, 0))
+        selected.add(other.id);
+    updateUI();
+  });
   canvas.addEventListener("pointercancel", () => {
     drag = null;
     wallDrag = null;
@@ -10979,6 +11031,7 @@
             moveUnit,
             formationRoutes,
             combatAI,
+            decorations: () => decorations,
           }
         : null,
   };

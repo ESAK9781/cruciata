@@ -457,7 +457,7 @@ test("walls block travel and gates open or close their passage", async ({
   await page.locator("#upgrade-gate-button").click();
   await page.evaluate(() => cruciata.step(25.1));
   const b = await page.evaluate(() =>
-    cruciata.snapshot().buildings.find((b) => b.gateSegments),
+    cruciata.snapshot().buildings.find((b) => b.team === 0 && b.gateSegments),
   );
   await expect(page.locator("#gate-button")).toBeVisible();
   // Newly built gates start closed; opening is an explicit player action.
@@ -473,54 +473,40 @@ test("construction stages and damage severity produce distinct consistent artwor
   page,
 }) => {
   await begin(page);
-  const images = await page.evaluate(() =>
-    [0, 0.25, 0.6, 1].map((progress) => {
+  const result = await page.evaluate(async () => {
+    const paint = (spec) => {
       const c = document.createElement("canvas");
       c.width = c.height = 150;
       CruciataArt.structure(
         c.getContext("2d"),
         {
           id: 7,
-          kind: "barracks",
           x: 75,
           y: 75,
-          w: 88,
-          h: 76,
           hp: 1000,
           maxHp: 1000,
           team: 0,
-          progress,
-        },
-        1,
-      );
-      return c.toDataURL();
-    }),
-  );
-  expect(new Set(images).size).toBe(4);
-  const damages = await page.evaluate(() =>
-    [1000, 700, 350].map((hp) => {
-      const c = document.createElement("canvas");
-      c.width = c.height = 150;
-      CruciataArt.structure(
-        c.getContext("2d"),
-        {
-          id: 7,
-          kind: "chapel",
-          x: 75,
-          y: 75,
-          w: 70,
-          h: 95,
-          hp,
-          maxHp: 1000,
-          team: 0,
           progress: 1,
+          ...spec,
         },
         1,
       );
       return c.toDataURL();
-    }),
-  );
-  expect(new Set(damages).size).toBe(3);
+    };
+    const stages = () =>
+      [0, 0.25, 0.6, 1].map((progress) =>
+        paint({ kind: "barracks", w: 88, h: 76, progress }),
+      );
+    const damage = () =>
+      [1000, 700, 350].map((hp) => paint({ kind: "chapel", w: 70, h: 95, hp }));
+    // Atlas pages decode on demand: warm them, then compare settled frames.
+    stages();
+    damage();
+    await CruciataAtlas.ready;
+    return { images: stages(), damages: damage() };
+  });
+  expect(new Set(result.images).size).toBe(4);
+  expect(new Set(result.damages).size).toBe(3);
 });
 test("music and effects controls persist independently", async ({ page }) => {
   await begin(page);
@@ -695,6 +681,8 @@ test("siege splash damages allies and enemies and leaves casualties", async ({
       });
     }),
   );
+  // Off-camera effects are intentionally skipped, so view the impact.
+  await page.evaluate(() => cruciata.camera(1200, 2000));
   await page.evaluate(() => cruciata.step(0.2));
   const s = await snapshot(page);
   expect(s.losses).toBeGreaterThan(0);
