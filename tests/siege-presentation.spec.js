@@ -273,6 +273,8 @@ test("projectile artwork grows at the apex while its damage radius stays fixed",
   page,
 }) => {
   await start(page);
+  // Heavy shells arc 340 units high; keep the apex inside the view.
+  await page.evaluate(() => cruciata.camera(1900, 2450));
   await page.evaluate(() => {
     window.projectileSizes = [];
     const ellipse = CruciataArt.ellipse;
@@ -332,7 +334,7 @@ test("raised siege models render locally, turn, and animate their mechanisms", a
   page,
 }) => {
   await start(page);
-  const result = await page.evaluate(() => {
+  const result = await page.evaluate(async () => {
     const paint = (type, time, angle) => {
       const c = document.createElement("canvas");
       c.width = c.height = 400;
@@ -364,6 +366,15 @@ test("raised siege models render locally, turn, and animate their mechanisms", a
         }
       return { url: c.toDataURL(), minY, maxY, count };
     };
+    // Atlas pages decode on demand: warm every pose, then measure settled frames.
+    for (const type of ["greatengine", "ram", "ballista"])
+      for (const [time, angle] of [
+        [0.15, 0],
+        [0.5, 0],
+        [0.15, 0.8],
+      ])
+        paint(type, time, angle);
+    await CruciataAtlas.ready;
     const poses = ["greatengine", "ram", "ballista"].map((type) => {
       const a = paint(type, 0.15, 0),
         b = paint(type, 0.5, 0),
@@ -462,7 +473,7 @@ test("siege sprite bounds retain mechanisms and trebuchet setup raises a lower m
   page,
 }) => {
   await page.goto("/?test");
-  const result = await page.evaluate(() => {
+  const result = await page.evaluate(async () => {
     const c = document.createElement("canvas");
     c.width = c.height = 600;
     const g = c.getContext("2d");
@@ -521,6 +532,9 @@ test("siege sprite bounds retain mechanisms and trebuchet setup raises a lower m
         }
       return last - first;
     };
+    height("packed");
+    height("deployed");
+    await CruciataAtlas.ready;
     return { borders, packed: height("packed"), deployed: height("deployed") };
   });
   expect(result.borders.every(Boolean)).toBe(true);

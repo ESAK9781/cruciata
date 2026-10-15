@@ -455,7 +455,7 @@
     gapRoute(start, goal) {
       return this.complete(this.gapRouteSteps(start, goal));
     }
-    *gapRouteSteps(start, goal) {
+    *gapRouteSteps(start, goal, limit = 512) {
       // Obstacle-edge vertices retain passages narrower than a navigation cell.
       const pad = 256;
       const points = [
@@ -469,7 +469,7 @@
               Math.hypot(b.x - start.x, b.y - start.y) -
               Math.hypot(b.x - goal.x, b.y - goal.y),
           )
-          .slice(0, 512),
+          .slice(0, limit),
       ];
       const cost = new Float64Array(points.length).fill(Infinity),
         parent = new Int32Array(points.length).fill(-1),
@@ -804,11 +804,19 @@
       route.reverse();
       const smooth = [];
       let anchor = start,
-        i = 0;
+        i = 0,
+        checks = 0;
       while (i < route.length) {
         let far = i;
-        while (far + 1 < route.length && this.clearLine(anchor, route[far + 1]))
+        // Bounded lookahead that yields keeps long routes from freezing the frame.
+        while (
+          far + 1 < route.length &&
+          far - i < 48 &&
+          this.clearLine(anchor, route[far + 1])
+        ) {
           far++;
+          if ((++checks & 3) === 0) yield;
+        }
         yield;
         smooth.push(route[far]);
         anchor = route[far];
@@ -828,7 +836,7 @@
         return sum + Math.hypot(p.x - prev.x, p.y - prev.y);
       }, 0);
       if (precise && direct < 2000 && length > direct * 1.45) {
-        const gap = yield* this.gapRouteSteps(start, destination);
+        const gap = yield* this.gapRouteSteps(start, destination, 160);
         if (
           gap.length &&
           gap.reduce((sum, p, i) => {

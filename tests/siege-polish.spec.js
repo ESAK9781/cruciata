@@ -284,6 +284,13 @@ test("capturing a neutral outpost converts its residents into playable villagers
       ids = residents.map((u) => u.id);
       s.units = [...residents, ...troops];
       s.enemy.think = 1e6;
+      // Forward-post towers and regional armies would otherwise contest the outpost.
+      s.campaignRules = null;
+      s.regionalThink = 1e9;
+      s.cities = [];
+      s.buildings = s.buildings.filter(
+        (b) => b.team !== 1 || b.kind === "towncenter",
+      );
       troops.forEach((u, i) => {
         u.x = site.x + 70;
         u.y = site.y + (i - 1) * 24;

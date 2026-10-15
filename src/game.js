@@ -1193,6 +1193,9 @@
       dy = y - b.y,
       r = (b.fortified ? 24 : 15) + margin,
       r2 = r * r;
+    // Arms never exceed 42 units, so distant pieces cannot block.
+    if (dx > 42 + r || dx < -42 - r || dy > 42 + r || dy < -42 - r)
+      return false;
     for (const arm of wallArms(b, fallbackAngle)) {
       const t = clamp(
         (dx * arm.x + dy * arm.y) / (arm.x * arm.x + arm.y * arm.y || 1),
@@ -1265,6 +1268,8 @@
   }
   function rebuildNavigation() {
     state.navDirty = false;
+    state.navCombat = false;
+    state.navAt = state.time;
     objectIndex.clear();
     obstacleIndex = {
       buildings: new Map(),
@@ -4166,19 +4171,27 @@
       return true;
     }
     // Stall watchdog: a unit that is commanded to move but makes no headway
-    // re-plans, and gives up gracefully when it is already near its slot.
+    // re-plans, and gives up gracefully only when it is already near its slot.
     const progress = u.progress;
     if (!progress || state.time - progress.last > 0.5) {
-      u.progress = { x: u.x, y: u.y, t: state.time, last: state.time };
+      u.progress = {
+        x: u.x,
+        y: u.y,
+        t: state.time,
+        last: state.time,
+        stalled: 0,
+      };
     } else {
       progress.last = state.time;
       if (distance(progress, u) > 14) {
         progress.x = u.x;
         progress.y = u.y;
         progress.t = state.time;
+        progress.stalled = 0;
       } else if (state.time - progress.t > 2.5) {
         progress.t = state.time;
-        if (distToGoal < 150) {
+        progress.stalled += 2.5;
+        if (distToGoal < 40 || (progress.stalled >= 7.5 && distToGoal < 150)) {
           u.moving = false;
           u.vx = 0;
           u.vy = 0;
@@ -4230,9 +4243,14 @@
         ) {
           // The first point is the company origin; join the nearest visible route entry.
           let entry = 0;
-          while (
+          // Joining the shared route needs only a nearby visible entry, not a scan of the whole route.
+          for (
+            let scans = 0;
+            scans < 12 &&
             entry + 1 < company.path.length &&
-            nav.clearLine(u, company.path[entry + 1])
+            distance(u, company.path[entry + 1]) < 900 &&
+            nav.clearLine(u, company.path[entry + 1]);
+            scans++
           )
             entry++;
           const route = company.path.slice(entry);
@@ -4361,7 +4379,12 @@
         const segX = nextWp.x - cur.x,
           segY = nextWp.y - cur.y;
         const dot = (u.x - cur.x) * segX + (u.y - cur.y) * segY;
-        if (dot > 0 && clearCached(u, "next", u, nextWp)) {
+        if (
+          dot > 0 &&
+          Math.abs(nextWp.x - u.x) < 480 &&
+          Math.abs(nextWp.y - u.y) < 480 &&
+          clearCached(u, "next", u, nextWp)
+        ) {
           u.path.shift();
           continue;
         }
@@ -4411,7 +4434,13 @@
       ? state.formations.find((f) => f.id === u.order.formation)
       : null;
     const cohTarget = formation?.anchor;
-    if (cohTarget && distToGoal > 220 && clearCached(u, "coh", u, cohTarget)) {
+    if (
+      cohTarget &&
+      distToGoal > 220 &&
+      Math.abs(cohTarget.x - u.x) < 320 &&
+      Math.abs(cohTarget.y - u.y) < 320 &&
+      clearCached(u, "coh", u, cohTarget)
+    ) {
       const cdx = cohTarget.x - u.x,
         cdy = cohTarget.y - u.y,
         cd = Math.hypot(cdx, cdy);
@@ -6338,6 +6367,32 @@
         b.id === state.buildings[1]?.id)
     );
   }
+  // Off-screen attacks on the player raise a minimap ping, a horn and a toast.
+  function raiseAlert(o) {
+    const alerts = (state.alerts ||= []),
+      near = alerts.find((a) => distance(a, o) < 500);
+    if (near) {
+      near.t = 0;
+      near.x = o.x;
+      near.y = o.y;
+    } else alerts.push({ x: o.x, y: o.y, t: 0 });
+    if (state.time >= (state.alertAt || 0) && !onScreen(o, -40)) {
+      state.alertAt = state.time + 10;
+      toast(
+        o.kind
+          ? BUILDINGS[o.kind].name + " is under attack! Press Z to look."
+          : "Your troops are under attack! Press Z to look.",
+      );
+      sound("horn");
+    }
+  }
+  function jumpToAlert() {
+    const alert = state.alerts?.[state.alerts.length - 1];
+    if (!alert || !playable()) return;
+    camera.x = alert.x;
+    camera.y = alert.y;
+    updateView();
+  }
   function damage(target, amount, source, siege = false) {
     if (DEBUG_MODE && state.cheats?.invulnerable && target?.team === 0) return;
     if (!target || target.hp <= 0 || target.team === 2) return;
@@ -6363,6 +6418,14 @@
           : 0.22
         : 1;
     target.hp -= amount * armored * (target.blessed > 0 ? 0.75 : 1);
+    if (
+      target.team === 0 &&
+      source &&
+      source.team !== 0 &&
+      source.team !== 2 &&
+      amount > 0
+    )
+      raiseAlert(target);
     if (target.kind === "fort" && siege && source?.team === 0)
       state.stats.siegeHits++;
     if (target.type && !target.kind) {
@@ -6373,7 +6436,9 @@
     if (target.hp > 0) return;
     target.hp = 0;
     if (target.kind) {
-      state.navDirty = true;
+      // Fallen masonry stops blocking at once (hp check); the route grid follows
+      // within a third of a second so sieges do not rebuild it every shell.
+      state.navCombat = true;
       if (isCapital(target)) {
         finish(target.team !== 0);
         return;
@@ -6697,9 +6762,12 @@
           distance(u, formation.anchor) < 270 ||
           u.lastHit > state.time - 2) &&
         // Searching every frame is wasteful; stagger scans a fifth of a second apart.
-        (state.time >= (u.acquireAt || 0) || u.lastHit > state.time - 0.5)
+        // Idle troops react at once; marching troops spread their first scan.
+        (state.time >=
+          (u.acquireAt ??= u.order ? state.time + (u.id % 13) * 0.016 : 0) ||
+          u.lastHit > state.time - 0.5)
       ) {
-        u.acquireAt = state.time + 0.18 + (u.id % 7) * 0.03;
+        u.acquireAt = state.time + 0.2 + (u.id % 11) * 0.025;
         target = acquire(u, !autonomous ? TYPES[u.type].range + 35 : r);
       }
       if (
@@ -7787,7 +7855,9 @@
     const threats = nearby(u, 180).filter(
       (e) => e.team !== u.team && e.team !== 2 && TYPES[e.type].damage > 0,
     );
-    if (threats.length) {
+    if (threats.length && state.time >= (u.fleeAt || 0)) {
+      // Re-plan the flight twice a second, not every frame.
+      u.fleeAt = state.time + 0.5;
       const closest = threats.sort(
           (a, b) => distance(a, u) - distance(b, u),
         )[0],
@@ -7951,8 +8021,19 @@
         state.occupation >= (rules?.hold || 90),
     };
   }
+  // Test-only phase timers locate frame hitches without touching production work.
+  const phases = {};
+  let phaseClock = 0;
+  const mark = (name, detail = "") => {
+    if (!TEST) return;
+    const now = performance.now(),
+      key = detail ? name + ":" + detail : name;
+    phases[key] = (phases[key] || 0) + (now - phaseClock);
+    phaseClock = now;
+  };
   function update(dt) {
     if (!playable()) return;
+    if (TEST) phaseClock = performance.now();
     const ownCapital =
       state.buildings.find((b) => b.id === state.capitals?.player) ||
       state.buildings.find((b) => b.team === 0 && b.kind === "towncenter");
@@ -7994,7 +8075,9 @@
       visionTimer = 0.2;
     }
     state.waveTimer -= dt;
+    mark("pre");
     campaignPressure(dt);
+    mark("campaign");
     state.screenShake = Math.max(0, (state.screenShake || 0) - dt * 16);
     state.saveTimer -= dt;
     const foodUse = fighters().length * 0.025 * dt;
@@ -8022,6 +8105,8 @@
           completeBuildings("chapel").length * 0.5) *
           dt,
     );
+    if (state.navCombat && state.time - (state.navAt ?? -9) >= 0.3)
+      state.navDirty = true;
     if (state.navDirty) {
       state.navDirty = false;
       rebuildNavigation();
@@ -8078,9 +8163,13 @@
         }
       }
     }
+    mark("nav+gates");
     updateScouting(dt);
+    mark("scouting");
     updateFormations(dt);
+    mark("formations");
     strategicAI(dt);
+    mark("strategic");
     for (const b of state.buildings) {
       if (b.upgradeOwner) {
         const owner = getObject(b.upgradeOwner);
@@ -8269,6 +8358,7 @@
           }
       }
     }
+    mark("buildings");
     for (const u of [...state.units]) {
       if (u.hp <= 0) continue;
       u.moving = false;
@@ -8291,8 +8381,10 @@
       else if (u.type === "civilian") civilianAI(u, dt);
       else if (u.type === "pilgrim" || u.type === "merchant") caravanAI(u, dt);
       else combatAI(u, dt);
+      mark("unit", u.type);
     }
     // Local crowd separation prevents overlapping and preserves spacing without pushing units through walls.
+    mark("units-end");
     // Fighters hold their ground but still make room for one another.
     const crowding = (u) =>
       u.moving ||
@@ -8355,6 +8447,7 @@
         });
       }
     }
+    mark("separation+fx");
     for (const a of state.arrows) {
       const target = getObject(a.target);
       if (target?.hp > 0) {
@@ -8522,7 +8615,9 @@
       }
     }
     state.boulders = state.boulders.filter((s) => !s.hit);
+    mark("projectiles");
     captureCities(dt);
+    mark("cities");
     for (const s of state.sites) {
       if (s.name === "Pilgrim refuge") continue;
       const owner = s.team ?? (s.captured ? 0 : 2);
@@ -8628,6 +8723,10 @@
       }
       state.debris = state.debris.filter((d) => !d.done);
     }
+    if (state.alerts?.length) {
+      for (const a of state.alerts) a.t += dt;
+      state.alerts = state.alerts.filter((a) => a.t < 8);
+    }
     for (const r of state.rings) r.t += dt;
     state.rings = state.rings.filter((r) => r.t < 1).slice(-80);
     for (const c of state.corpses) c.t += dt;
@@ -8657,6 +8756,7 @@
       finish(false);
       return;
     }
+    mark("tail");
     if (TEST && !liveSim) nav.process(Infinity, 32);
     if (objectiveState().won) finish(true);
     if (state.saveTimer <= 0) {
@@ -10245,6 +10345,15 @@
     }
     if (!state.cheats?.reveal || !DEBUG_MODE)
       fog.paint(mc, mini.width, mini.height);
+    for (const a of state.alerts || []) {
+      mc.strokeStyle = "#ff6a4a";
+      mc.lineWidth = 2;
+      mc.globalAlpha = Math.max(0.2, 1 - a.t / 8);
+      mc.beginPath();
+      mc.arc(a.x * sx, a.y * sy, 5 + ((a.t * 12) % 14), 0, Math.PI * 2);
+      mc.stroke();
+      mc.globalAlpha = 1;
+    }
     mc.strokeStyle = "#fbefc6";
     mc.lineWidth = 1.2;
     mc.strokeRect(view.x * sx, view.y * sy, view.w * sx, view.h * sy);
@@ -10536,6 +10645,7 @@
         "KeyV",
         "KeyQ",
         "KeyX",
+        "KeyZ",
         "KeyG",
         "KeyR",
         "Digit1",
@@ -10566,6 +10676,7 @@
       KeyE: selectWorkers,
       KeyV: idleWorker,
       KeyQ: home,
+      KeyZ: jumpToAlert,
       KeyX: cancel,
     };
     actions[e.code]?.();
@@ -11020,6 +11131,11 @@
       }
     },
     save: () => saveGame(true),
+    phases: () => {
+      const copy = { ...phases };
+      for (const key of Object.keys(phases)) delete phases[key];
+      return copy;
+    },
     internals: () =>
       TEST
         ? {

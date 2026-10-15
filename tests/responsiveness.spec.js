@@ -301,3 +301,46 @@ test("a cavalry charge with a long run-up strikes harder than a standing blow", 
   expect(standing).toBeGreaterThan(0);
   expect(charged / standing).toBeGreaterThan(1.4);
 });
+
+test("attacks outside the view raise an alert that the Z key jumps to", async ({
+  page,
+}) => {
+  await begin(page);
+  await page.evaluate(() => {
+    cruciata.scenario((s) => {
+      s.nodes = [];
+      s.decorations = [];
+      s.cities = [];
+      s.enemy.think = 1e9;
+      const sword = s.units.find((u) => u.team === 0 && u.type === "sword"),
+        foe = s.units.find((u) => u.team === 1 && u.type === "sword");
+      s.units = [sword, foe];
+      Object.assign(sword, {
+        x: 3000,
+        y: 3000,
+        hp: 5000,
+        maxHp: 5000,
+        hold: true,
+        order: null,
+      });
+      Object.assign(foe, {
+        x: 3020,
+        y: 3000,
+        hp: 5000,
+        maxHp: 5000,
+        hold: false,
+        order: null,
+        stance: "fight",
+        home: { x: 3020, y: 3000 },
+      });
+    });
+    cruciata.camera(600, 600);
+  });
+  await page.evaluate(() => cruciata.step(3));
+  const snap = await page.evaluate(() => cruciata.snapshot());
+  expect(snap.alerts?.length).toBeGreaterThan(0);
+  await expect(page.locator("#toast")).toContainText("under attack");
+  await page.keyboard.press("z");
+  const view = await page.evaluate(() => cruciata.snapshot().camera);
+  expect(Math.hypot(view.x - 3000, view.y - 3000)).toBeLessThan(200);
+});
