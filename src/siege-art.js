@@ -394,40 +394,7 @@
         if (i % 3 === 0) {
           m.bar([x, y, 50], [x, y, 128], 3, steel);
           m.box(x, y, 126, 6, 6, 6, gold);
-          // Faction banner, turned to face the camera: the Christian red field
-          // with its cream cross, or the Islamic green field with a crescent.
-          const ux = Math.cos(turn),
-            uy = -Math.sin(turn),
-            at = (s, z) => [x + ux * s, y + uy * s, z],
-            islamic = b.team === 1,
-            field = islamic ? "#2b6a4e" : "#a3342a",
-            cream = "#efe2bf";
-          m.face(
-            [at(0, 126), at(40, 123), at(40, 95), at(0, 98)],
-            field,
-            "#1b1410",
-          );
-          m.setLayer(1);
-          if (islamic) {
-            const arc = [];
-            for (let k = 0; k <= 10; k++) {
-              const t = 0.8 + (k / 10) * 4.7;
-              arc.push(at(21 + Math.cos(t) * 8, 111 + Math.sin(t) * 8));
-            }
-            m.stroke(arc, 3, cream);
-          } else {
-            m.face(
-              [at(18.5, 122), at(22.5, 122), at(22.5, 100), at(18.5, 100)],
-              cream,
-              false,
-            );
-            m.face(
-              [at(11, 114), at(31, 114), at(31, 109), at(11, 109)],
-              cream,
-              false,
-            );
-          }
-          m.setLayer(0);
+          // The cloth is drawn live (see waveFlag) so it can wave.
         } else {
           // Iron braziers burn atop the remaining buttresses.
           m.box(x, y, 50, 11, 11, 7, steel);
@@ -732,6 +699,103 @@
     }
     g.drawImage(entry.canvas, -origin[0], -origin[1], width, height);
   }
+  // Faction banners are drawn live, not baked into the machine sprite: a flat
+  // flag (Jerusalem cross on red, crescent on green) cached once per side and
+  // drawn in vertical strips that ripple like the building banners.
+  const flatFlags = {};
+  function flatFlag(team) {
+    const key = team === 1 ? 1 : 0;
+    if (flatFlags[key]) return flatFlags[key];
+    const c = document.createElement("canvas");
+    c.width = 120;
+    c.height = 84;
+    const q = c.getContext("2d"),
+      cream = "#efe2bf";
+    q.fillStyle = key ? "#2b6a4e" : "#a3342a";
+    q.fillRect(0, 0, 120, 84);
+    q.strokeStyle = "#1b1410";
+    q.lineWidth = 3;
+    q.strokeRect(1.5, 1.5, 117, 81);
+    q.fillStyle = cream;
+    q.strokeStyle = cream;
+    const bar = (x, y, w, h) => q.fillRect(x - w / 2, y - h / 2, w, h),
+      potent = (x, y, len, t) => {
+        // A cross with crossbars on every arm.
+        bar(x, y, t, len * 2);
+        bar(x, y, len * 2, t);
+        for (const [dx, dy] of [
+          [0, -1],
+          [0, 1],
+          [-1, 0],
+          [1, 0],
+        ]) {
+          const ex = x + dx * len,
+            ey = y + dy * len;
+          if (dx) bar(ex, ey, t * 0.9, t * 2.4);
+          else bar(ex, ey, t * 2.4, t * 0.9);
+        }
+      };
+    if (key) {
+      q.beginPath();
+      q.arc(52, 42, 24, 0, Math.PI * 2);
+      q.fill();
+      q.fillStyle = "#2b6a4e";
+      q.beginPath();
+      q.arc(60, 42, 21, 0, Math.PI * 2);
+      q.fill();
+      q.fillStyle = cream;
+      q.beginPath();
+      for (let i = 0; i < 10; i++) {
+        const r = i % 2 ? 4.5 : 10,
+          a = -Math.PI / 2 + (i * Math.PI) / 5;
+        q.lineTo(80 + Math.cos(a) * r, 42 + Math.sin(a) * r);
+      }
+      q.fill();
+    } else {
+      // Jerusalem cross: a great cross potent with four small crosses.
+      potent(60, 42, 21, 8);
+      for (const [x, y] of [
+        [34, 20],
+        [86, 20],
+        [34, 64],
+        [86, 64],
+      ])
+        potent(x, y, 7, 3);
+    }
+    return (flatFlags[key] = c);
+  }
+  function waveFlag(g, x, y, team, time, w, h) {
+    const flag = flatFlag(team),
+      strips = 16,
+      gust = 0.75 + Math.sin(time * 0.57) * 0.18 + Math.sin(time * 0.23) * 0.1,
+      sw = flag.width / strips;
+    for (let i = 0; i < strips; i++) {
+      const t = i / strips,
+        wave =
+          (Math.sin(time * 2.1 - t * 5.4) * 3 +
+            Math.sin(time * 3.3 - t * 9) * 0.9) *
+          t *
+          gust,
+        drop = t * 3;
+      g.drawImage(
+        flag,
+        i * sw,
+        0,
+        sw,
+        flag.height,
+        x + t * w,
+        y + wave,
+        w / strips + 0.7,
+        h - drop,
+      );
+      const light = Math.cos(time * 2.6 - t * 6);
+      g.fillStyle =
+        light > 0
+          ? `rgba(255,239,209,${(light * 0.14).toFixed(3)})`
+          : `rgba(0,0,0,${(-light * 0.14).toFixed(3)})`;
+      g.fillRect(x + t * w, y + wave, w / strips + 0.7, h - drop);
+    }
+  }
   function greatEngine(g, b, time) {
     // The Colossus bakes fewer reload poses: its sprites are four times larger.
     const big = b.kind === "colossus",
@@ -769,6 +833,26 @@
       big ? [210, 500] : [150, 240],
       (cg) => drawGreatEngine(cg, { ...b, x: 0, y: 0 }, time),
     );
+    if (big) {
+      // Four banner poles stand on the buttresses; their flags wave live.
+      const turn = (b.aimAngle ?? -Math.PI / 2) + Math.PI / 2,
+        ca = Math.cos(turn),
+        sa = Math.sin(turn);
+      for (const i of [0, 3, 6, 9]) {
+        const a = (i * Math.PI) / 6 + Math.PI / 12,
+          x = Math.cos(a) * 103,
+          y = Math.sin(a) * 103;
+        waveFlag(
+          g,
+          (x * ca - y * sa) * 1.4,
+          ((x * sa + y * ca) * 0.72 - 124) * 1.4,
+          b.team,
+          time,
+          52,
+          36,
+        );
+      }
+    }
     g.restore();
   }
   function siegeMachine(g, u, time, angle = u.angle || 0) {

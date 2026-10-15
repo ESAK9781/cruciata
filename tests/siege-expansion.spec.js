@@ -139,6 +139,7 @@ test("villagers construct a permanent engine that bombards fortified walls", asy
   await page.evaluate(() => {
     cruciata.supply({ wood: 5000, stone: 5000, gold: 5000 });
     cruciata.scenario((s) => {
+      s.techs = { engineworks: true };
       const worker = s.units.find((u) => u.team === 0 && u.type === "worker");
       s.units = [
         { ...worker, x: 1250, y: 2600, job: null, order: null },

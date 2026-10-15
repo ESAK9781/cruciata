@@ -12,6 +12,8 @@ async function begin(page, level = 0) {
       s.sites = [];
       s.cheats = { reveal: true };
       s.enemy.think = 1e9;
+      s.techs = { engineworks: true, colossal: true };
+      s.enemy.techs = { engineworks: true, colossal: true };
     });
   }, level);
   await page.setViewportSize({ width: 1440, height: 900 });
@@ -498,4 +500,93 @@ test("the landing site stays in sight for three seconds, then fades out", async 
     return out;
   });
   expect(seen).toEqual({ landed: true, held: true, faded: false });
+});
+
+test("great engines and the colossus are locked until researched at a siege workshop", async ({
+  page,
+}) => {
+  await begin(page);
+  await page.evaluate(() =>
+    cruciata.scenario((s) => {
+      s.techs = {};
+      s.resources = { food: 9999, wood: 9999, stone: 9999, gold: 9999 };
+      const t = JSON.parse(JSON.stringify(s.buildings[0]));
+      s.buildings.push({
+        ...t,
+        id: 99600,
+        kind: "siegeworkshop",
+        x: 1300,
+        y: 2600,
+        w: 100,
+        h: 100,
+        progress: 1,
+        hp: 1000,
+        maxHp: 1000,
+        queue: [],
+        capital: false,
+      });
+    }),
+  );
+  await page.locator("#settlement-tab").click();
+  await expect(page.locator("#build-greatengine")).toBeDisabled();
+  await expect(page.locator("#build-colossus")).toBeDisabled();
+  expect(
+    await page.evaluate(() => cruciata.internals().state.techs.engineworks),
+  ).toBeFalsy();
+  // Research the first tier at the workshop; the Colossus stays locked.
+  const p = await page.evaluate(() => cruciata.project(1300, 2600));
+  await page.evaluate(() => cruciata.camera(1300, 2500));
+  const q = await page.evaluate(() => cruciata.project(1300, 2600));
+  await page.mouse.click(q.x, q.y);
+  await page.locator("#research-tab").click();
+  await expect(page.locator("#research-colossal")).toBeHidden();
+  await page.locator("#research-engineworks").click();
+  await page.evaluate(() => cruciata.step(100));
+  await page.locator("#settlement-tab").click();
+  await expect(page.locator("#build-greatengine")).toBeEnabled();
+  await expect(page.locator("#build-colossus")).toBeDisabled();
+  await page.locator("#research-tab").click();
+  await expect(page.locator("#research-colossal")).toBeVisible();
+  void p;
+});
+
+test("the enemy researches great engines at its own siege workshop", async ({
+  page,
+}) => {
+  await begin(page);
+  const out = await page.evaluate(() => {
+    cruciata.scenario((s) => {
+      s.enemy.techs = {};
+      s.enemy.think = 0;
+      s.enemy.resources = { food: 9000, wood: 9000, stone: 9000, gold: 9000 };
+      s.time = 700;
+      const home = s.buildings.find(
+        (b) => b.team === 1 && b.kind === "towncenter",
+      );
+      s.buildings.push({
+        ...JSON.parse(JSON.stringify(home)),
+        id: 99650,
+        kind: "siegeworkshop",
+        x: home.x - 260,
+        y: home.y + 260,
+        w: 100,
+        h: 100,
+        progress: 1,
+        hp: 1000,
+        maxHp: 1000,
+        queue: [],
+        capital: false,
+      });
+    });
+    const S = cruciata.internals().state;
+    let queued = false;
+    for (let i = 0; i < 60 && !queued; i++) {
+      cruciata.step(1);
+      queued = S.buildings.some(
+        (b) => b.team === 1 && b.queue.some((q) => q.tech === "engineworks"),
+      );
+    }
+    return queued;
+  });
+  expect(out).toBe(true);
 });

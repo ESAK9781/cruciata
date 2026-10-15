@@ -372,6 +372,45 @@
       ]),
     ),
   );
+  // The larger engines are research: each unlock is a tech researched at a
+  // siege workshop before its foundation may be laid.
+  TECHS.engineworks = {
+    name: "Great engines",
+    unlock: "greatengine",
+    producer: "siegeworkshop",
+    cost: { wood: 450, stone: 300, gold: 400 },
+    time: 90,
+    desc: "Siege engineering. Unlocks the permanent great siege engine (range 320-2200) in the Fortification build menu.",
+  };
+  TECHS.colossal = {
+    name: "Colossal engineering",
+    unlock: "colossus",
+    requires: "engineworks",
+    producer: "siegeworkshop",
+    cost: { wood: 1000, stone: 800, gold: 1100 },
+    time: 150,
+    desc: "Requires Great engines. Unlocks the Colossal siege engine: unlimited range, one per side.",
+  };
+  const UNLOCKS = { greatengine: "engineworks", colossus: "colossal" };
+  function hasTech(key, team = 0) {
+    return team === 0 ? !!state.techs?.[key] : !!state.enemy?.techs?.[key];
+  }
+  // A structure is buildable once its tech is researched (or the side already
+  // owns one, which keeps older saves playable).
+  function isUnlocked(kind, team = 0) {
+    return (
+      !UNLOCKS[kind] ||
+      hasTech(UNLOCKS[kind], team) ||
+      state.buildings.some((b) => b.team === team && b.kind === kind)
+    );
+  }
+  function techAvailable(key, team = 0) {
+    const t = TECHS[key];
+    if (!t) return false;
+    if (t.unlock)
+      return !hasTech(key, team) && (!t.requires || hasTech(t.requires, team));
+    return rankFor(t.type, team) === t.rank - 1;
+  }
   function rankFor(type, team = 0) {
     return (team === 0 ? state.upgrades : state.enemy?.upgrades)?.[type] || 0;
   }
@@ -1027,6 +1066,185 @@
         );
     }
     return contours;
+  }
+  // Forests grow like the rock escarpments (winding spines of 64-unit tiles)
+  // but broader and longer. A forest is a blocking "rockmass" flagged `forest`,
+  // so collision, navigation, placement and saves treat it exactly like rock;
+  // only the drawing differs (dense trees on every tile). Woodcutters work the
+  // trees standing around its rim (see forestRimNodes).
+  function makeForest(c, random, index) {
+    const cell = 64,
+      camp = !!c.camp,
+      tiles = new Map(),
+      mine = (x, y) => tiles.has(x + "," + y);
+    const valid = (x, y) => {
+      const px = (x + 0.5) * cell,
+        py = (y + 0.5) * cell;
+      if (
+        state.buildings.some(
+          (b) =>
+            Math.abs(b.x - px) < b.w / 2 + cell + 30 &&
+            Math.abs(b.y - py) < b.h / 2 + cell + 30,
+        ) ||
+        state.units.some(
+          (u) =>
+            u.hp > 0 &&
+            Math.abs(u.x - px) < cell + 20 &&
+            Math.abs(u.y - py) < cell + 20,
+        ) ||
+        // Leave room around every town centre for walls and farms.
+        state.buildings.some(
+          (b) =>
+            b.kind === "towncenter" && Math.hypot(b.x - px, b.y - py) < 470,
+        )
+      )
+        return false;
+      for (const dx of [-cell / 2, 0, cell / 2])
+        for (const dy of [-cell / 2, 0, cell / 2])
+          if (!landFree(px + dx, py + dy, 30, false)) return false;
+      return !decorations.some(
+        (d) =>
+          d.kind === "rockmass" &&
+          Math.abs(d.x - px) < d.rx + cell &&
+          Math.abs(d.y - py) < d.ry + cell &&
+          rockBlocks(d, px, py, cell * 0.75),
+      );
+    };
+    // Find a legal starting tile near the cluster's centre.
+    let cx = Math.floor(c.x / cell),
+      cy = Math.floor(c.y / cell),
+      found = valid(cx, cy);
+    for (let ring = 1; ring <= 8 && !found; ring++)
+      for (let k = 0; k < 10 && !found; k++) {
+        const a = random() * Math.PI * 2,
+          x = Math.floor(c.x / cell + Math.cos(a) * ring),
+          y = Math.floor(c.y / cell + Math.sin(a) * ring);
+        if (valid(x, y)) {
+          cx = x;
+          cy = y;
+          found = true;
+        }
+      }
+    if (!found) return null;
+    tiles.set(cx + "," + cy, { x: cx, y: cy });
+    const heading = random() * Math.PI * 2,
+      length = camp
+        ? 8 + Math.floor(random() * 5)
+        : 16 + Math.floor(random() * 20),
+      bend = (random() - 0.5) * 1.3,
+      width = camp ? 1.8 + random() * 0.7 : 2.3 + random() * 1.6;
+    let spineX = cx,
+      spineY = cy,
+      angle = heading;
+    for (let step = 0; step < length; step++) {
+      angle += Math.sin(step * 0.25 + index) * 0.05 + bend / length;
+      const centerX = Math.round(spineX),
+        centerY = Math.round(spineY),
+        shoulder = width + Math.sin(step * 0.43 + index) * 0.8;
+      for (let dy = -5; dy <= 5; dy++)
+        for (let dx = -5; dx <= 5; dx++) {
+          const x = centerX + dx,
+            y = centerY + dy;
+          if (Math.hypot(dx, dy) <= shoulder && valid(x, y))
+            tiles.set(x + "," + y, { x, y });
+        }
+      spineX += Math.cos(angle);
+      spineY += Math.sin(angle);
+    }
+    fillRockHoles(tiles, valid);
+    if (tiles.size < (camp ? 8 : 20)) return null;
+    // Drop single-tile spurs so the rim reads as a clean mass.
+    for (const [key, t] of [...tiles])
+      if (
+        [
+          [1, 0],
+          [-1, 0],
+          [0, 1],
+          [0, -1],
+        ].filter(([dx, dy]) => mine(t.x + dx, t.y + dy)).length < 2
+      )
+        tiles.delete(key);
+    const contours = traceRockContours(tiles, cell),
+      points = contours.flat(),
+      minX = Math.min(...points.map((p) => p.x)),
+      maxX = Math.max(...points.map((p) => p.x)),
+      minY = Math.min(...points.map((p) => p.y)),
+      maxY = Math.max(...points.map((p) => p.y)),
+      mass = {
+        kind: "rockmass",
+        forest: true,
+        x: (minX + maxX) / 2,
+        y: (minY + maxY) / 2,
+        rx: (maxX - minX) / 2 + 24,
+        ry: (maxY - minY) / 2 + 24,
+        r: 0,
+        block: true,
+        contours,
+        cell,
+        tiles: [...tiles.values()],
+        palm: state.config
+          ? state.config.biome === 2
+          : LEVELS[state.level].terrain >= 3,
+        snow: state.config
+          ? state.config.biome === 3
+          : LEVELS[state.level].terrain === 2,
+        biome:
+          state.config?.biome ??
+          (LEVELS[state.level].terrain === 2
+            ? 3
+            : LEVELS[state.level].terrain >= 3
+              ? 2
+              : 0),
+        seed: state.seed + index * 53,
+      };
+    decorations.push(mass);
+    (state.terrainFeatures ||= []).push(mass);
+    return mass;
+  }
+  // Trees along the outside of a forest are ordinary, harvestable wood
+  // deposits: one per exposed tile edge. The interior stays solid and unreachable.
+  function forestRimNodes(mass, random) {
+    const cell = mass.cell,
+      has = new Set(mass.tiles.map((t) => t.x + "," + t.y)),
+      palm = !!mass.palm,
+      snow = !!mass.snow,
+      out = [];
+    for (const t of mass.tiles)
+      for (const [dx, dy] of [
+        [1, 0],
+        [-1, 0],
+        [0, 1],
+        [0, -1],
+      ]) {
+        if (has.has(t.x + dx + "," + (t.y + dy))) continue;
+        const n = {
+          id: ++uid,
+          kind: "wood",
+          x:
+            (t.x + 0.5) * cell +
+            dx * (cell / 2 + 22) +
+            (dy ? (random() - 0.5) * 24 : 0),
+          y:
+            (t.y + 0.5) * cell +
+            dy * (cell / 2 + 22) +
+            (dx ? (random() - 0.5) * 24 : 0),
+          r: 23,
+          remaining: 660,
+          max: 660,
+          palm,
+          snow,
+          scale: 0.9 + random() * 0.3,
+        };
+        if (!landFree(n.x, n.y, 52, false) || !groundFree(n.x, n.y, 4))
+          continue;
+        if (state.buildings.some((b) => distance(b, n) < b.r + 45)) continue;
+        if (state.units.some((u) => u.team !== 2 && distance(u, n) < 50))
+          continue;
+        out.push(n);
+      }
+    // Keep the rim loose enough to walk beside: skip neighbours closer than 40.
+    for (const n of out)
+      if (!state.nodes.some((m) => distance(m, n) < 40)) state.nodes.push(n);
   }
   function makeRockClusters(random) {
     const cell = 64,
@@ -1802,8 +2020,20 @@
     if (generate) {
       state.nodes = [];
       const clusters = [
-        { kind: "wood", x: l.camp.x + 270, y: l.camp.y - 220, count: 20 },
-        { kind: "wood", x: l.camp.x - 220, y: l.camp.y - 280, count: 16 },
+        {
+          kind: "wood",
+          x: l.camp.x + 270,
+          y: l.camp.y - 220,
+          count: 20,
+          camp: true,
+        },
+        {
+          kind: "wood",
+          x: l.camp.x - 220,
+          y: l.camp.y - 280,
+          count: 16,
+          camp: true,
+        },
         { kind: "food", x: l.camp.x + 270, y: l.camp.y + 170, count: 7 },
         { kind: "gold", x: l.camp.x + 500, y: l.camp.y + 60, count: 5 },
         { kind: "stone", x: l.camp.x + 400, y: l.camp.y - 450, count: 6 },
@@ -1830,6 +2060,7 @@
           x: eh.x + (i % 2 ? 270 : -230),
           y: eh.y + (i < 2 ? -250 : 360),
           count: kind === "wood" ? 18 : 5,
+          camp: kind === "wood",
         });
       for (const c of clusters.slice(5, -4)) {
         c.x = 450 + random() * (W - 900);
@@ -1843,12 +2074,18 @@
           y: 350 + random() * (H - 700),
           count: i % 4 === 0 ? 15 : 4,
         });
+      // Wood grows as forests (see makeForest); everything else as clusters.
+      state.terrainFeatures ||= [];
+      for (const [i, c] of clusters.filter((c) => c.kind === "wood").entries())
+        makeForest(c, random, i);
+      for (const mass of state.terrainFeatures.filter((m) => m.forest))
+        forestRimNodes(mass, random);
       for (const c of clusters)
         for (
           let i = 0;
           i <
           Math.max(
-            c.kind === "wood" ? 8 : 3,
+            c.kind === "wood" ? 0 : 3,
             Math.floor(c.count * (state.config?.frequency || 0.55)),
           );
           i++
@@ -4923,7 +5160,7 @@
     if (
       !playable() ||
       state.techs[key] ||
-      rankFor(TECHS[key].type) !== TECHS[key].rank - 1 ||
+      !techAvailable(key) ||
       state.buildings.some((b) => b.queue.some((q) => q.tech === key))
     )
       return false;
@@ -4954,6 +5191,12 @@
     if (!playable() || kind === "gate") return;
     const builders = workers().filter((u) => selected.has(u.id));
 
+    if (!isUnlocked(kind)) {
+      toast(
+        `Research ${TECHS[UNLOCKS[kind]].name} at a siege workshop to build this.`,
+      );
+      return;
+    }
     if (kind === "colossus" && colossusOf(0)) {
       toast(
         "You may only have one Colossal siege engine at a time (even one under construction).",
@@ -5414,6 +5657,12 @@
     if (!playable() || !placement) return false;
     const kind = placement,
       builders = workers().filter((u) => selected.has(u.id));
+    if (!isUnlocked(kind)) {
+      toast(
+        `Research ${TECHS[UNLOCKS[kind]].name} at a siege workshop to build this.`,
+      );
+      return false;
+    }
     if (kind === "colossus" && colossusOf(0)) {
       toast("You already have a Colossal siege engine.");
       return false;
@@ -7745,7 +7994,10 @@
         if (node && buildAt(kind, node)) return;
       }
     }
-    const exhausted = ws.filter((u) => !u.job && !u.order).length;
+    const exhausted = ws.filter((u) => !u.job && !u.order).length,
+      front = known
+        .filter((k) => !["wall", "gate"].includes(k.kind))
+        .sort((a, b) => distance(a, base) - distance(b, base))[0];
     if (
       (state.time > 180 || (state.time > 100 && exhausted >= 3)) &&
       completeBuildings("towncenter", 1).length < 4 &&
@@ -7763,7 +8015,15 @@
               (b) => distance(b, n) > 1500,
             ),
         )
-        .sort((a, b) => distance(a, base) - distance(b, base))[0];
+        // Later expansions lean toward the enemy: a forward base shortens
+        // the march and gives the siege engines a safe place to stand.
+        .sort(
+          (a, b) =>
+            distance(a, base) +
+            (front && state.time > 420 ? distance(a, front) * 0.7 : 0) -
+            (distance(b, base) +
+              (front && state.time > 420 ? distance(b, front) * 0.7 : 0)),
+        )[0];
       if (resource && afford(BUILDINGS.towncenter.cost, 1)) {
         for (let i = 0; i < 32; i++) {
           const p = {
@@ -7796,6 +8056,7 @@
       if (!mine) {
         if (
           state.time < 840 ||
+          !hasTech("colossal", 1) ||
           ws.length < 12 ||
           !afford(BUILDINGS.colossus.cost, 1)
         )
@@ -7858,6 +8119,150 @@
         mine.fireTarget = null;
       }
     }
+    // Siege research, forward batteries of great engines, and the Colossus.
+    function techAI() {
+      const works = completeBuildings("siegeworkshop", 1).find(
+        (b) => b.queue.length < 2,
+      );
+      if (!works) return;
+      const hard = state.difficulty === "hard",
+        easy = state.difficulty === "easy";
+      for (const key of ["engineworks", "colossal"]) {
+        const t = TECHS[key];
+        if (
+          hasTech(key, 1) ||
+          !techAvailable(key, 1) ||
+          state.buildings.some(
+            (b) => b.team === 1 && b.queue.some((q) => q.tech === key),
+          )
+        )
+          continue;
+        const at = (key === "engineworks" ? 360 : 720) * (hard ? 0.8 : 1);
+        if (state.time < at || (key === "colossal" && easy)) return;
+        if (!afford(t.cost, 1)) return;
+        pay(t.cost, 1, 1);
+        works.queue.push({
+          kind: "research",
+          tech: key,
+          time: 0,
+          duration: t.time,
+          cost: { ...t.cost },
+        });
+        return;
+      }
+    }
+    const engineValue = (b) =>
+      ({
+        colossus: 100,
+        greatengine: 90,
+        siegeworkshop: 60,
+        barracks: 55,
+        stable: 55,
+        towncenter: 50,
+        fort: 45,
+        tower: 35,
+        watchtower: 30,
+        chapel: 25,
+        house: 20,
+      })[b.kind] ?? 0;
+    function batteryAI() {
+      if (!isUnlocked("greatengine", 1)) return;
+      const engines = state.buildings.filter(
+          (b) => b.team === 1 && b.kind === "greatengine" && b.hp > 0,
+        ),
+        spec = BUILDINGS.greatengine,
+        limit =
+          state.difficulty === "hard" ? 3 : state.difficulty === "easy" ? 1 : 2,
+        targets = known
+          .map((k) => getObject(k.id))
+          .filter((b) => b && b.hp > 0 && b.team === 0 && engineValue(b) > 0);
+      // Every finished engine is told where to fire (a known structure in range).
+      for (const e of engines) {
+        if (e.progress < 1) continue;
+        const current = getObject(e.attackTarget);
+        if (
+          current &&
+          current.hp > 0 &&
+          distance(e, current) >= spec.minRange &&
+          distance(e, current) <= spec.range
+        )
+          continue;
+        const pick = targets
+          .filter(
+            (t) =>
+              distance(e, t) >= spec.minRange + 20 &&
+              distance(e, t) <= spec.range - 30,
+          )
+          .sort(
+            (a, c) =>
+              engineValue(c) - engineValue(a) ||
+              distance(a, e) - distance(c, e),
+          )[0];
+        e.attackTarget = pick ? pick.id : null;
+        e.fireTarget = null;
+      }
+      // Riflemen-free defence: a few soldiers hold each forward battery.
+      for (const e of engines) {
+        const stationed = army.filter((u) => u.garrisonBase === e.id);
+        for (const u of army
+          .filter((u) => !u.scout && !u.garrisonBase && !u.order && !u.target)
+          .slice(0, Math.max(0, 5 - stationed.length))) {
+          u.garrisonBase = e.id;
+          u.home = findFree({ x: e.x + ((u.id % 3) - 1) * 80, y: e.y + 170 });
+          u.order = { ...u.home, attack: true };
+          u.pathTimer = 0;
+        }
+      }
+      if (
+        engines.length >= limit ||
+        engines.some((e) => e.progress < 1) ||
+        state.time < 480 ||
+        ws.length < 10 ||
+        !targets.length ||
+        !afford(spec.cost, 1)
+      )
+        return;
+      // Find ground inside range of the nearest enemy structure but outside
+      // the reach of its towers, reached by walking back toward home.
+      const target = targets.sort(
+          (a, c) => distance(a, base) - distance(c, base),
+        )[0],
+        away = Math.atan2(base.y - target.y, base.x - target.x);
+      for (const dist of [1900, 1700, 1500, 1300, 1100])
+        for (const lateral of [0, 260, -260, 520, -520]) {
+          const p = {
+            x:
+              target.x +
+              Math.cos(away) * dist +
+              Math.cos(away + Math.PI / 2) * lateral,
+            y:
+              target.y +
+              Math.sin(away) * dist +
+              Math.sin(away + Math.PI / 2) * lateral,
+          };
+          if (
+            !validSite("greatengine", p, 1) ||
+            targets.some(
+              (t) =>
+                distance(t, p) <
+                (["tower", "watchtower", "fort"].includes(t.kind) ? 800 : 500),
+            )
+          )
+            continue;
+          pay(spec.cost, 1, 1);
+          const b = makeBuilding("greatengine", 1, p.x, p.y, 0);
+          state.buildings.push(b);
+          state.navDirty = true;
+          queueConstruction(
+            ws.filter((u) => u.job?.kind !== "build").slice(0, 6),
+            [b.id],
+            false,
+          );
+          return;
+        }
+    }
+    techAI();
+    batteryAI();
     colossusAI();
     const surplus =
       state.enemy.resources.food > 400 &&
@@ -8014,6 +8419,19 @@
     }
     for (let i = 0; i < (state.difficulty === "hard" ? 4 : 2); i++)
       train(counter(cycle[(army.length + i) % cycle.length], i));
+    // Against a walled enemy, bring dedicated siege: rams for gates and walls,
+    // trebuchets to out-range towers.
+    const fortCount = known.filter((k) =>
+      ["wall", "gate", "tower", "watchtower", "fort"].includes(k.kind),
+    ).length;
+    if (fortCount > 10 && army.length >= 8)
+      for (const type of ["trebuchet", "ram"])
+        if (
+          army.filter((u) => u.type === type).length <
+            Math.min(6, 2 + Math.floor(fortCount / 12)) &&
+          train(type)
+        )
+          break;
     if (state.difficulty !== "easy" && state.time > 300) {
       for (const type of ["sword", "archer", "knight"]) {
         const t = TECHS[type + (rankFor(type, 1) + 1)],
@@ -8961,16 +9379,26 @@
             completeWallUpgrade(b, item);
           } else if (item.kind === "research") {
             const t = TECHS[item.tech];
-            (b.team === 0 ? state.upgrades : state.enemy.upgrades)[t.type] =
-              t.rank;
-            if (b.team === 0) state.techs[item.tech] = true;
-            for (const u of state.units)
-              if (u.team === b.team && u.type === t.type) applyRank(u, t.rank);
-            if (b.team === 0)
-              toast(
-                t.name +
-                  " upgrade complete. Your whole company has been upgraded.",
-              );
+            if (t.unlock) {
+              if (b.team === 0) state.techs[item.tech] = true;
+              else (state.enemy.techs ||= {})[item.tech] = true;
+              if (b.team === 0)
+                toast(
+                  `${t.name} researched. The ${BUILDINGS[t.unlock].name.toLowerCase()} can now be built.`,
+                );
+            } else {
+              (b.team === 0 ? state.upgrades : state.enemy.upgrades)[t.type] =
+                t.rank;
+              if (b.team === 0) state.techs[item.tech] = true;
+              for (const u of state.units)
+                if (u.team === b.team && u.type === t.type)
+                  applyRank(u, t.rank);
+              if (b.team === 0)
+                toast(
+                  t.name +
+                    " upgrade complete. Your whole company has been upgraded.",
+                );
+            }
           } else {
             const p = spawnPoint(b),
               u = makeUnit(item.type, b.team, p.x, p.y);
@@ -9602,6 +10030,12 @@
       line.textContent = `Queues one at each of the ${multi} selected buildings that can train it.`;
       tip.append(line);
     }
+    if (card.dataset.lock) {
+      const lock = document.createElement("div");
+      lock.className = "tip-lock";
+      lock.textContent = card.dataset.lock;
+      tip.append(lock);
+    }
     if (card.dataset.tip) {
       const text = document.createElement("p");
       text.textContent = card.dataset.tip;
@@ -9790,7 +10224,7 @@
           "research-" + k,
           t.name,
           t.cost,
-          { type: t.type },
+          t.unlock ? { kind: t.unlock } : { type: t.type },
           () => research(k),
           t.desc,
         ),
@@ -10125,7 +10559,7 @@
             c.progress >= 1 &&
             (c.id === selectedBuilding || selectedBuildings.has(c.id)) &&
             c.kind === t.producer,
-        ) || rankFor(t.type) !== t.rank - 1;
+        ) || !techAvailable(key);
     $("research-tab").hidden = !state.buildings.some(
       (c) =>
         c.team === 0 &&
@@ -10289,7 +10723,13 @@
     }
     for (const [k, t] of Object.entries(BUILDINGS))
       if (t.cost && $("build-" + k)) {
+        const locked = !isUnlocked(k);
+        $("build-" + k).dataset.lock = locked
+          ? `Locked: research ${TECHS[UNLOCKS[k]].name} at a siege workshop.`
+          : "";
+        $("build-" + k).classList.toggle("locked", locked);
         $("build-" + k).disabled =
+          locked ||
           !afford(t.cost) ||
           !!state.result ||
           (k === "colossus" && !!colossusOf(0));
@@ -10298,7 +10738,7 @@
     for (const [k, t] of Object.entries(TECHS)) {
       $("research-" + k).disabled =
         !!state.techs[k] ||
-        rankFor(t.type) !== t.rank - 1 ||
+        !techAvailable(k) ||
         state.buildings.some((b) => b.queue.some((q) => q.tech === k)) ||
         !selectedStructures(
           (b) => b.kind === t.producer && b.progress >= 1 && b.queue.length < 8,
@@ -10412,6 +10852,56 @@
       4,
       team === 1 ? "#a74734" : "#72934e",
     );
+  }
+  // Dense forest: four overlapping trees on every visible tile (fewer, larger
+  // trees and then plain canopy blocks as the view zooms out).
+  function drawForest(d, base) {
+    const cell = d.cell,
+      pad = 40,
+      x0 = view.x - pad,
+      y0 = view.y - pad,
+      x1 = view.x + view.w + pad,
+      y1 = view.y + view.h + pad,
+      far = view.scale < 0.22,
+      mid = view.scale < 0.45;
+    for (const t of d.tiles) {
+      const px = t.x * cell,
+        py = t.y * cell;
+      if (px + cell < x0 || px > x1 || py + cell < y0 || py > y1) continue;
+      if (far) {
+        ctx.fillStyle = d.snow ? "#8da58f" : d.palm ? "#4f7d3c" : "#2f5e32";
+        ctx.fillRect(px, py, cell + 1, cell + 1);
+        continue;
+      }
+      const hash =
+        Math.imul((t.x * 73856093) ^ (t.y * 19349663), 2654435761) >>> 0;
+      if (mid) {
+        Art.treeFast(
+          ctx,
+          px + cell / 2,
+          py + cell / 2,
+          2.3,
+          d.palm,
+          d.snow,
+          base,
+        );
+        continue;
+      }
+      for (let i = 0; i < 4; i++) {
+        const h = Math.imul(hash + i * 40503, 2246822519) >>> 0,
+          jx = ((h & 255) / 255 - 0.5) * 14,
+          jy = (((h >>> 8) & 255) / 255 - 0.5) * 14;
+        Art.treeFast(
+          ctx,
+          px + (i % 2 ? 0.75 : 0.25) * cell + jx,
+          py + (i > 1 ? 0.75 : 0.25) * cell + jy,
+          1.4 + (((h >>> 16) & 255) / 255) * 0.25,
+          d.palm,
+          d.snow,
+          base,
+        );
+      }
+    }
   }
   function onScreen(o, margin = 120) {
     return (
@@ -10700,8 +11190,10 @@
         );
     for (const d of decorations)
       if (onScreen(d)) {
-        if (d.kind === "rockmass") Art.rockMass(ctx, d);
-        else if (d.kind === "cliff") Art.cliff(ctx, d);
+        if (d.kind === "rockmass") {
+          if (d.forest) drawForest(d, baseTransform);
+          else Art.rockMass(ctx, d);
+        } else if (d.kind === "cliff") Art.cliff(ctx, d);
         else if (d.kind === "rock") Art.boulder(ctx, d);
         else
           Art.treeFast(
@@ -10978,6 +11470,67 @@
           b.x,
           b.y - 250,
         );
+        ctx.restore();
+      }
+      // While placing an engine, show what it will reach: the great engine's
+      // band, or the Colossus' minimum range and scatter at distance; known
+      // enemy structures in reach are ringed.
+      if (placement === "greatengine" || placement === "colossus") {
+        const spec = BUILDINGS.greatengine,
+          big = placement === "colossus",
+          lo = big ? COLOSSUS_MIN_RANGE : spec.minRange,
+          hi = big ? Infinity : spec.range,
+          ok = validSite(placement, mouse);
+        ctx.save();
+        ctx.lineWidth = 2 / Math.max(0.4, view.scale);
+        ctx.strokeStyle = ok ? "#e8b64bcc" : "#d96b4faa";
+        ctx.fillStyle = ok ? "#d7a34b12" : "#d96b4f10";
+        ctx.beginPath();
+        if (!big) ctx.arc(mouse.x, mouse.y, hi, 0, Math.PI * 2);
+        ctx.arc(mouse.x, mouse.y, lo, 0, Math.PI * 2, true);
+        if (!big) ctx.fill("evenodd");
+        ctx.stroke();
+        ctx.setLineDash([14, 10]);
+        ctx.strokeStyle = "#d96b4fcc";
+        ctx.beginPath();
+        ctx.arc(mouse.x, mouse.y, lo, 0, Math.PI * 2);
+        ctx.stroke();
+        ctx.setLineDash([]);
+        ctx.fillStyle = "#f5d497";
+        ctx.font = `bold ${Math.round(12 / Math.max(0.5, view.scale))}px Georgia`;
+        ctx.textAlign = "center";
+        ctx.fillText(
+          big
+            ? `Minimum range ${lo}; unlimited beyond, scatter grows with distance`
+            : `Range ${lo}-${hi}`,
+          mouse.x,
+          mouse.y + lo + 18,
+        );
+        if (big)
+          for (const d of [1500, 3000, 4500]) {
+            ctx.globalAlpha = 0.45;
+            ctx.setLineDash([4, 10]);
+            ctx.beginPath();
+            ctx.arc(mouse.x, mouse.y, d, 0, Math.PI * 2);
+            ctx.stroke();
+            ctx.globalAlpha = 1;
+            ctx.setLineDash([]);
+            ctx.fillText(
+              `${d}: scatter ${Math.round(colossusScatter(d))}`,
+              mouse.x,
+              mouse.y - d - 6,
+            );
+          }
+        ctx.strokeStyle = "#ff8a5c";
+        ctx.lineWidth = 3 / Math.max(0.4, view.scale);
+        for (const b of knownBuildings) {
+          if (b.team === 0 || b.team === 2 || b.hp <= 0) continue;
+          const d = distance(mouse, b);
+          if (d < lo || d > hi) continue;
+          ctx.beginPath();
+          ctx.arc(b.x, b.y, Math.max(26, b.r || 30) + 8, 0, Math.PI * 2);
+          ctx.stroke();
+        }
         ctx.restore();
       }
     };
