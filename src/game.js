@@ -9967,21 +9967,6 @@
     "worker",
     "civilian",
   ]);
-  // A pre-rendered soft shadow: one image draw instead of a path fill per unit.
-  const shadowSprite = document.createElement("canvas");
-  shadowSprite.width = 64;
-  shadowSprite.height = 40;
-  {
-    const q = shadowSprite.getContext("2d");
-    q.fillStyle = "#314029";
-    q.globalAlpha = 0.26;
-    q.beginPath();
-    q.ellipse(32, 20, 30, 17, 0, 0, Math.PI * 2);
-    q.fill();
-  }
-  function drawShadow(g, x, y, rx, ry) {
-    g.drawImage(shadowSprite, x - rx, y - ry, rx * 2, ry * 2);
-  }
   const clusterMap = new WeakMap(),
     renderStats = { rallyLines: 0, orderLines: 0, siegeLinks: 0, figures: 0 };
   function clusterOf(u) {
@@ -10527,40 +10512,6 @@
         CLUSTERED.has(u.type) && view.scale >= CLUSTER_SCALE && perUnit > 1;
       if (clustered && !clusterOf(u).ready) updateCluster(u, 0);
       const figs = clustered ? clusterFigures(u, motion) : null;
-      if (crowd > 900 || view.scale < 0.4) {
-        // Dense or distant crowds skip ground shadows entirely.
-      } else if (clustered)
-        // One soft shadow under the whole crowd of figures is far cheaper than three.
-        drawShadow(
-          ctx,
-          u.x + 2,
-          u.y + 4,
-          u.type === "knight" ? 24 : 17,
-          u.type === "knight" ? 22 : 13,
-        );
-      else if (PERSON.has(u.type))
-        drawShadow(
-          ctx,
-          u.x + 3,
-          u.y + 4,
-          u.type === "knight" ? 16 : 12,
-          u.type === "knight" ? 22 : 12,
-        );
-      else
-        Art.ellipse(
-          ctx,
-          u.x + 3,
-          u.y + 4,
-          u.type === "knight"
-            ? 16
-            : u.type === "trebuchet"
-              ? 26
-              : u.type === "pilgrim" || u.type === "merchant"
-                ? 24
-                : 12,
-          u.type === "knight" ? 22 : 12,
-          "#31402930",
-        );
       if (selected.has(u.id)) {
         ctx.strokeStyle = "#ede1ae";
         ctx.lineWidth = 1.8;
