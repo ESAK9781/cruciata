@@ -163,7 +163,7 @@ test("native terrain surf animates while ships retain sharp detailed overhead ar
   page,
 }) => {
   await begin(page);
-  const results = await page.evaluate(() => {
+  const results = await page.evaluate(async () => {
     const paint = (time) => {
       const c = document.createElement("canvas");
       c.width = 600;
@@ -185,6 +185,10 @@ test("native terrain surf animates while ships retain sharp detailed overhead ar
     const c = document.createElement("canvas");
     c.width = 120;
     c.height = 210;
+    // The ship sprite decodes on demand: draw once, wait, then measure.
+    CruciataArt.ship(c.getContext("2d"), 60, 90, 0);
+    await CruciataAtlas.ready;
+    c.getContext("2d").clearRect(0, 0, 120, 210);
     CruciataArt.ship(c.getContext("2d"), 60, 90, 0);
     const data = c.getContext("2d").getImageData(0, 0, 120, 210).data,
       colours = new Set();

@@ -276,6 +276,12 @@ const { chromium } = require("@playwright/test"),
       }, scene);
       const file = name + ".png";
       await page.locator("#game").screenshot({ path: path.join(target, file) });
+      // Zoomed close-ups must not leak their scale into later scenes.
+      if (scene.zoomSteps)
+        await page.evaluate((steps) => {
+          for (let i = 0; i < steps; i++)
+            document.getElementById("zoom-out").click();
+        }, scene.zoomSteps);
       shots.push({ name, file });
     };
     const kinds = [

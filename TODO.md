@@ -1,3 +1,14 @@
+# Polish pass: responsiveness, walls, performance and spectacle
+
+- [x] Commit a local backup before starting (388f44a).
+- [x] Orders respond on the first frame: provisional movement while shared routes compute, an urgent navigation budget, committed player move orders, stall watchdog and wedge recovery.
+- [x] Rebuild curtain rendering as projected prisms so diagonal and bastion segments, towers and gates share seams and footprints at all eight headings.
+- [x] Find and fix a 10-second freeze (unbounded route smoothing) plus the 100-300 ms hitches from line-of-sight scans, target scans and flee re-planning.
+- [x] Add combat/siege spectacle: sparks, cavalry charge, debris, scorch decals, launch plumes, burning structures, arrow art and order-path lines.
+- [x] Gameplay: attack alerts with minimap pings and Z, double-click type selection, charge bonus, river bridge kept clear of neutral city walls, castle layout overlaps resolved.
+- [x] Repair stale or racy tests; add responsiveness regression coverage.
+- [ ] Full chromium suite green after the final change; Firefox spot-check of movement and art specs.
+
 # Consistent projected artwork
 
 ## Current art-direction revision
