@@ -1,4 +1,83 @@
 const { test, expect } = require("./helpers");
+test("player paths bypass and preempt slow background searches without losing clearance", async ({
+  page,
+}) => {
+  await page.goto("/?test");
+  const result = await page.evaluate(() => {
+    const nav = new CruciataNavigation(640, 480);
+    nav.rebuild((x, y) => !(x > 240 && x < 272 && y < 420));
+    const resolve = nav.resolveJob;
+    nav.resolveJob = function* (job) {
+      if (!job.priority) for (let i = 0; i < 10000; i++) yield;
+      return yield* resolve.call(this, job);
+    };
+    nav.query({ x: 80, y: 80 }, { x: 400, y: 80 }, { owner: "background" });
+    nav.process(Infinity, 30);
+    const direct = nav.query(
+      { x: 80, y: 440 },
+      { x: 400, y: 440 },
+      { priority: 2, owner: "player-direct" },
+    );
+    const start = { x: 90, y: 100 },
+      goal = { x: 400, y: 100 };
+    nav.query(start, goal, { priority: 2, owner: "player" });
+    let path = null,
+      work = 0;
+    while (path === null && work < 1000) {
+      nav.process(Infinity, 32);
+      work += 32;
+      path = nav.query(start, goal, { priority: 2, owner: "player" });
+    }
+    let previous = start;
+    const clear = path?.every((p) => {
+      const result = nav.clearLine(previous, p);
+      previous = p;
+      return result;
+    });
+    return { direct, path, work, clear, background: nav.pending.size };
+  });
+  expect(result.direct).toEqual([{ x: 400, y: 440 }]);
+  expect(result.path?.length).toBeGreaterThan(1);
+  expect(result.work).toBeLessThan(1000);
+  expect(result.clear).toBe(true);
+  expect(result.background).toBe(1);
+});
+
+test("replacement commands retire obsolete navigation requests and reserve queue capacity", async ({
+  page,
+}) => {
+  await page.goto("/?test");
+  const result = await page.evaluate(() => {
+    const nav = new CruciataNavigation(640, 480);
+    nav.rebuild((x, y) => !(x > 240 && x < 272 && y < 420));
+    for (let i = 0; i < 128; i++)
+      nav.query(
+        { x: 80 + i * 0.1, y: 100 },
+        { x: 400, y: 100 },
+        { owner: "ai:" + i },
+      );
+    const start = { x: 90, y: 110 },
+      first = { x: 400, y: 110 },
+      second = { x: 410, y: 120 };
+    nav.query(start, first, { priority: 2, owner: "player" });
+    const old = nav.ownerKeys.get("player"),
+      reserved = nav.pending.has(old);
+    nav.query(start, second, { priority: 2, owner: "player" });
+    const obsolete = nav.pending.has(old),
+      current = nav.ownerKeys.get("player");
+    nav.cancelOwner("player");
+    return {
+      reserved,
+      obsolete,
+      cancelled: !nav.pending.has(current),
+      size: nav.pending.size,
+    };
+  });
+  expect(result.reserved).toBe(true);
+  expect(result.obsolete).toBe(false);
+  expect(result.cancelled).toBe(true);
+  expect(result.size).toBeLessThanOrEqual(127);
+});
 test("budgeted paths match synchronous routes and survive distant map changes", async ({
   page,
 }) => {

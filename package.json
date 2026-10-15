@@ -1,14 +1,15 @@
 {
   "name": "cruciata",
   "version": "3.0.0",
-  "description": "A static overhead siege RTS campaign",
+  "description": "A static RTS campaign with projected 3D siege artwork",
   "private": true,
   "scripts": {
     "start": "node server.js",
-    "build": "node scripts/build-static.js",
+    "build": "node scripts/verify-art.js && node scripts/build-static.js",
+    "art:bake": "node scripts/bake-art.js",
     "pretest": "npm run build",
     "test": "playwright test",
-    "check": "node --check src/fog.js && node --check src/audio.js && node --check src/game.js && node --check src/menus.js && node --check src/artwork.js && node --check src/navigation.js && node --check server.js && node --check scripts/build-static.js && prettier --check index.html \"src/*.{js,css}\" assets/maps/*.js server.js playwright.config.js scripts/*.js tests/*.js .github/workflows/*.yml README.md docs/*.md package.json",
+    "check": "node --check src/isometric-art.js && node --check src/settlement-art.js && node --check src/people-art.js && node --check src/model-raster.js && node --check src/sprite-atlas.js && node --check src/siege-art.js && node --check src/fog.js && node --check src/audio.js && node --check src/game.js && node --check src/menus.js && node --check src/artwork.js && node --check src/navigation.js && node --check server.js && node --check scripts/build-static.js && prettier --check index.html \"src/*.{js,css}\" assets/maps/*.js server.js playwright.config.js scripts/*.js tests/*.js .github/workflows/*.yml README.md docs/*.md package.json",
     "format": "prettier --write index.html \"src/*.{js,css}\" assets/maps/*.js server.js playwright.config.js scripts/*.js tests/*.js .github/workflows/*.yml README.md docs/*.md package.json"
   },
   "keywords": [],

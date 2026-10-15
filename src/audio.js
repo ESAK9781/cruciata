@@ -26,15 +26,18 @@
     gold: ["impactMining_000"],
     stone: ["impactMining_001"],
     food: ["cloth1"],
-    build: ["impactWood_medium_000"],
+    build: [
+      "impactWood_medium_000",
+      "impactWood_heavy_001",
+      "impactWood_heavy_002",
+    ],
     deliver: ["handleCoins"],
     click: ["click_001"],
     siege: ["creak1"],
-    explosion: [
-      "explosionCrunch_000",
-      "explosionCrunch_001",
-      "lowFrequency_explosion_000",
-    ],
+    explosion: ["trebuchet-landing.wav"],
+    "great-impact": ["great-landing.wav"],
+    "great-launch": ["impactMetal_heavy_001", "impactWood_heavy_002"],
+    collapse: ["impactGlass_heavy_000", "impactWood_heavy_001"],
     arrow: ["knifeSlice2"],
   };
   const voices = new Map();
@@ -42,6 +45,7 @@
     last = new Map(),
     counts = new Map(),
     active = new Set();
+  let commandAudio = null;
   let enabled = true,
     played = 0,
     effectsVolume = 0.65,
@@ -149,11 +153,43 @@
   for (const names of Object.values(bank))
     for (const name of names)
       if (!cache.has(name)) {
-        const a = new Audio(`assets/audio/${name}.ogg`);
+        const a = new Audio(
+          `assets/audio/${name.includes(".") ? name : name + ".ogg"}`,
+        );
         a.preload = "auto";
         cache.set(name, a);
         voices.set(name, [a]);
       }
+  function recording(kind, volume, priority = false) {
+    const names = bank[kind] || bank.click,
+      n = counts.get(kind) || 0;
+    counts.set(kind, n + 1);
+    const name = names[n % names.length],
+      pool = voices.get(name);
+    let a = pool.find((voice) => !active.has(voice));
+    if (!a && pool.length < (priority ? 4 : 2)) {
+      a = cache.get(name).cloneNode();
+      pool.push(a);
+    }
+    if (!a) return;
+    a.currentTime = 0;
+    a.baseVolume = Math.min(
+      1,
+      volume *
+        (priority
+          ? 0.95
+          : ["hit", "wood", "gold", "stone", "food", "build"].includes(kind)
+            ? 0.24
+            : 0.48),
+    );
+    a.volume = a.baseVolume * effectsVolume;
+    active.add(a);
+    a.onended = () => active.delete(a);
+    a.onerror = () => active.delete(a);
+    a.play()
+      .then(() => played++)
+      .catch(() => active.delete(a));
+  }
   window.CruciataAudio = {
     nextTrack() {
       music.pause();
@@ -177,7 +213,16 @@
         }
     },
     play(kind, volume = 1) {
-      if (!enabled || effectsVolume <= 0 || volume < 0.03 || active.size >= 10)
+      const priority =
+        kind === "explosion" ||
+        kind === "collapse" ||
+        kind.startsWith("great-");
+      if (
+        !enabled ||
+        effectsVolume <= 0 ||
+        volume < 0.03 ||
+        (active.size >= 10 && !priority)
+      )
         return;
       const now = performance.now(),
         interval = ["hit", "wood", "stone", "gold", "build", "food"].includes(
@@ -187,32 +232,41 @@
           : 70;
       if (now - (last.get(kind) || -10000) < interval) return;
       last.set(kind, now);
-      const names = bank[kind] || bank.click,
-        n = counts.get(kind) || 0;
-      counts.set(kind, n + 1);
-      const name = names[n % names.length],
-        pool = voices.get(name);
-      let a = pool.find((voice) => !active.has(voice));
-      if (!a && pool.length < 2) {
-        a = cache.get(name).cloneNode();
-        pool.push(a);
+      if (priority && active.size >= 10) {
+        const quietest = [...active].sort((a, b) => a.volume - b.volume)[0];
+        quietest.pause();
+        active.delete(quietest);
       }
-      if (!a) return;
-      a.currentTime = 0;
-      a.baseVolume = Math.min(
-        0.7,
-        volume *
-          (["hit", "wood", "gold", "stone", "food", "build"].includes(kind)
-            ? 0.24
-            : 0.48),
-      );
-      a.volume = a.baseVolume * effectsVolume;
-      active.add(a);
-      a.onended = () => active.delete(a);
-      a.onerror = () => active.delete(a);
-      a.play()
-        .then(() => played++)
-        .catch(() => active.delete(a));
+      if (kind === "attack") {
+        const AudioContext = window.AudioContext || window.webkitAudioContext;
+        if (!AudioContext) return;
+        commandAudio ||= new AudioContext();
+        commandAudio.resume().catch(() => {});
+        for (const [i, frequency] of [196, 261.63, 392].entries()) {
+          const oscillator = commandAudio.createOscillator(),
+            gain = commandAudio.createGain();
+          const start = commandAudio.currentTime + i * 0.085;
+          oscillator.type = "triangle";
+          oscillator.frequency.value = frequency;
+          gain.gain.setValueAtTime(0, start);
+          gain.gain.linearRampToValueAtTime(
+            volume * effectsVolume * 0.2,
+            start + 0.015,
+          );
+          gain.gain.exponentialRampToValueAtTime(0.001, start + 0.18);
+          oscillator.connect(gain);
+          gain.connect(commandAudio.destination);
+          oscillator.start(start);
+          oscillator.stop(start + 0.19);
+          oscillator.onended = () => {
+            oscillator.disconnect();
+            gain.disconnect();
+          };
+        }
+        played++;
+        return;
+      }
+      recording(kind, volume, priority);
     },
     status() {
       return {

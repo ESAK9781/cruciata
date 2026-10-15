@@ -85,7 +85,25 @@
         }
       }
       for (const b of buildings)
-        if (this.sees(b)) this.known[b.id] = { ...b, queue: [], rally: null };
+        if (this.sees(b)) {
+          const old = this.known[b.id];
+          if (
+            !old ||
+            old.hp !== b.hp ||
+            old.maxHp !== b.maxHp ||
+            old.team !== b.team ||
+            old.kind !== b.kind ||
+            old.progress !== b.progress ||
+            old.closed !== b.closed ||
+            old.links !== b.links ||
+            old.architecture !== b.architecture ||
+            old.x !== b.x ||
+            old.y !== b.y
+          )
+            this.known[b.id] = { ...b, queue: [], rally: null };
+        }
+      // AI factions need the same visibility/exploration data, but never paint it.
+      if (this.team !== 0) return;
       if (!this.pixels) {
         this.pixels = this.context.createImageData(this.cols, this.rows);
         for (let i = 0; i < this.explored.length; i++) {

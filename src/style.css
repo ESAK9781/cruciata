@@ -630,6 +630,8 @@ kbd {
   color: #b8a076;
 }
 .commands {
+  min-height: 0;
+  overflow-y: auto;
   display: grid;
   grid-template-columns: repeat(2, 1fr);
   gap: 4px;
@@ -677,10 +679,6 @@ kbd {
   border-bottom: 1px solid #7c6240;
   margin-bottom: 7px;
   gap: 4px;
-}
-#rotate-placement {
-  margin-left: auto;
-  font-size: 10px;
 }
 .muster-tabs button {
   border: 0;
@@ -2746,27 +2744,6 @@ main {
   .build-category .action-card {
     height: 38px;
   }
-}
-
-#stance-control {
-  margin-left: auto;
-  display: flex;
-  align-items: center;
-  gap: 5px;
-  font:
-    11px Georgia,
-    serif;
-  color: #e2c176;
-}
-#stance-control[hidden] {
-  display: none;
-}
-#unit-stance {
-  padding: 3px 5px;
-  width: 105px;
-  font:
-    11px Georgia,
-    serif;
 }
 
 #control-groups {

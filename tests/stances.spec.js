@@ -38,7 +38,7 @@ for (const stance of ["hold", "stand-down", "fight"])
     page,
   }) => {
     await battle(page);
-    await page.locator("#unit-stance").selectOption(stance);
+    await page.locator("#stance-" + stance).click();
     const far = await page.evaluate(() => {
       cruciata.step(3);
       return cruciata
@@ -72,7 +72,7 @@ test("hold and stand down persist across manual movement orders", async ({
 }) => {
   for (const stance of ["hold", "stand-down"]) {
     await battle(page, 1000);
-    await page.locator("#unit-stance").selectOption(stance);
+    await page.locator("#stance-" + stance).click();
     const p = await page.evaluate(() => cruciata.project(1800, 2600));
     await page.mouse.click(p.x, p.y, { button: "right" });
     const u = await page.evaluate(() => {

@@ -1,4 +1,5 @@
-/* Original overhead art. All structures share roof, stone, timber, and banner palettes. */
+/* Ground painting, cloth physics and canvas primitives. isometric-art.js installs
+   the projected world models over the legacy shape fallbacks before game.js. */
 (() => {
   "use strict";
   const C = {
@@ -68,9 +69,9 @@
       color,
     );
   }
-  function jerusalemCross(g, x, y, size, color) {
+  function jerusalemCross(g, x, y, size, color, weight = 1) {
     const arm = size * 0.6,
-      width = Math.max(1, size * 0.18);
+      width = Math.max(1, size * 0.18) * weight;
     line(
       g,
       [
@@ -201,7 +202,325 @@
       width: (0.7 + phase / 150) * scale,
     };
   }
-  function banner(g, x, y, team, time) {
+  // Army cloth is transient: simulation advances it, rendering only reads it.
+  const standardCloths = new WeakMap();
+  function standardAnchor(u) {
+    const a = (u.angle || 0) + Math.PI / 2;
+    return { x: u.x + Math.cos(a) * 6, y: u.y + Math.sin(a) * 6, z: 44 };
+  }
+  function standardCloth(u) {
+    let cloth = standardCloths.get(u);
+    if (cloth) return cloth;
+    const anchor = standardAnchor(u),
+      points = [],
+      rows = [],
+      links = [];
+    for (let r = 0; r < 5; r++) {
+      rows[r] = [];
+      const end = 12 + Math.abs(r - 2) * 2;
+      for (let c = 0; c <= end; c++) {
+        const p = {
+          x: anchor.x - Math.cos(u.angle || 0) * c * 4.2,
+          y: anchor.y - Math.sin(u.angle || 0) * c * 4.2,
+          z: anchor.z - r * 4 + Math.sin(c * 0.7 + r) * 0.3 * (c > 0),
+          vx: 0,
+          vy: 0,
+          vz: 0,
+          r,
+          c,
+          pinned: c === 0,
+        };
+        rows[r][c] = p;
+        points.push(p);
+      }
+    }
+    const join = (a, b, length, stiffness = 1) => {
+      if (a && b)
+        links.push({ a, b, length, length2: length * length, stiffness });
+    };
+    for (const p of points) {
+      join(p, rows[p.r][p.c + 1], 4.2);
+      join(p, rows[p.r + 1]?.[p.c], 4);
+      join(p, rows[p.r + 1]?.[p.c + 1], Math.hypot(4.2, 4), 0.65);
+      join(p, rows[p.r + 1]?.[p.c - 1], Math.hypot(4.2, 4), 0.65);
+      join(p, rows[p.r][p.c + 2], 8.4, 0.18);
+    }
+    cloth = { points, rows, links, anchor, time: 0 };
+    standardCloths.set(u, cloth);
+    return cloth;
+  }
+  function updateStandard(u, dt) {
+    if (!(dt > 0)) return;
+    const cloth = standardCloth(u),
+      target = standardAnchor(u);
+    if (cloth.suspended) {
+      const dx = target.x - cloth.anchor.x,
+        dy = target.y - cloth.anchor.y;
+      for (const p of cloth.points) {
+        p.x += dx;
+        p.y += dy;
+        p.vx = p.vy = p.vz = 0;
+      }
+      cloth.anchor = target;
+      cloth.suspended = false;
+      cloth.sleeping = false;
+      cloth.settledFor = 0;
+    }
+    const old = cloth.anchor;
+    const anchorTravel = Math.hypot(target.x - old.x, target.y - old.y);
+    if (cloth.sleeping && anchorTravel < 0.02) return;
+    if (anchorTravel >= 0.02) {
+      cloth.sleeping = false;
+      cloth.settledFor = 0;
+    }
+    // Teleports/load placement reset inertia without stretching the cloth.
+    if (Math.hypot(target.x - old.x, target.y - old.y) > 150) {
+      for (const p of cloth.points) {
+        p.x += target.x - old.x;
+        p.y += target.y - old.y;
+        p.vx = p.vy = p.vz = 0;
+      }
+      cloth.anchor = target;
+      return;
+    }
+    const steps = Math.ceil(dt / (1 / 90)),
+      h = dt / steps;
+    const speed = Math.hypot(target.x - old.x, target.y - old.y) / dt;
+    for (let step = 1; step <= steps; step++) {
+      const anchor = {
+        x: old.x + ((target.x - old.x) * step) / steps,
+        y: old.y + ((target.y - old.y) * step) / steps,
+      };
+      cloth.time += h;
+      for (const p of cloth.points) {
+        p.px = p.x;
+        p.py = p.y;
+        p.pz = p.z;
+        if (p.pinned) {
+          p.x = anchor.x;
+          p.y = anchor.y;
+          p.z = target.z - p.r * 4;
+          continue;
+        }
+        // Gravity, still-air drag and small movement-driven turbulent forces.
+        // The moving pinned edge pulls the mass through air, leaving it behind.
+        const flutter =
+          Math.min(1, speed / 65) *
+          Math.sin(cloth.time * 11 - p.c * 0.8 + p.r * 0.7) *
+          32;
+        p.vx = (p.vx + flutter * h) * Math.exp(-3.5 * h);
+        p.vy = (p.vy + flutter * 0.35 * h) * Math.exp(-3.5 * h);
+        p.vz = (p.vz + (-85 + flutter) * h) * Math.exp(-3.5 * h);
+        p.x += p.vx * h;
+        p.y += p.vy * h;
+        p.z += p.vz * h;
+      }
+      for (let iteration = 0; iteration < 5; iteration++)
+        for (const { a, b, length, length2, stiffness } of cloth.links) {
+          const dx = b.x - a.x,
+            dy = b.y - a.y,
+            dz = b.z - a.z,
+            squared = dx * dx + dy * dy + dz * dz;
+          if (Math.abs(squared - length2) < 0.004) continue;
+          const d = Math.sqrt(squared) || 1;
+          const correction =
+            (((d - length) / d) * stiffness) / (a.pinned || b.pinned ? 1 : 2);
+          if (!a.pinned) {
+            a.x += dx * correction;
+            a.y += dy * correction;
+            a.z += dz * correction;
+          }
+          if (!b.pinned) {
+            b.x -= dx * correction;
+            b.y -= dy * correction;
+            b.z -= dz * correction;
+          }
+        }
+      for (const p of cloth.points) {
+        if (!p.pinned && p.z < 7) {
+          p.z = 7;
+          p.x = p.px + (p.x - p.px) * 0.85;
+          p.y = p.py + (p.y - p.py) * 0.85;
+        }
+        p.vx = (p.x - p.px) / h;
+        p.vy = (p.y - p.py) / h;
+        p.vz = (p.z - p.pz) / h;
+      }
+    }
+    cloth.anchor = target;
+    const energy =
+      cloth.points.reduce(
+        (sum, p) => sum + p.vx * p.vx + p.vy * p.vy + p.vz * p.vz,
+        0,
+      ) / cloth.points.length;
+    cloth.settledFor =
+      speed < 0.1 && energy < 0.3 ? (cloth.settledFor || 0) + dt : 0;
+    cloth.sleeping = cloth.settledFor > 0.8;
+  }
+  const standardEmblems = new Map();
+  function standardEmblem(team) {
+    if (standardEmblems.has(team)) return standardEmblems.get(team);
+    const canvas = document.createElement("canvas");
+    canvas.width = 320;
+    canvas.height = 64;
+    const cg = canvas.getContext("2d");
+    cg.scale(4, 4);
+    if (team === 0) jerusalemCross(cg, 22, 8, 6.7, C.cream, 1.7);
+    else sigil(cg, 22, 8, 6.7, team, C.cream);
+    standardEmblems.set(team, canvas);
+    return canvas;
+  }
+  function clothEmblemTriangle(g, image, shape, c, r, second) {
+    const [a, b, d] = shape,
+      sx = c * 5,
+      sy = r * 4;
+    const ax = (second ? b[0] - d[0] : b[0] - a[0]) / 5;
+    const ay = (second ? b[1] - d[1] : b[1] - a[1]) / 5;
+    const bx = (second ? d[0] - a[0] : d[0] - b[0]) / 4;
+    const by = (second ? d[1] - a[1] : d[1] - b[1]) / 4;
+    g.save();
+    g.beginPath();
+    g.moveTo(...a);
+    g.lineTo(...b);
+    g.lineTo(...d);
+    g.closePath();
+    g.clip();
+    g.transform(
+      ax / 4,
+      ay / 4,
+      bx / 4,
+      by / 4,
+      a[0] - ax * sx - bx * sy,
+      a[1] - ay * sx - by * sy,
+    );
+    g.drawImage(image, 0, 0);
+    g.restore();
+  }
+  function armyStandard(g, u) {
+    const cloth = standardCloth(u),
+      anchor = cloth.anchor;
+    // Foreshorten cloth depth independently of elevation. Rear-facing resting
+    // tails must still read as hanging down, rather than rising behind the pole.
+    const local = (p) => [
+      (p.x - u.x) / 0.72,
+      (anchor.y + (p.y - anchor.y) * 0.35 - (p.z || 0) - u.y) / 0.72,
+    ];
+    const tip = local(anchor);
+    line(
+      g,
+      [
+        [tip[0], tip[1] - 3],
+        [tip[0], tip[1] + 62],
+      ],
+      1.8,
+      "#695d43",
+    );
+    ellipse(g, tip[0], tip[1] - 4, 2, 2, "#b9a578");
+    const color =
+      u.team === 1
+        ? C.green
+        : u.team === 3
+          ? "#b18b3b"
+          : u.team === 2
+            ? "#9a917e"
+            : C.red;
+    for (let r = 0; r < 4; r++)
+      for (let c = 0; c < 16; c++) {
+        const nodes = [
+          cloth.rows[r][c],
+          cloth.rows[r][c + 1],
+          cloth.rows[r + 1][c + 1],
+          cloth.rows[r + 1][c],
+        ].filter(Boolean);
+        if (nodes.length < 3) continue;
+        const shape = nodes.map(local);
+        polygon(g, shape, color);
+        // Subpixel overlap seals antialiased mesh seams without outlining cells.
+        g.strokeStyle = color;
+        g.lineWidth = 0.65;
+        g.stroke();
+        const slope = (nodes[1].y - nodes[0].y) / 5;
+        polygon(
+          g,
+          shape,
+          `rgba(${slope > 0 ? "0,0,0" : "255,239,209"},${Math.min(0.24, Math.abs(slope) * 0.12)})`,
+        );
+        // Warp all five crosses onto the fabric, keeping the complete emblem
+        // inside the hem and allowing individual folds to deform the stitching.
+        if (c >= 3 && c <= 5 && nodes.length === 4) {
+          const emblem = standardEmblem(u.team);
+          clothEmblemTriangle(
+            g,
+            emblem,
+            [shape[0], shape[1], shape[2]],
+            c,
+            r,
+            false,
+          );
+          clothEmblemTriangle(
+            g,
+            emblem,
+            [shape[0], shape[2], shape[3]],
+            c,
+            r,
+            true,
+          );
+        }
+      }
+    for (const r of [0, 4]) line(g, cloth.rows[r].map(local), 0.75, "#d1ae72");
+    for (const r of [0, 1, 2, 3]) {
+      const a = cloth.rows[r].at(-1),
+        b = cloth.rows[r + 1].at(-1);
+      line(g, [local(a), local(b)], 0.8, "#d1ae72");
+    }
+  }
+  const particleImages = new Map(),
+    particleTints = new Map();
+  for (const name of [
+    "smoke_01",
+    "smoke_04",
+    "dirt_01",
+    "spark_01",
+    "light_02",
+    "flame_01",
+  ])
+    if (typeof Image !== "undefined") {
+      const img = new Image();
+      img.src = `assets/particles/${name}.png`;
+      particleImages.set(name, img);
+    }
+  function particle(g, p) {
+    const img = particleImages.get(p.sprite);
+    if (!img?.complete || !img.naturalWidth) {
+      ellipse(g, p.x, p.y, p.r, p.r, p.color);
+      return;
+    }
+    const key = p.sprite + p.color;
+    let tint = particleTints.get(key);
+    if (!tint) {
+      tint = document.createElement("canvas");
+      tint.width = tint.height = 128;
+      const cg = tint.getContext("2d");
+      cg.drawImage(img, 0, 0, 128, 128);
+      cg.globalCompositeOperation = "source-in";
+      cg.fillStyle = p.color;
+      cg.fillRect(0, 0, 128, 128);
+      particleTints.set(key, tint);
+    }
+    const radius = p.r * (1 + ((p.growth || 0) * p.t) / p.life);
+    g.save();
+    g.translate(p.x, p.y);
+    g.rotate((p.angle || 0) + (p.spin || 0) * p.t);
+    if (p.glow) g.globalCompositeOperation = "lighter";
+    g.drawImage(tint, -radius, -radius, radius * 2, radius * 2);
+    g.restore();
+  }
+  function banner(g, x, y, team, time, scale = 1) {
+    g.save();
+    g.translate(x, y);
+    g.scale(scale, scale);
+    x = 0;
+    y = 0;
     line(
       g,
       [
@@ -220,7 +539,13 @@
           : team === 1
             ? C.green
             : C.red;
-    const wave = (t) => Math.sin(time * 2.6 - t * 6 + x * 0.03) * 2.7 * t;
+    const gust =
+      0.7 + Math.sin(time * 0.57) * 0.18 + Math.sin(time * 0.23) * 0.12;
+    const wave = (t) =>
+      (Math.sin(time * 2.1 - t * 5.4) * 2.8 +
+        Math.sin(time * 3.3 - t * 9) * 0.8) *
+      t *
+      gust;
     for (let i = 0; i < 10; i++) {
       const a = i / 10,
         b = (i + 1) / 10;
@@ -255,6 +580,7 @@
       g.arc(x + 11, cy, 4, 0.7, 5.3);
       g.stroke();
     }
+    g.restore();
   }
 
   function tree(g, x, y, scale = 1, palm = false) {
@@ -1175,15 +1501,640 @@
   function wallStroke(g, points, width, color) {
     g.strokeStyle = color;
     g.lineWidth = width;
+    // Connected curtains share flat midpoint seams and angular corner joins.
     g.lineCap = "butt";
-    g.lineJoin = "miter";
+    g.lineJoin = "bevel";
     g.beginPath();
     points.forEach(([x, y], i) => (i ? g.lineTo(x, y) : g.moveTo(x, y)));
     g.stroke();
   }
+  function gear(g, x, y, r, angle) {
+    g.save();
+    g.translate(x, y);
+    g.rotate(angle);
+    const points = [];
+    for (let i = 0; i < 48; i++) {
+      const a = (i * Math.PI) / 24,
+        rr = i % 4 < 2 ? r : r * 0.82;
+      points.push([Math.cos(a) * rr, Math.sin(a) * rr]);
+    }
+    polygon(g, points, "#5d625f", "#222c2d");
+    ellipse(g, 0, 0, r * 0.7, r * 0.7, "#a69671");
+    ellipse(g, 0, 0, r * 0.53, r * 0.53, "#4e514a");
+    for (let i = 0; i < 6; i++) {
+      const a = (i * Math.PI) / 3;
+      line(
+        g,
+        [
+          [Math.cos(a) * r * 0.22, Math.sin(a) * r * 0.22],
+          [Math.cos(a) * r * 0.62, Math.sin(a) * r * 0.62],
+        ],
+        3,
+        "#c8b88f",
+      );
+    }
+    ellipse(g, 0, 0, 4, 4, "#e5d8ac");
+    g.restore();
+  }
+  function beam(g, a, b, width = 10) {
+    line(g, [a, b], width + 3, "#3a2d22");
+    line(g, [a, b], width, "#ad8651");
+    line(
+      g,
+      [
+        [a[0] - 1, a[1] - 2],
+        [b[0] - 1, b[1] - 2],
+      ],
+      2,
+      "#dfbc80",
+    );
+    for (const p of [a, b]) {
+      ellipse(g, p[0], p[1], width * 0.5, width * 0.5, "#52534b");
+      ellipse(g, p[0] - 1, p[1] - 1, 1.4, 1.4, "#d6cba7");
+    }
+  }
+  function greatEngine(g, b, time) {
+    window.CruciataSiegeArt.greatEngine(g, b, time);
+  }
+  function siegeMachine(g, u, time, angle) {
+    window.CruciataSiegeArt.siegeMachine(g, u, time, angle);
+  }
+  function caravan(g, u, time, angle) {
+    g.save();
+    g.rotate(angle + Math.PI / 2);
+    const walk = u.moving ? Math.sin(time * 9 + (u.id || 0)) * 2 : 0;
+    ellipse(g, 5, 5, 29, 48, "#27302240");
+    // Hooped canvas wagon, layered timber bed, iron tyres, and rotating spokes.
+    for (const x of [-23, 23])
+      for (const y of [-12, 20]) {
+        g.save();
+        g.translate(x, y);
+        rect(g, -5, -10, 10, 20, "#282b27", "#0f1615");
+        ellipse(g, 0, 0, 4, 8, "#816843");
+        for (let i = 0; i < 4; i++) {
+          const a = (u.moving ? time * 5 : 0) + (i * Math.PI) / 2;
+          line(
+            g,
+            [
+              [Math.cos(a) * 3, Math.sin(a) * 7],
+              [-Math.cos(a) * 3, -Math.sin(a) * 7],
+            ],
+            1,
+            "#d8b782",
+          );
+        }
+        ellipse(g, 0, 0, 2, 2, "#d7c8a1");
+        g.restore();
+      }
+    rect(g, -20, -25, 40, 56, "#795f3e", "#3d3226");
+    for (let y = -23; y < 30; y += 7)
+      line(
+        g,
+        [
+          [-19, y],
+          [19, y],
+        ],
+        1,
+        "#c39760",
+      );
+    for (const x of [-18, 18]) beam(g, [x, -28], [x, 32], 4);
+    g.save();
+    g.translate(0, walk * 0.3);
+    polygon(
+      g,
+      [
+        [-17, -27],
+        [14, -30],
+        [21, -21],
+        [21, 24],
+        [13, 30],
+        [-18, 27],
+        [-23, 18],
+        [-23, -17],
+      ],
+      u.type === "pilgrim" ? "#e3d4af" : "#b79b70",
+      "#695a41",
+    );
+    for (let y = -22; y < 27; y += 9) {
+      line(
+        g,
+        [
+          [-20, y],
+          [18, y - 2],
+        ],
+        1,
+        "#8c795954",
+      );
+      line(
+        g,
+        [
+          [-14, y - 1],
+          [11, y - 3],
+        ],
+        1,
+        "#fff1c390",
+      );
+    }
+    for (const x of [-15, 14])
+      line(
+        g,
+        [
+          [x, -28],
+          [x, 27],
+        ],
+        1,
+        "#8b7758",
+      );
+    for (const x of [-19, 18])
+      for (let y = -21; y < 26; y += 11) {
+        ellipse(g, x, y, 1.5, 1.5, "#735539");
+        line(
+          g,
+          [
+            [x, y],
+            [x * 1.1, y + 5],
+          ],
+          1,
+          "#c7ad79",
+        );
+      }
+    if (u.type === "pilgrim") jerusalemCross(g, -2, -1, 8, "#9c4431");
+    else {
+      rect(g, -13, -14, 14, 23, "#976c3e", "#583f28");
+      rect(g, 2, -8, 13, 21, "#c4a16a", "#6b5638");
+      for (const x of [-7, 8])
+        line(
+          g,
+          [
+            [x, -14],
+            [x, 16],
+          ],
+          2,
+          "#d9c18e",
+        );
+    }
+    g.restore();
+    for (const sign of [-1, 1])
+      line(
+        g,
+        [
+          [sign * 11, -25],
+          [sign * 10, -58],
+        ],
+        3,
+        "#ad8a56",
+      );
+    // Draft horse: shoulder, rump, neck, ears, mane, tack and alternating legs.
+    for (const sign of [-1, 1])
+      for (const y of [-53, -39]) {
+        line(
+          g,
+          [
+            [sign * 6, y],
+            [sign * (11 + walk * 0.6), y + walk * sign],
+          ],
+          3,
+          "#514336",
+        );
+        ellipse(g, sign * 12, y + walk * sign, 2, 2, "#272825");
+      }
+    ellipse(g, 0, -46 + walk * 0.2, 10, 17, "#94785a");
+    ellipse(g, -2, -53, 8, 11, "#b3936b");
+    ellipse(g, 0, -63, 6, 10, "#9c7c56");
+    ellipse(g, 0, -70, 5, 7, "#b4946e");
+    for (const x of [-4, 4])
+      polygon(
+        g,
+        [
+          [x, -72],
+          [x - 2, -80],
+          [x + 2, -76],
+        ],
+        "#674c36",
+      );
+    line(
+      g,
+      [
+        [0, -39],
+        [3, -29 + walk],
+      ],
+      3,
+      "#4a3c2d",
+    );
+    line(
+      g,
+      [
+        [-7, -50],
+        [7, -50],
+      ],
+      3,
+      "#503d2a",
+    );
+    line(
+      g,
+      [
+        [-5, -65],
+        [5, -65],
+      ],
+      2,
+      "#503d2a",
+    );
+    line(
+      g,
+      [
+        [-5, -65],
+        [-13, -20],
+      ],
+      1,
+      "#dac298",
+    );
+    line(
+      g,
+      [
+        [5, -65],
+        [13, -20],
+      ],
+      1,
+      "#dac298",
+    );
+    for (let y = -68; y < -40; y += 4)
+      line(
+        g,
+        [
+          [-2, y],
+          [1, y + 4],
+        ],
+        2,
+        "#47372c",
+      );
+    ellipse(g, -2, -72, 1, 1, "#27251f");
+    // Rear lantern and tied provisions.
+    rect(g, -18, 27, 10, 12, "#84704a", "#40382c");
+    ellipse(g, -13, 32, 3, 3, "#efbd65");
+    ellipse(g, 10, 30, 7, 5, "#b99b62");
+    line(
+      g,
+      [
+        [4, 30],
+        [16, 30],
+      ],
+      1,
+      "#6e5232",
+    );
+    g.restore();
+  }
+  function islamicBuilding(g, b, time) {
+    const w = b.w,
+      h = b.h,
+      l = -w / 2,
+      t = -h / 2;
+    const civic = ["towncenter", "fort", "chapel"].includes(b.kind);
+    const tower = ["tower", "watchtower"].includes(b.kind);
+    const arch = (x, y, size) => {
+      polygon(
+        g,
+        [
+          [x - size, y + size],
+          [x - size, y],
+          [x, y - size * 1.4],
+          [x + size, y],
+          [x + size, y + size],
+        ],
+        "#343e34",
+        "#e0caa1",
+      );
+      line(
+        g,
+        [
+          [x - size * 0.6, y + size],
+          [x - size * 0.6, y],
+          [x, y - size * 0.9],
+          [x + size * 0.6, y],
+        ],
+        0.8,
+        "#978563",
+      );
+    };
+    const dome = (x, y, r) => {
+      ellipse(g, x + 3, y + 7, r + 3, r * 0.73, "#343e3455");
+      ellipse(g, x, y, r, r * 0.72, "#566f60", "#3b5044");
+      ellipse(g, x - 2, y - 4, r * 0.91, r * 0.64, "#a3b29b", "#657b65");
+      for (const k of [-0.65, -0.3, 0.3, 0.65])
+        line(
+          g,
+          [
+            [x + k * r * 0.35, y - r * 0.54],
+            [x + k * r, y + r * 0.35],
+          ],
+          1,
+          "#657d68",
+        );
+      ellipse(g, x - 3, y - r * 0.25, r * 0.26, r * 0.17, "#d5d7b077");
+      line(
+        g,
+        [
+          [x, y - r * 0.6],
+          [x, y - r * 0.9],
+        ],
+        1.3,
+        "#c3ab67",
+      );
+    };
+    const minaret = (x, y, height) => {
+      rect(g, x - 6, y - height, 12, height + 8, "#c0b18b", "#6b7058");
+      rect(g, x + 2, y - height, 4, height + 8, "#8a896b");
+      for (let v = y - height + 8; v < y; v += 9)
+        line(
+          g,
+          [
+            [x - 5, v],
+            [x + 5, v],
+          ],
+          0.7,
+          "#8f8c6c",
+        );
+      rect(g, x - 9, y - height + 9, 18, 5, "#ddcba0", "#6c785d");
+      dome(x, y - height - 2, 8);
+      arch(x, y - height + 22, 2.7);
+    };
+    // Plaster walls, recessed courtyards and stepped flat roof parapets replace
+    // the player's pitched timber roofs, rather than merely changing heraldry.
+    rect(g, l + 6, t + 10, w, h, "#34433555");
+    rect(g, l, t, w, h, "#a89a75", "#59644d");
+    polygon(
+      g,
+      [
+        [l, h / 2],
+        [w / 2, h / 2],
+        [w / 2, h / 2 + 9],
+        [l, h / 2 + 9],
+      ],
+      "#827c5e",
+      "#59644d",
+    );
+    rect(g, l + 4, t + 4, w - 8, h - 8, "#d2c3a0", "#9a9676");
+    for (let y = t + 9; y < h / 2; y += 10)
+      for (let x = l + 7 + (Math.floor(y / 10) % 2) * 7; x < w / 2 - 6; x += 18)
+        line(
+          g,
+          [
+            [x, y],
+            [Math.min(x + 14, w / 2 - 5), y],
+          ],
+          0.6,
+          "#aaa383",
+        );
+    if (tower) {
+      const r = Math.min(w, h) * 0.46;
+      const shape = Array.from({ length: 8 }, (_, i) => [
+        Math.cos((i * Math.PI) / 4 + Math.PI / 8) * r,
+        Math.sin((i * Math.PI) / 4 + Math.PI / 8) * r - 8,
+      ]);
+      polygon(g, shape, "#c8b98e", "#6c765b");
+      ellipse(g, 0, -8, r * 0.63, r * 0.53, "#7f896c", "#d8c79d");
+      for (let i = 0; i < 8; i++) {
+        const a = (i * Math.PI) / 4;
+        rect(
+          g,
+          Math.cos(a) * r - 3,
+          Math.sin(a) * r - 11,
+          6,
+          7,
+          "#dfcda2",
+          "#737d5d",
+        );
+      }
+      arch(0, h / 2 - 9, Math.min(5, w * 0.12));
+    } else if (civic) {
+      rect(g, l + 12, t + 14, w - 24, h - 28, "#938e70", "#ebe0bb");
+      rect(
+        g,
+        l + w * 0.23,
+        t + h * 0.27,
+        w * 0.54,
+        h * 0.44,
+        "#c5b792",
+        "#777f60",
+      );
+      dome(0, -h * 0.1, Math.min(w * 0.23, h * 0.27));
+      for (let x = l + 20; x < w / 2 - 12; x += 17) arch(x, h / 2 - 15, 5);
+      for (const sign of [-1, 1])
+        minaret(sign * (w / 2 - 13), -h * 0.15, Math.min(58, h * 0.45));
+      if (b.kind !== "chapel") {
+        for (const x of [l + 7, w / 2 - 13])
+          for (const y of [t + 7, h / 2 - 13])
+            rect(g, x, y, 9, 10, "#d6c49a", "#69765a");
+        arch(0, h / 2 - 13, Math.min(12, w * 0.12));
+      }
+    } else if (["barracks", "stable", "siegeworkshop"].includes(b.kind)) {
+      rect(g, l + 14, t + 13, w - 28, h - 26, "#8f8968", "#e6d5a8");
+      for (let x = l + 20; x < w / 2 - 15; x += 15) {
+        arch(x, t + 20, 4);
+        arch(x, h / 2 - 17, 4);
+      }
+      rect(g, l + 8, t + 7, w - 16, 10, "#b1ae86", "#636f54");
+      if (b.kind === "barracks") {
+        for (let x = l + 22; x < w / 2 - 15; x += 16) {
+          ellipse(g, x, 1, 4, 5, "#576c51", "#d6bb7c");
+          line(
+            g,
+            [
+              [x, 6],
+              [x, 13],
+            ],
+            1.2,
+            "#57482d",
+          );
+        }
+      }
+      if (b.kind === "stable") {
+        for (let x = l + 22; x < w / 2 - 15; x += 19) {
+          ellipse(g, x, 0, 7, 4, "#705338");
+          ellipse(g, x + 5, -4, 3, 3, "#846447");
+        }
+      }
+      if (b.kind === "siegeworkshop") {
+        beam(g, [l + 23, 10], [w / 2 - 18, -12], 6);
+        gear(g, 12, 8, 9, 0);
+        rect(g, -18, 4, 22, 9, "#806640", "#433f2e");
+      }
+      arch(0, h / 2 - 7, 7);
+    } else {
+      rect(g, l + 8, t + 8, w - 16, h - 16, "#b7b08b", "#717d5c");
+      rect(
+        g,
+        l + 12,
+        t + 12,
+        Math.max(8, w * 0.28),
+        Math.max(7, h * 0.27),
+        "#807e60",
+        "#ded3ab",
+      );
+      dome(w * 0.19, -h * 0.16, Math.min(11, w * 0.17));
+      arch(-w * 0.1, h / 2 - 8, Math.min(6, w * 0.13));
+      for (const x of [l + 8, w / 2 - 10])
+        rect(g, x, 1, 3, 7, "#344a38", "#d5c5a0");
+      if (b.kind === "mill") {
+        gear(g, 0, 0, 12, time * 0.35);
+        beam(g, [-17, 0], [17, 0], 4);
+      }
+      if (["lumbercamp", "miningcamp"].includes(b.kind))
+        for (let i = 0; i < 4; i++)
+          rect(
+            g,
+            l + 8 + i * 7,
+            h / 2 - 16,
+            6,
+            8,
+            b.kind === "miningcamp" ? "#757969" : "#80613d",
+            "#4c543d",
+          );
+    }
+    // Repeating teal-and-ochre tile frieze reads across both small and large assets.
+    for (let x = l + 8; x < w / 2 - 7; x += 8) {
+      polygon(
+        g,
+        [
+          [x, t + 3],
+          [x + 3, t + 6],
+          [x, t + 9],
+          [x - 3, t + 6],
+        ],
+        "#517e70",
+      );
+    }
+    banner(g, w / 2 - 7, -h / 2 + 5, b.team, time, 0.8);
+  }
+  function structureDamage(g, b, time) {
+    const w = b.w,
+      h = b.h;
+    const damage = 1 - b.hp / b.maxHp;
+    if (damage > 0.12) {
+      for (let i = 0; i < Math.ceil(damage * 6); i++) {
+        const x = Math.sin(i * 7.1 + b.id) * w * 0.32,
+          y = Math.cos(i * 3.4 + b.id) * h * 0.28;
+        line(
+          g,
+          [
+            [x - 7, y - 9],
+            [x, y - 3],
+            [x - 3, y + 4],
+            [x + 4, y + 12],
+          ],
+          1 + damage,
+          "#332c24",
+        );
+        if (damage > 0.4)
+          ellipse(g, x, y, 6 + damage * 6, 4 + damage * 5, "#312c24bb");
+      }
+      if (damage > 0.32)
+        for (let i = 0; i < 3; i++) {
+          const cycle = (time * 0.4 + i * 0.33) % 1,
+            x = w * 0.15 + i * 7 + Math.sin(time + i) * 4,
+            y = -h * 0.18 - cycle * 40;
+          ellipse(
+            g,
+            x,
+            y,
+            5 + cycle * 9,
+            4 + cycle * 10,
+            "#252526" +
+              Math.round((1 - cycle) * 80)
+                .toString(16)
+                .padStart(2, "0"),
+          );
+        }
+      if (damage > 0.62)
+        for (let i = 0; i < 3; i++) {
+          const x = -w * 0.25 + i * w * 0.23,
+            y = h * 0.15;
+          const flicker = Math.sin(time * 13 + i * 4) * 2;
+          ellipse(g, x, y, 5 + flicker, 8 - flicker, "#d6541bcc");
+          ellipse(g, x, y + 2, 2.5, 5 + flicker, "#ffc451");
+        }
+      for (let i = 0; i < Math.floor(damage * 9); i++)
+        rect(
+          g,
+          -w / 2 + ((i * 19 + b.id) % w),
+          h / 2 + 3 + (i % 3) * 3,
+          5,
+          4,
+          "#9e8c70",
+        );
+    }
+  }
   function structure(g, b, time) {
+    if (b.kind === "greatengine" && b.progress >= 1 && b.hp > 0) {
+      greatEngine(g, b, time);
+      return;
+    }
+    if (b.gateSegments && b.hp > 0 && b.progress >= 1) {
+      g.save();
+      g.translate(b.x, b.y);
+      g.rotate(b.gateAngle || 0);
+      if (b.bastionGate || b.gateSegments.some((part) => part.fortified)) {
+        // Broad dark abutments frame the same two-section navigable opening.
+        rect(g, -52, -27, 104, 54, "#48534b", "#2b352e");
+        rect(g, -49, -24, 98, 48, "#727b6c", "#3c483f");
+        rect(g, -14, -28, 28, 56, b.closed ? "#594c38" : "#2c3029", "#a7ae97");
+        for (const sign of [-1, 1]) {
+          rect(g, sign * 35 - 15, -31, 30, 62, "#596456", "#303c34");
+          rect(g, sign * 35 - 12, -27, 24, 54, "#87907a", "#455442");
+          for (let y = -23; y < 26; y += 8)
+            line(
+              g,
+              [
+                [sign * 35 - 11, y],
+                [sign * 35 + 11, y],
+              ],
+              0.8,
+              "#54634f",
+            );
+          for (let x = sign * 35 - 12; x < sign * 35 + 13; x += 9)
+            rect(g, x, -34, 6, 8, "#9ea78e", "#4b5848");
+          rect(g, sign * 35 - 3, -10, 6, 19, "#2d392f", "#afaf91");
+        }
+        line(
+          g,
+          [
+            [-15, -25],
+            [0, -34],
+            [15, -25],
+          ],
+          4,
+          "#a2ab91",
+        );
+        if (b.closed)
+          for (let x = -10; x <= 10; x += 5)
+            line(
+              g,
+              [
+                [x, -23],
+                [x, 25],
+              ],
+              2,
+              "#b6a36d",
+            );
+        rect(g, -17, -27, 34, 6, "#939d83", "#3b4b3b");
+        banner(g, 35, -30, b.team, time, 0.8);
+        g.restore();
+        return;
+      }
+      structure(
+        g,
+        { ...b, x: 0, y: 0, w: 74, h: 42, rotation: 0, gateSegments: null },
+        time,
+      );
+      g.restore();
+      return;
+    }
     if (b.progress >= 1) {
-      if (b.kind === "watchtower" && b.hp > 0) {
+      if (
+        b.kind === "watchtower" &&
+        b.team !== 1 &&
+        b.architecture !== "islamic" &&
+        b.hp > 0
+      ) {
         g.save();
         g.translate(b.x, b.y);
         for (const dx of [-12, 12])
@@ -1234,6 +2185,18 @@
         return;
       }
     }
+    if (b.wallAttachment && b.hp > 0 && b.progress >= 1)
+      structure(
+        g,
+        {
+          ...b,
+          ...b.wallAttachment,
+          kind: "wall",
+          wallAttachment: null,
+          fortified: !!(b.fortified || b.wallAttachment.fortified),
+        },
+        time,
+      );
     g.save();
     g.translate(b.x, b.y);
     let w = b.w,
@@ -1512,7 +2475,8 @@
     }
     if (b.kind === "wall") {
       const links = Object.values(b.links || {}),
-        angle = b.wallAngle || 0;
+        angle = b.wallAngle || 0,
+        width = b.fortified ? 48 : 30;
       if (links.length === 1) links.push({ x: -links[0].x, y: -links[0].y });
       if (!links.length) {
         const r =
@@ -1524,105 +2488,119 @@
           { x: -Math.cos(angle) * r, y: -Math.sin(angle) * r },
         );
       }
-      for (const arm of links)
-        wallStroke(
-          g,
-          [
-            [4, 5],
-            [arm.x + 4, arm.y + 5],
-          ],
-          25,
-          "#3a3f2c44",
-        );
-      for (const arm of links) {
-        wallStroke(
-          g,
-          [
-            [0, 0],
-            [arm.x, arm.y],
-          ],
-          24,
-          "#63563e",
-        );
-        wallStroke(
-          g,
-          [
-            [0, 0],
-            [arm.x, arm.y],
-          ],
-          21,
-          "#d1bd92",
-        );
-        wallStroke(
-          g,
-          [
-            [0, 0],
-            [arm.x, arm.y],
-          ],
-          13,
-          "#a89a7a",
-        );
-        const a = Math.atan2(arm.y, arm.x),
-          d = Math.hypot(arm.x, arm.y);
-        g.save();
-        g.rotate(a);
-        // Reinforced stone courses and a recessed walk distinguish curtain walls.
-        for (const side of [-1, 1])
+      const spans =
+        links.length === 2
+          ? [
+              [
+                [links[0].x, links[0].y],
+                [0, 0],
+                [links[1].x, links[1].y],
+              ],
+            ]
+          : links.map((arm) => [
+              [0, 0],
+              [arm.x, arm.y],
+            ]);
+      for (const [band, color, ox, oy] of [
+        [width + 4, "#292d2844", 4, 8],
+        [width, b.fortified ? "#37443a" : "#504c3f", 0, 0],
+        [width - 4, b.fortified ? "#727c6b" : "#d1bd92", 0, 0],
+        [width - 14, b.fortified ? "#4d594c" : "#8a846e", 0, 0],
+      ]) {
+        for (const span of spans)
           wallStroke(
             g,
+            span.map(([x, y]) => [x + ox, y + oy]),
+            band,
+            color,
+          );
+        if (links.some((arm) => Math.hypot(arm.x, arm.y) < 1)) {
+          g.save();
+          g.translate(ox, oy);
+          g.rotate(angle);
+          rect(g, -16, -band / 2, 32, band, color);
+          g.restore();
+        }
+      }
+      for (const arm of links) {
+        g.save();
+        g.rotate(Math.atan2(arm.y, arm.x));
+        const d = Math.hypot(arm.x, arm.y);
+        for (const sign of [-1, 1])
+          line(
+            g,
             [
-              [0, side * 6],
-              [d, side * 6],
+              [0, sign * (width / 2 - 9)],
+              [d, sign * (width / 2 - 9)],
             ],
-            1,
-            "#786b52",
+            2,
+            "#5f5e4e",
           );
         for (let x = 3; x < d; x += 9) {
-          for (const side of [-1, 1])
-            rect(g, x - 2, side * 9 - 2, 5, 5, "#f0ddb2", "#928060");
-          wallStroke(
-            g,
-            [
-              [x, -6],
-              [x, 6],
-            ],
-            0.7,
-            "#726b53",
-          );
+          for (const sign of [-1, 1])
+            rect(
+              g,
+              x - 3,
+              sign * (width / 2 - 5) - 3,
+              6,
+              6,
+              b.fortified ? "#9ba38b" : "#e0d1ac",
+              "#766f59",
+            );
+          for (let y = -width / 2 + 7; y < width / 2 - 6; y += 8)
+            line(
+              g,
+              [
+                [x - 4, y],
+                [x + 3, y],
+              ],
+              0.7,
+              "#625e4b",
+            );
         }
-        if (b.hp < b.maxHp * 0.8) {
-          wallStroke(
-            g,
-            [
-              [d * 0.4, -8],
-              [d * 0.5, -2],
-              [d * 0.35, 3],
-            ],
-            1.5,
-            "#574a36",
-          );
-          if (b.hp < b.maxHp * 0.45)
-            rect(g, d * 0.6, 5, 4, 4, "#5f513c", "#ead7ad");
+        if (b.fortified) {
+          for (let x = 7; x < d; x += 15)
+            rect(g, x - 2, -5, 4, 10, "#6b7369", "#d0bd89");
         }
         g.restore();
       }
-      rect(g, -6, -6, 12, 12, "#b4a483");
-      if (b.hp < b.maxHp * 0.65)
-        wallStroke(
+      if (b.hp < b.maxHp * 0.8)
+        line(
           g,
           [
-            [-5, -5],
-            [0, -1],
-            [-2, 3],
-            [5, 5],
+            [-6, -9],
+            [0, -2],
+            [-3, 5],
+            [7, 10],
           ],
-          1.5,
-          "#534b39",
+          2,
+          "#51483a",
         );
       g.restore();
       return;
     }
-    if (b.kind === "wall" || b.kind === "gate") {
+    if (
+      (team === 1 || b.architecture === "islamic") &&
+      [
+        "towncenter",
+        "fort",
+        "chapel",
+        "house",
+        "barracks",
+        "stable",
+        "siegeworkshop",
+        "mill",
+        "lumbercamp",
+        "miningcamp",
+        "tower",
+        "watchtower",
+      ].includes(b.kind)
+    ) {
+      islamicBuilding(g, b, time);
+      structureDamage(g, b, time);
+      g.restore();
+      return;
+    } else if (b.kind === "wall" || b.kind === "gate") {
       rect(g, -w / 2, -h / 2, w, h, "#c4b28b", "#62553e");
       for (let y = -h / 2 + 3; y < h / 2; y += 8)
         for (let x = -w / 2 + (y % 2) * 4; x < w / 2; x += 12) {
@@ -2102,60 +3080,7 @@
       for (const x of [-w / 2 + 10, w / 2 - 10])
         rect(g, x - 2, h / 2 - 15, 4, 7, "#3c3f37", "#d7bd8d");
     }
-    const damage = 1 - b.hp / b.maxHp;
-    if (damage > 0.12) {
-      for (let i = 0; i < Math.ceil(damage * 6); i++) {
-        const x = Math.sin(i * 7.1 + b.id) * w * 0.32,
-          y = Math.cos(i * 3.4 + b.id) * h * 0.28;
-        line(
-          g,
-          [
-            [x - 7, y - 9],
-            [x, y - 3],
-            [x - 3, y + 4],
-            [x + 4, y + 12],
-          ],
-          1 + damage,
-          "#332c24",
-        );
-        if (damage > 0.4)
-          ellipse(g, x, y, 6 + damage * 6, 4 + damage * 5, "#312c24bb");
-      }
-      if (damage > 0.32)
-        for (let i = 0; i < 3; i++) {
-          const cycle = (time * 0.4 + i * 0.33) % 1,
-            x = w * 0.15 + i * 7 + Math.sin(time + i) * 4,
-            y = -h * 0.18 - cycle * 40;
-          ellipse(
-            g,
-            x,
-            y,
-            5 + cycle * 9,
-            4 + cycle * 10,
-            "#252526" +
-              Math.round((1 - cycle) * 80)
-                .toString(16)
-                .padStart(2, "0"),
-          );
-        }
-      if (damage > 0.62)
-        for (let i = 0; i < 3; i++) {
-          const x = -w * 0.25 + i * w * 0.23,
-            y = h * 0.15;
-          const flicker = Math.sin(time * 13 + i * 4) * 2;
-          ellipse(g, x, y, 5 + flicker, 8 - flicker, "#d6541bcc");
-          ellipse(g, x, y + 2, 2.5, 5 + flicker, "#ffc451");
-        }
-      for (let i = 0; i < Math.floor(damage * 9); i++)
-        rect(
-          g,
-          -w / 2 + ((i * 19 + b.id) % w),
-          h / 2 + 3 + (i % 3) * 3,
-          5,
-          4,
-          "#9e8c70",
-        );
-    }
+    structureDamage(g, b, time);
     g.restore();
   }
   function terrain(width, height, level, coast, river, seed, bridge = 1150) {
@@ -2584,7 +3509,7 @@
       g.restore();
       for (const [i, y] of [1580, 1780, 2000].entries())
         if (y > view.y - 100 && y < view.y + view.h + 100)
-          ship(g, coast(y) - 95, y, time, i);
+          window.CruciataArt.ship(g, coast(y) - 95, y, time, i);
     }
     if (level === 1) {
       g.save();
@@ -2636,31 +3561,7 @@
         if (points.length) line(g, points, 2, "#d8dfbaaa");
       }
       if (bridge > view.y - 90 && bridge < view.y + view.h + 90) {
-        const x = river(bridge);
-        rect(g, x - 82, bridge - 44, 164, 88, "#a09271", "#5c5544");
-        for (let px = x - 76; px < x + 78; px += 10)
-          line(
-            g,
-            [
-              [px, bridge - 38],
-              [px, bridge + 38],
-            ],
-            0.8,
-            "#dccba1",
-          );
-        for (const yy of [bridge - 44, bridge + 44]) {
-          line(
-            g,
-            [
-              [x - 85, yy],
-              [x + 85, yy],
-            ],
-            5,
-            "#d7c69e",
-          );
-          for (let px = x - 83; px < x + 84; px += 17)
-            rect(g, px - 3, yy - 4, 6, 8, "#ebd9b0", "#7d6d53");
-        }
+        window.CruciataArt.bridge(g, river(bridge), bridge);
       }
     }
   }
@@ -2972,10 +3873,21 @@
     jerusalemCross,
     roof,
     banner,
+    updateStandard,
+    suspendStandard(u) {
+      const cloth = standardCloths.get(u);
+      if (cloth) cloth.suspended = true;
+    },
+    standardCloth,
+    armyStandard,
+    particle,
     lappingWave,
     tree,
     resource,
     unit,
+    caravan,
+    greatEngine,
+    siegeMachine,
     corpse,
     structure,
     terrain,

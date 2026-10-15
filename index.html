@@ -208,9 +208,13 @@
               </div>
             </div>
             <div class="commands">
-              <button id="attack-button">
-                <span>⚔</span>Advance<kbd>F</kbd></button
-              ><button id="hold-button"><span>⛨</span>Hold<kbd>H</kbd></button
+              <button id="stance-fight" hidden>Fight</button
+              ><button id="stance-hold" hidden>Hold</button
+              ><button id="stance-stand-down" hidden>Stand down</button
+              ><button id="upgrade-gate-button" hidden>Upgrade to gate</button
+              ><button id="upgrade-tower-button" hidden>
+                Upgrade to guard tower</button
+              ><button id="destroy-button" hidden>Destroy building</button
               ><button id="bless-button"><span>✝</span>Bless<kbd>B</kbd></button
               ><button id="deploy-button">
                 <span>⚒</span><span id="deploy-label">Set up</span
@@ -220,6 +224,7 @@
                 title="Explore unknown lands as a company; avoid combat"
               >
                 <span>&#8982;</span>Scout<kbd>G</kbd></button
+              ><button id="cancel-targeting-button" hidden>Cancel target</button
               ><button id="cancel-button">
                 <span>×</span>Cancel<kbd>X</kbd>
               </button>
@@ -232,30 +237,6 @@
                   Build</button
                 ><button id="research-tab" role="tab" aria-selected="false">
                   Unit upgrades
-                </button>
-                <label
-                  id="stance-control"
-                  hidden
-                  title="Fight: pursue and attack. Hold: attack in range without moving independently. Stand down: move only on orders and never attack."
-                >
-                  Stance
-                  <select
-                    id="unit-stance"
-                    aria-label="Military aggression stance"
-                  >
-                    <option value="fight">Fight</option>
-                    <option value="hold">Hold</option>
-                    <option value="stand-down">Stand down</option>
-                    <option value="mixed" disabled>Mixed stances</option>
-                  </select>
-                </label>
-                <button
-                  id="rotate-placement"
-                  type="button"
-                  title="Rotate gate (R)"
-                  hidden
-                >
-                  Rotate gate (R)
                 </button>
               </div>
               <div id="recruit-list" class="action-grid"></div>
@@ -379,7 +360,14 @@
     <script src="src/navigation.js"></script>
     <script src="src/fog.js"></script>
     <script src="src/audio.js"></script>
+    <script src="src/model-raster.js"></script>
+    <script src="src/siege-art.js"></script>
     <script src="src/artwork.js"></script>
+    <script src="src/isometric-art.js"></script>
+    <script src="src/settlement-art.js"></script>
+    <script src="src/people-art.js"></script>
+    <script src="assets/atlas/manifest.js"></script>
+    <script src="src/sprite-atlas.js"></script>
     <script src="src/game.js"></script>
 
     <script src="assets/maps/levant-coast.js"></script>

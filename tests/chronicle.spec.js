@@ -429,11 +429,36 @@ test("walls block travel and gates open or close their passage", async ({
 }) => {
   await begin(page);
   await page.evaluate(() => cruciata.supply({ stone: 500, wood: 500 }));
-  const b = await build(page, "gate");
-  await page.keyboard.press("e");
-  await clickWorld(page, b.x, b.y, { button: "right" });
-  await page.evaluate(() => cruciata.step(50));
-  await clickWorld(page, b.x, b.y);
+  await page.evaluate(() =>
+    cruciata.scenario((s) => {
+      s.units = [];
+      s.nodes = [];
+      s.decorations = [];
+      for (let i = 0; i < 2; i++)
+        s.buildings.push({
+          id: 99950 + i,
+          kind: "wall",
+          team: 0,
+          x: 1400 + i * 32,
+          y: 2600,
+          w: 32,
+          h: 32,
+          r: 23,
+          wallAngle: 0,
+          progress: 1,
+          hp: 3200,
+          maxHp: 3200,
+          queue: [],
+        });
+    }),
+  );
+  await page.evaluate(() => cruciata.camera(1400, 2600));
+  await clickWorld(page, 1400, 2600);
+  await page.locator("#upgrade-gate-button").click();
+  await page.evaluate(() => cruciata.step(25.1));
+  const b = await page.evaluate(() =>
+    cruciata.snapshot().buildings.find((b) => b.gateSegments),
+  );
   await expect(page.locator("#gate-button")).toBeVisible();
   // Newly built gates start closed; opening is an explicit player action.
   expect(await page.evaluate((p) => cruciata.free(p), b)).toBe(false);

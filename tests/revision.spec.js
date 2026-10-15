@@ -292,7 +292,7 @@ test("Shift queues different construction projects in order and builders finish 
   ).toBe(true);
 });
 
-test("rectangle selection cancels multiple foundations completely without rubble", async ({
+test("rectangle selection cancels foundations one at a time without rubble", async ({
   page,
 }) => {
   await begin(page);
@@ -313,11 +313,17 @@ test("rectangle selection cancels multiple foundations completely without rubble
     (await page.evaluate(() => cruciata.snapshot())).selectedBuildings,
   ).toEqual(ids);
   await page.locator("#cancel-button").click();
+  expect(
+    (await page.evaluate(() => cruciata.snapshot())).buildings.filter((b) =>
+      ids.includes(b.id),
+    ),
+  ).toHaveLength(1);
+  await page.locator("#cancel-button").click();
   const s = await page.evaluate(() => cruciata.snapshot());
   expect(s.buildings.some((b) => ids.includes(b.id))).toBe(false);
 });
 
-test("bulk selection recruits and cancels a unit from every compatible producer", async ({
+test("bulk selection rotates individual recruits and cancellations among compatible producers", async ({
   page,
 }) => {
   await begin(page);
@@ -338,9 +344,11 @@ test("bulk selection recruits and cancels a unit from every compatible producer"
   );
   await page.locator("#recruit-sword").click();
   let s = await page.evaluate(() => cruciata.snapshot());
-  expect(s.buildings.slice(-2).every((b) => b.queue[0]?.type === "sword")).toBe(
-    true,
-  );
+  expect(s.buildings.slice(-2).map((b) => b.queue.length)).toEqual([1, 0]);
+  await page.locator("#recruit-sword").click();
+  s = await page.evaluate(() => cruciata.snapshot());
+  expect(s.buildings.slice(-2).map((b) => b.queue.length)).toEqual([1, 1]);
+  await page.locator("#cancel-button").click();
   await page.locator("#cancel-button").click();
   s = await page.evaluate(() => cruciata.snapshot());
   expect(s.buildings.slice(-2).every((b) => b.queue.length === 0)).toBe(true);
@@ -1431,64 +1439,51 @@ test("production campaign records completion and automatically saves the newly b
   expect((await page.evaluate(() => cruciata.snapshot())).level).toBe(1);
 });
 
-test("gate placement rotates its footprint, stays closed, and saves its orientation", async ({
+test("legacy rectangular gates retain saved orientation and passage", async ({
   page,
 }) => {
   await begin(page);
   await clearTerrain(page);
-  await page.locator("#settlement-tab").click();
-  await page.locator("#build-gate").click();
-  await expect(page.locator("#rotate-placement")).toBeVisible();
-  await page.keyboard.press("r");
-  await world(page, 1450, 2600);
-  let gates = await page.evaluate(() =>
-    cruciata
-      .snapshot()
-      .buildings.filter((b) => b.kind === "gate" && b.team === 0),
-  );
-  expect(gates).toHaveLength(1);
-  expect(gates[0]).toMatchObject({
-    rotation: 90,
-    w: 42,
-    h: 74,
-    maxHp: 4200,
-    closed: true,
-  });
-  await page.locator("#build-gate").click();
-  await page.locator("#rotate-placement").click();
-  await page.locator("#rotate-placement").click();
-  await world(page, 1570, 2600);
-  gates = await page.evaluate(() =>
-    cruciata
-      .snapshot()
-      .buildings.filter((b) => b.kind === "gate" && b.team === 0),
-  );
-  expect(gates[1]).toMatchObject({ rotation: 0, w: 74, h: 42 });
-  const id = gates[0].id;
-  await page.evaluate((id) => {
+  await page.evaluate(() =>
     cruciata.scenario((s) => {
-      const b = s.buildings.find((b) => b.id === id);
-      b.progress = 1;
-      b.hp = b.maxHp;
-    });
-  }, id);
+      const template =
+        s.buildings.find((b) => b.kind === "gate") || s.buildings[0];
+      s.buildings.push({
+        ...template,
+        id: 99970,
+        kind: "gate",
+        team: 0,
+        x: 1450,
+        y: 2600,
+        w: 42,
+        h: 74,
+        r: 43,
+        rotation: 90,
+        closed: true,
+        progress: 1,
+        hp: 4200,
+        maxHp: 4200,
+        queue: [],
+      });
+    }),
+  );
   expect(await page.evaluate(() => cruciata.free({ x: 1450, y: 2630 }))).toBe(
     false,
   );
   await world(page, 1450, 2600);
-  await page.evaluate(() => cruciata.gate());
+  await page.locator("#gate-button").click();
+  await page.evaluate(() => cruciata.step(0.1));
   expect(await page.evaluate(() => cruciata.free({ x: 1450, y: 2630 }))).toBe(
     true,
   );
   await page.evaluate(() => cruciata.save());
   await page.reload();
   expect(await page.evaluate(() => cruciata.resume())).toBe(true);
-  gates = await page.evaluate(() =>
-    cruciata
-      .snapshot()
-      .buildings.filter((b) => b.kind === "gate" && b.team === 0),
-  );
-  expect(gates[0]).toMatchObject({ rotation: 90, w: 42, h: 74, closed: false });
+  expect(
+    await page.evaluate(() =>
+      cruciata.snapshot().buildings.find((b) => b.id === 99970),
+    ),
+  ).toMatchObject({ rotation: 90, w: 42, h: 74, closed: false });
 });
 
 test("reinforced walls survive ordinary attacks but take substantial siege damage", async ({
@@ -1808,7 +1803,7 @@ test("fortified cities defend locally and transfer their surviving garrison and 
   expect(after.cities.find((c) => c.id === before.city).captured).toBe(true);
   expect(
     after.units.filter((u) => u.city === before.city && u.type === "worker"),
-  ).toHaveLength(6);
+  ).toHaveLength(16);
   expect(
     before.guardIds.every(
       (id) => after.units.find((u) => u.id === id).team === 0,

@@ -18,6 +18,7 @@
   const clamp = (n, a, b) => Math.max(a, Math.min(b, n)),
     distance = (a, b) => Math.hypot(a.x - b.x, a.y - b.y),
     alive = (o) => o.hp > 0;
+  const visibleFacing = new WeakSet();
   const TYPES = {
     worker: {
       name: "Villager",
@@ -123,6 +124,36 @@
       cooldown: 1,
       rank: 4,
     },
+  };
+  TYPES.ram = {
+    name: "Battering ram",
+    cost: { wood: 280, gold: 100 },
+    hp: 900,
+    speed: 38,
+    range: 38,
+    damage: 95,
+    cooldown: 3,
+    producer: "siegeworkshop",
+    train: 40,
+    rank: 0,
+  };
+  TYPES.ballista = {
+    name: "Ballista",
+    cost: { wood: 200, gold: 140 },
+    hp: 220,
+    speed: 48,
+    range: 380,
+    damage: 42,
+    cooldown: 4,
+    producer: "siegeworkshop",
+    train: 30,
+    rank: 2,
+  };
+  TYPES.merchant = {
+    ...TYPES.pilgrim,
+    name: "Supply caravan",
+    hp: 280,
+    speed: 50,
   };
   const BUILDINGS = {
     towncenter: {
@@ -257,14 +288,43 @@
     time: 25,
     passable: true,
   };
+  BUILDINGS.bastionwall = {
+    ...BUILDINGS.wall,
+    name: "Bastion wall",
+    cost: { stone: 48, wood: 12 },
+    hp: 11000,
+    time: 16,
+  };
+  BUILDINGS.bastiongate = {
+    ...BUILDINGS.gate,
+    name: "Bastion gatehouse",
+    cost: { stone: 260, wood: 120 },
+    hp: 18000,
+    time: 40,
+  };
+  BUILDINGS.greatengine = {
+    name: "Great siege engine",
+    cost: { wood: 1200, stone: 650, gold: 500 },
+    w: 203,
+    h: 175,
+    hp: 6000,
+    time: 180,
+    range: 2200,
+    minRange: 320,
+    damage: 650,
+    description:
+      "Massive permanent counterweight engine. Villagers build it on site. Range 320-2200; huge blasts also hit nearby friendly troops.",
+  };
   for (const [key, b] of Object.entries(BUILDINGS)) {
-    if (!["wall", "gate"].includes(key)) {
+    if (!["wall", "gate", "bastionwall"].includes(key)) {
       b.w = Math.round(b.w * 0.8);
       b.h = Math.round(b.h * 0.8);
     }
   }
   BUILDINGS.house.pop = 12;
   BUILDINGS.towncenter.pop = 32;
+  BUILDINGS.towncenter.cost = { wood: 500, stone: 350, gold: 200 };
+  BUILDINGS.towncenter.time = 100;
   for (const key of ["sword", "archer", "knight", "standard"]) {
     TYPES[key].train *= 0.6;
     for (const r in TYPES[key].cost)
@@ -335,9 +395,9 @@
       hp: 1900,
       wave: 95,
       objective: "Establish a pilgrim settlement",
-      desc: "Complete two farms, gather 200 food, and take the coastal outpost.",
+      desc: "Complete four farms, gather 1,000 food, and wrest the coastal outpost from its defenders.",
       story:
-        "The cross standards rise on the Levantine shore. Your Christian host needs more than courage: send villagers to the orchards and forests, build two farms, and supply the army before securing the neutral coastal outpost with at least three soldiers.",
+        "The cross standards rise on the Levantine shore. Your Christian host needs more than courage: send villagers to the orchards and forests, build four farms, gather a thousand provisions, and supply the army before securing the neutral coastal outpost with at least three soldiers.",
       win: "The fields are planted and the coast is secured. A living settlement now supplies the pilgrimage.",
     },
     {
@@ -353,9 +413,9 @@
       hp: 2400,
       wave: 80,
       objective: "Escort the pilgrim caravan",
-      desc: "Build a watchtower by the bridge. Escort at least two caravans to the northeast refuge.",
+      desc: "Fortify the bridge and escort two caravans across the long contested road to the northeast refuge.",
       story:
-        "The Orontes cuts the road in two. Muslim patrols watch its only bridge. Establish a watchtower near the crossing and escort your three pilgrim caravans; they march only while soldiers are close and the way is safe.",
+        "The Orontes cuts the road in two. Four enemy camps guard the bridge and the long road to the distant refuge. Establish a watchtower near the crossing and escort your three pilgrim caravans; they march only while soldiers are close and the way is safe.",
       win: "The pilgrims have crossed beneath the protection of your standards. The road to Antioch remains open.",
     },
     {
@@ -371,9 +431,9 @@
       hp: 3200,
       wave: 55,
       objective: "Hold through the winter siege",
-      desc: "Keep the town centre standing for six minutes and complete a chapel. Winter slows food gathering.",
+      desc: "Endure sustained attacks for 10 to 15 minutes and complete a chapel. Winter slows food gathering.",
       story:
-        "Winter closes around Antioch. Attacks will come from several directions, and the harvest is meagre. Fortify your settlement, keep food stores healthy, and build a chapel to sustain the defenders through six minutes of siege.",
+        "Winter closes around Antioch. Attacks will come from several directions, and the harvest is meagre. Fortify your settlement, keep food stores healthy, and build a chapel to sustain the defenders through a prolonged siege from six surrounding enemy camps.",
       win: "The settlement has endured. The bells of the chapel answer the departing winter, and your host is ready to march.",
     },
     {
@@ -389,9 +449,9 @@
       hp: 3200,
       wave: 70,
       objective: "Secure the pilgrim road",
-      desc: "Hold both road villages. Secure the road and deliver three escorted supply caravans.",
+      desc: "Hold both distant road villages for 3 to 5 minutes and deliver two escorted supply caravans.",
       story:
-        "The road south runs through two abandoned villages. Secure both settlements and hold them for ninety seconds. Keep the villagers alive and protect the supply road while the opposing host scouts for a weakness.",
+        "The road south runs through two abandoned villages. Secure both settlements and hold them while two supply caravans cross the contested road. Keep the villagers alive and protect the supply road while the opposing host scouts for a weakness.",
       win: "The route is secure. Merchants and pilgrims carry provisions south beneath your banners.",
     },
     {
@@ -407,9 +467,9 @@
       hp: 3800,
       wave: 65,
       objective: "Breach the outer walls",
-      desc: "Destroy two of the three gatehouses. Use deployed trebuchets to strike the fortifications.",
+      desc: "Destroy all three reinforced gatehouses. Use deployed trebuchets to strike the fortifications.",
       story:
-        "Jerusalem rises behind its outer walls. Build a siege workshop, bring timber and stone to the engines, and break two gatehouses. Trebuchets must set up before firing; their stones spare neither friend nor foe near the impact.",
+        "Jerusalem rises behind its outer walls. Build a siege workshop, bring timber and stone to the engines, and break all three reinforced gatehouses. Trebuchets must set up before firing; their stones spare neither friend nor foe near the impact.",
       win: "The outer defenses are breached. The engines have opened the path to the Holy City.",
     },
     {
@@ -425,7 +485,7 @@
       hp: 4500,
       wave: 55,
       objective: "Take and hold the Holy City",
-      desc: "Take the citadel, secure both holy sites, and withstand a final 90-second counterattack.",
+      desc: "Take the citadel, secure both holy sites, and withstand 4 to 6 minutes of counterattacks.",
       story:
         "Cross and crescent standards face one another before Jerusalem. Take the citadel and secure both holy sites, then prepare for the counterattack. Your settlement must still survive: an overextended host can lose the road behind it.",
       win: "Your standards fly over Jerusalem. The campaign is complete. The chronicle remembers the pilgrims, villagers, and soldiers who paid for each mile of this road.",
@@ -488,6 +548,7 @@
     uiClock = 0,
     fog,
     enemyFog,
+    militiaFog,
     selectedNode = null,
     quickConfig = null,
     quickSlot = null,
@@ -504,7 +565,9 @@
     nav = new window.CruciataNavigation(W, H),
     spatial = new Map(),
     obstacleIndex = null,
-    objectIndex = new Map();
+    objectIndex = new Map(),
+    combatStructures = null,
+    combatStructureRadius = 0;
   function seeded(seed) {
     return () => {
       seed |= 0;
@@ -530,7 +593,9 @@
     window.CruciataAudio.setEnabled(settings.sound);
     if (!settings.sound) return;
     if (point && point.team !== 0 && !fog?.sees(point)) return;
-    const volume = point ? clamp(1 - distance(point, camera) / 1000, 0, 1) : 1;
+    const reach =
+      kind.startsWith("great-") || kind === "explosion" ? 3600 : 1000;
+    const volume = point ? clamp(1 - distance(point, camera) / reach, 0, 1) : 1;
     window.CruciataAudio.play(kind, volume);
   }
   const ROLES = {
@@ -599,6 +664,7 @@
         groundCover: undefined,
         fog: fog?.save(),
         enemyFog: enemyFog?.save(),
+        militiaFog: militiaFog?.save(),
         units: state.units.map((u) => ({
           ...u,
           path: [],
@@ -715,7 +781,7 @@
         0,
       ),
       cap = Math.min(
-        260,
+        520,
         completeBuildings(null, team).reduce(
           (n, b) => n + (BUILDINGS[b.kind].pop || 0),
           0,
@@ -786,7 +852,9 @@
         : base;
     return {
       id: ++uid,
-      kind,
+      kind: kind === "bastionwall" ? "wall" : kind,
+      fortified: kind === "bastionwall",
+      architecture: team === 1 ? "islamic" : undefined,
       team,
       x,
       y,
@@ -1098,6 +1166,44 @@
     }
     return false;
   }
+  const wallArmCache = new WeakMap();
+  function wallArms(b, fallbackAngle = 0) {
+    const angle = b.wallAngle ?? fallbackAngle;
+    const cached = wallArmCache.get(b);
+    if (cached && cached.links === b.links && cached.angle === angle)
+      return cached.arms;
+    const arms = Object.values(b.links || {});
+    if (arms.length === 1) arms.push({ x: -arms[0].x, y: -arms[0].y });
+    if (!arms.length) {
+      const length =
+        Math.abs(Math.sin(angle) * Math.cos(angle)) > 0.1
+          ? Math.sqrt(2) * 16
+          : 16;
+      arms.push(
+        { x: Math.cos(angle) * length, y: Math.sin(angle) * length },
+        { x: -Math.cos(angle) * length, y: -Math.sin(angle) * length },
+      );
+    }
+    wallArmCache.set(b, { links: b.links, angle, arms });
+    return arms;
+  }
+  function curtainBlocks(b, x, y, margin, fallbackAngle = 0) {
+    const dx = x - b.x,
+      dy = y - b.y,
+      r = (b.fortified ? 24 : 15) + margin,
+      r2 = r * r;
+    for (const arm of wallArms(b, fallbackAngle)) {
+      const t = clamp(
+        (dx * arm.x + dy * arm.y) / (arm.x * arm.x + arm.y * arm.y || 1),
+        0,
+        1,
+      );
+      const rx = dx - arm.x * t,
+        ry = dy - arm.y * t;
+      if (rx * rx + ry * ry < r2) return true;
+    }
+    return false;
+  }
   function groundFree(x, y, margin = 10, ignore = null, adjacentWalls = false) {
     if (!landFree(x, y, margin)) return false;
     const bucket = Math.floor(x / 128) + "," + Math.floor(y / 128),
@@ -1114,36 +1220,13 @@
         (BUILDINGS[b.kind].passable && !b.closed)
       )
         continue;
+      if (b.gateSegments) {
+        for (const part of b.gateSegments)
+          if (curtainBlocks(part, x, y, margin, b.gateAngle || 0)) return false;
+        continue;
+      }
       if (b.kind === "wall" && Number.isFinite(b.wallAngle)) {
-        const arms = Object.values(b.links || {});
-        if (arms.length === 1) arms.push({ x: -arms[0].x, y: -arms[0].y });
-        if (!arms.length) {
-          const length =
-            Math.abs(Math.sin(b.wallAngle) * Math.cos(b.wallAngle)) > 0.1
-              ? Math.sqrt(2) * 16
-              : 16;
-          arms.push(
-            {
-              x: Math.cos(b.wallAngle) * length,
-              y: Math.sin(b.wallAngle) * length,
-            },
-            {
-              x: -Math.cos(b.wallAngle) * length,
-              y: -Math.sin(b.wallAngle) * length,
-            },
-          );
-        }
-        for (const arm of arms) {
-          const dx = x - b.x,
-            dy = y - b.y,
-            t = clamp(
-              (dx * arm.x + dy * arm.y) / (arm.x * arm.x + arm.y * arm.y),
-              0,
-              1,
-            );
-          if (Math.hypot(dx - arm.x * t, dy - arm.y * t) < 11 + margin)
-            return false;
-        }
+        if (curtainBlocks(b, x, y, margin)) return false;
         continue;
       }
       if (
@@ -1185,6 +1268,20 @@
       decorations: new Map(),
       nodes: new Map(),
     };
+    combatStructures = new Map();
+    combatStructureRadius = 0;
+    for (const b of state.buildings)
+      if (b.hp > 0 && b.team !== 2) {
+        let map = combatStructures.get(b.team);
+        if (!map) {
+          map = new Map();
+          combatStructures.set(b.team, map);
+        }
+        const key = Math.floor(b.x / 256) + "," + Math.floor(b.y / 256);
+        if (!map.has(key)) map.set(key, []);
+        map.get(key).push(b);
+        combatStructureRadius = Math.max(combatStructureRadius, b.r || 0);
+      }
     function insert(map, o, rx, ry) {
       for (
         let y = Math.floor((o.y - ry - 64) / 128);
@@ -1206,8 +1303,8 @@
         insert(
           obstacleIndex.buildings,
           b,
-          Math.max(32, b.w / 2),
-          Math.max(32, b.h / 2),
+          Math.max(32, b.w / 2, b.r || 0),
+          Math.max(32, b.h / 2, b.r || 0),
         );
     for (const d of decorations)
       if (d.block)
@@ -1225,8 +1322,35 @@
           n.kind === "wood" ? 14 : 23,
           n.kind === "wood" ? 14 : 23,
         );
-    for (const b of state.buildings)
-      if (b.kind === "wall" && b.hp > 0) b.links = wallConnections(b);
+    const curtain = state.buildings.flatMap((other) =>
+      other.gateSegments && other.hp > 0
+        ? other.gateSegments.map((part, i) => ({
+            ...other,
+            ...part,
+            id: other.id + ":" + i,
+            kind: "wall",
+          }))
+        : other.wallAttachment
+          ? [{ ...other, ...other.wallAttachment, kind: "wall" }]
+          : [other],
+    );
+    const curtainBuckets = new Map();
+    for (const segment of curtain)
+      if (segment.hp > 0 && ["wall", "gate"].includes(segment.kind))
+        insert(curtainBuckets, segment, segment.w / 2, segment.h / 2);
+    for (const b of state.buildings) {
+      const neighbors =
+        curtainBuckets.get(
+          Math.floor(b.x / 128) + "," + Math.floor(b.y / 128),
+        ) || [];
+      if (b.kind === "wall" && b.hp > 0)
+        b.links = wallConnections(b, neighbors);
+      if (b.wallAttachment && b.hp > 0)
+        b.wallAttachment.links = wallConnections(
+          { ...b, ...b.wallAttachment, kind: "wall" },
+          neighbors,
+        );
+    }
     const waypoints = [];
     for (const b of state.buildings)
       if (b.hp > 0 && !(BUILDINGS[b.kind].passable && !b.closed))
@@ -1259,7 +1383,7 @@
     const footprints = new Map();
     for (const b of state.buildings)
       if (b.hp > 0 && !(BUILDINGS[b.kind].passable && !b.closed)) {
-        const pad = b.kind === "wall" ? 96 : 24,
+        const pad = b.kind === "wall" || b.gateSegments ? 96 : 24,
           w = b.w + pad * 2,
           h = b.h + pad * 2;
         footprints.set("b" + b.id, {
@@ -1275,6 +1399,7 @@
             b.closed,
             b.wallAngle,
             JSON.stringify(b.links),
+            JSON.stringify(b.gateSegments),
           ].join(";"),
         });
       }
@@ -1772,154 +1897,125 @@
       x,
       y,
       name,
-      radius: 320,
+      radius: 1100,
       capture: 0,
       captured: false,
+      reward: { food: 1800, wood: 2400, stone: 1800, gold: 2200 },
     };
     state.cities.push(city);
     const extra = { city: city.id };
     const center = makeBuilding("towncenter", 3, x, y, 1, {
       ...extra,
       cityCenter: true,
+      w: 280,
+      h: 240,
+      r: 185,
+      hp: 16000,
+      maxHp: 16000,
     });
     city.center = center.id;
     state.buildings.push(center);
-    for (const [kind, dx, dy] of [
-      ["house", -140, -120],
-      ["house", 140, -120],
-      ["barracks", -140, 110],
-      ["chapel", 140, 110],
-      ["tower", -240, -240],
-      ["tower", 240, -240],
-      ["tower", -240, 240],
-      ["tower", 240, 240],
-    ])
-      state.buildings.push(makeBuilding(kind, 3, x + dx, y + dy, 1, extra));
-    const ring = [
-      [-192, -352],
-      [160, -352],
-      [352, -160],
-      [352, 96],
-      [192, 256],
-      [96, 352],
-      [-160, 352],
-      [-352, 160],
-      [-352, -192],
-    ].map(([dx, dy]) => ({ x: x + dx, y: y + dy }));
-    const gates = [
-      { x: x - 352, y: y - 32, rotation: 90 },
-      { x: x + 352, y: y - 32, rotation: 90 },
-    ];
-    for (const gate of gates)
+    for (let i = 0; i < 32; i++) {
+      const angle = i * 2.399,
+        r = 300 + Math.floor(i / 8) * 120;
+      const kind =
+        i < 20
+          ? "house"
+          : ["barracks", "stable", "chapel", "siegeworkshop", "farm", "mill"][
+              i % 6
+            ];
       state.buildings.push(
-        makeBuilding("gate", 3, gate.x, gate.y, 1, {
+        makeBuilding(
+          kind,
+          3,
+          x + Math.cos(angle) * r,
+          y + Math.sin(angle) * r,
+          1,
+          extra,
+        ),
+      );
+    }
+    for (const p of defensivePlots(city, 960))
+      state.buildings.push(
+        makeBuilding(p.kind, 3, p.x, p.y, 1, {
           ...extra,
-          rotation: gate.rotation,
+          ...p,
+          kind: p.kind === "bastionwall" ? "wall" : p.kind,
           closed: true,
         }),
       );
-    const positions = new Set();
-    for (let i = 0; i < ring.length; i++) {
-      const a = ring[i],
-        b = ring[(i + 1) % ring.length];
-      for (const p of wallLine(a, b)) {
-        const key = p.x + "," + p.y;
-        if (positions.has(key) || gates.some((g) => distance(g, p) < 80))
-          continue;
-        positions.add(key);
-        state.buildings.push(
-          makeBuilding("wall", 3, p.x, p.y, 1, {
-            ...extra,
-            wallAngle: Math.atan2(b.y - a.y, b.x - a.x),
-          }),
-        );
-      }
-    }
-    for (const gate of gates)
-      for (const sign of [-1, 1])
-        state.buildings.push(
-          makeBuilding("wall", 3, gate.x, gate.y + 56 * sign, 1, {
-            ...extra,
-            wallAngle: Math.PI / 2,
-          }),
-        );
-    city.radius = 370;
-    for (let i = 0; i < 6; i++)
+    for (let i = 0; i < 16; i++)
       state.units.push(
-        makeUnit("civilian", 3, x - 90 + i * 36, y + 185, {
-          city: city.id,
-          home: { x, y: y + 185 },
-          wander: 6 + i,
-        }),
+        makeUnit(
+          "civilian",
+          3,
+          x - 190 + (i % 8) * 48,
+          y + 210 + Math.floor(i / 8) * 40,
+          { ...extra, home: { x, y: y + 220 }, wander: 6 + i },
+        ),
       );
-    for (let i = 0; i < 14; i++) {
+    for (
+      let i = 0;
+      i < 72 + (state.mode === "campaign" ? state.level * 8 : 0);
+      i++
+    ) {
       const type =
-        i < 6
-          ? "archer"
-          : i === 12
-            ? "chaplain"
-            : i === 13
-              ? "standard"
-              : "sword";
-      const a = (i * Math.PI * 2) / 14,
-        r = type === "archer" ? 245 : 115;
-      const p = { x: x + Math.cos(a) * r, y: y + Math.sin(a) * r };
+        i % 11 === 0
+          ? "knight"
+          : i % 3 === 0
+            ? "archer"
+            : i === 70
+              ? "chaplain"
+              : i === 71
+                ? "standard"
+                : "sword";
+      const angle = i * 2.399,
+        r = i < 20 ? 200 : i < 44 ? 480 : 810,
+        p = { x: x + Math.cos(angle) * r, y: y + Math.sin(angle) * r };
       state.units.push(
         makeUnit(type, 3, p.x, p.y, {
-          city: city.id,
+          ...extra,
           cityDefender: true,
-          home: { ...p },
+          home: p,
           hold: type === "archer",
+          rank: 1,
         }),
       );
     }
   }
   function observerSees(observer, target) {
-    if (observer.team === 3) {
-      const city = state.cities?.find((c) => c.id === observer.city);
-      return (
-        !!city &&
-        !city.captured &&
-        distance(target, city) < city.radius + 220 &&
-        distance(observer, target) < 600
-      );
-    }
+    if (observer.team === 3) return !!militiaFog?.sees(target);
     return (observer.team === 0 ? fog : enemyFog).sees(target);
   }
   function captureCities(dt) {
     for (const city of state.cities || []) {
       if (city.captured) continue;
+      const capital = state.buildings.find((b) => b.id === city.center);
       const soldiers = state.units.filter(
         (u) =>
           u.hp > 0 &&
           u.team === 0 &&
-          ![
-            "worker",
-            "chaplain",
-            "civilian",
-            "pilgrim",
-            "merchant",
-            "trebuchet",
-          ].includes(u.type) &&
-          distance(u, city) < 100,
+          ["sword", "archer", "knight", "standard"].includes(u.type) &&
+          (capital
+            ? surfaceDistance(u, capital) < 35
+            : distance(u, city) < 100),
       );
-      const contested = state.units.some(
-        (u) =>
-          u.hp > 0 &&
-          u.team !== 0 &&
-          u.team !== 2 &&
-          !["worker", "civilian", "chaplain"].includes(u.type) &&
-          distance(u, city) < 120,
-      );
-      city.capture = Math.max(
-        0,
-        Math.min(
-          12,
-          city.capture + (soldiers.length >= 3 && !contested ? dt : -dt * 0.5),
-        ),
-      );
-      if (city.capture < 12) continue;
+      if (!soldiers.length) continue;
+      city.capture = 12;
       city.captured = true;
+      if (!city.rewardClaimed) {
+        const reward = city.reward || {
+          food: 1800,
+          wood: 2400,
+          stone: 1800,
+          gold: 2200,
+        };
+        for (const [resource, amount] of Object.entries(reward))
+          state.resources[resource] += amount;
+        city.rewardClaimed = true;
+        city.reward = reward;
+        state.stats.citiesCaptured = (state.stats.citiesCaptured || 0) + 1;
+      }
       for (const b of state.buildings.filter(
         (b) => b.city === city.id && b.hp > 0,
       )) {
@@ -1946,7 +2042,7 @@
       fog.update(state.units, state.buildings);
       toast(
         city.name +
-          " captured. Its surviving garrison and buildings now serve your army.",
+          " captured! +1,800 food, +2,400 wood, +1,800 stone, +2,200 gold. Surviving defenders and buildings join your host.",
       );
       sound("horn");
     }
@@ -2036,7 +2132,11 @@
       for (const u of state.units.filter((u) => u.team === team)) {
         const index = soldiers.indexOf(u);
         const origin =
-          index >= 0 && team < 2
+          index >= 0 &&
+          team < 2 &&
+          !u.campaignPost &&
+          !u.castleGuard &&
+          !["pilgrim", "merchant"].includes(u.type)
             ? {
                 x: front + (team === 0 ? 1 : -1) * Math.floor(index / 10) * 30,
                 y:
@@ -2068,7 +2168,439 @@
       }
     }
   }
+  function stationCurtainArchers() {
+    const groups = [
+      ...state.cities.map((city) => ({ team: 3, city: city.id, center: city })),
+      {
+        team: 1,
+        center: state.buildings.find((b) => b.id === state.capitals.enemy),
+      },
+    ];
+    if (LEVELS[state.level].kind === "survival" && state.mode === "campaign")
+      groups.push({ team: 0, center: state.buildings[0] });
+    for (const group of groups) {
+      const walls = state.buildings
+        .filter(
+          (b) =>
+            b.team === group.team &&
+            b.kind === "wall" &&
+            b.defenceLayer === 0 &&
+            (group.city ? b.city === group.city : !b.city),
+        )
+        .sort(
+          (a, b) =>
+            Math.atan2(a.y - group.center.y, a.x - group.center.x) -
+            Math.atan2(b.y - group.center.y, b.x - group.center.x),
+        );
+      const archers = state.units.filter(
+        (u) =>
+          u.team === group.team &&
+          u.type === "archer" &&
+          (group.city ? u.city === group.city : !u.city && !u.campaignPost),
+      );
+      archers.forEach((u, i) => {
+        const wall = walls[Math.floor((i * walls.length) / archers.length)];
+        if (!wall) return;
+        const a = Math.atan2(group.center.y - wall.y, group.center.x - wall.x),
+          p = findFree({
+            x: wall.x + Math.cos(a) * 55,
+            y: wall.y + Math.sin(a) * 55,
+          });
+        u.x = p.x;
+        u.y = p.y;
+        u.home = p;
+        u.curtainGuard = true;
+        u.hold = true;
+        u.stance = "hold";
+      });
+    }
+  }
+  function campaignRules(level, difficulty) {
+    const scale = difficulty === "hard" ? 1.3 : difficulty === "easy" ? 0.8 : 1;
+    return {
+      version: 2,
+      farms: 4,
+      food: 1000,
+      survival: difficulty === "easy" ? 600 : difficulty === "hard" ? 900 : 720,
+      hold:
+        level === 5
+          ? difficulty === "easy"
+            ? 240
+            : difficulty === "hard"
+              ? 360
+              : 300
+          : difficulty === "easy"
+            ? 180
+            : difficulty === "hard"
+              ? 300
+              : 240,
+      gates: 3,
+      deliveries: level === 3 ? 2 : 0,
+      strength: scale,
+      interval: Math.round((95 - level * 7) / scale),
+      grace: level === 0 ? 110 : 75,
+      attacks: 0,
+      posts: [],
+    };
+  }
+  function prepareCampaign() {
+    const rules = state.campaignRules,
+      l = LEVELS[state.level],
+      camp = state.buildings[0];
+    if (l.kind === "survival") {
+      for (const u of fighters(0)) u.castleGuard = true;
+      Object.assign(camp, {
+        w: 240,
+        h: 210,
+        r: 160,
+        hp: 6500,
+        maxHp: 6500,
+        castle: true,
+      });
+      for (const plot of defensivePlots(camp, 720))
+        state.buildings.push(
+          makeBuilding(plot.kind, 0, plot.x, plot.y, 1, {
+            ...plot,
+            kind: plot.kind === "bastionwall" ? "wall" : plot.kind,
+            closed: false,
+            defence: true,
+          }),
+        );
+      for (let i = 0; i < 12; i++) {
+        const angle = i * 2.399,
+          r = 230 + Math.floor(i / 6) * 100;
+        state.buildings.push(
+          makeBuilding(
+            i < 8
+              ? "house"
+              : i === 8
+                ? "watchtower"
+                : i === 9
+                  ? "stable"
+                  : i === 10
+                    ? "siegeworkshop"
+                    : "barracks",
+            0,
+            camp.x + Math.cos(angle) * r,
+            camp.y + Math.sin(angle) * r,
+          ),
+        );
+      }
+      for (let i = 0; i < 36; i++) {
+        const angle = i * 2.399,
+          r = 280 + (i % 3) * 90;
+        state.units.push(
+          makeUnit(
+            i % 7 === 0
+              ? "knight"
+              : i % 3 === 0
+                ? "archer"
+                : i === 35
+                  ? "standard"
+                  : "sword",
+            0,
+            camp.x + Math.cos(angle) * r,
+            camp.y + Math.sin(angle) * r,
+            {
+              castleGuard: true,
+              home: {
+                x: camp.x + Math.cos(angle) * r,
+                y: camp.y + Math.sin(angle) * r,
+              },
+            },
+          ),
+        );
+      }
+      rebuildNavigation();
+    }
+    if (l.kind === "escort") {
+      const route = [
+        { x: 1100, y: 1420 },
+        { x: riverX(1150) - 130, y: 1150 },
+        { x: riverX(1150) + 210, y: 1150 },
+        { x: 3200, y: 1800 },
+        { x: 5900, y: 3900 },
+        { x: 6900, y: 4100 },
+        { x: 9000, y: 2800 },
+        { x: 11200, y: 1600 },
+      ];
+      for (const u of state.units.filter((u) => u.type === "pilgrim")) {
+        u.route = route.map((p) => findFree(p));
+        u.routeIndex = 0;
+        u.hp = u.maxHp = 300;
+      }
+      const refuge = state.sites.find((p) => p.name === "Pilgrim refuge");
+      Object.assign(refuge, route.at(-1));
+      rules.route = route;
+    }
+    if (["liberation", "occupation"].includes(l.kind)) {
+      const sites = state.sites.filter(
+        (p) => !p.optional && p.name !== "Pilgrim refuge",
+      );
+      sites.forEach((site, i) => {
+        const goal = { x: i ? 9400 : 5600, y: i ? 4900 : 3300 },
+          dx = goal.x - site.x,
+          dy = goal.y - site.y;
+        Object.assign(site, goal);
+        for (const b of state.buildings.filter((b) => b.site === site.id)) {
+          b.x += dx;
+          b.y += dy;
+        }
+        for (const u of state.units.filter((u) => u.site === site.id)) {
+          u.x += dx;
+          u.y += dy;
+          if (u.home) {
+            u.home.x += dx;
+            u.home.y += dy;
+          }
+        }
+      });
+      if (l.kind === "liberation")
+        for (let i = 0; i < 3; i++)
+          state.units.push(
+            makeUnit("merchant", 0, camp.x + 250 + i * 50, camp.y + 180, {
+              route: [
+                { x: 1100, y: 1420 },
+                { x: riverX(1150) + 240, y: 1150 },
+                { x: 5600, y: 3300 },
+                { x: 9400, y: 4900 },
+              ],
+              routeIndex: 0,
+              missionSupply: true,
+            }),
+          );
+    }
+    if (l.kind === "siege")
+      for (const b of state.buildings.filter((b) => b.gate)) {
+        b.hp = b.maxHp = 16000;
+      }
+    const anchors =
+      l.kind === "escort"
+        ? [
+            { x: riverX(1150) + 340, y: 1370 },
+            { x: 4900, y: 3700 },
+            { x: 8650, y: 3000 },
+            { x: 10500, y: 1950 },
+          ]
+        : l.kind === "survival"
+          ? Array.from({ length: 6 }, (_, i) => ({
+              x: camp.x + Math.cos((i * Math.PI) / 3) * 1150,
+              y: camp.y + Math.sin((i * Math.PI) / 3) * 1150,
+            }))
+          : l.kind === "settlement"
+            ? [{ x: state.buildings[1].x + 300, y: state.buildings[1].y + 350 }]
+            : [
+                { x: 5950, y: 3500 },
+                { x: 9750, y: 5100 },
+                { x: camp.x + 950, y: camp.y + 650 },
+              ];
+    if (state.level >= 3) {
+      anchors.push({ x: 7800, y: 4000 });
+      if (state.level >= 4) anchors.push({ x: 9000, y: 2200 });
+      if (state.level >= 5) anchors.push({ x: 9300, y: 6600 });
+    }
+    for (const [j, raw] of anchors.entries()) {
+      let p = findFree(raw);
+      for (let i = 0; i < 48; i++) {
+        const a = i * 2.399,
+          r = Math.floor(i / 8) * 70,
+          q = { x: raw.x + Math.cos(a) * r, y: raw.y + Math.sin(a) * r };
+        if (
+          [-55, 0, 55].every((dx) =>
+            [-50, 0, 50].every((dy) => groundFree(q.x + dx, q.y + dy, 10)),
+          )
+        ) {
+          p = q;
+          break;
+        }
+      }
+      const post = makeBuilding("barracks", 1, p.x, p.y, 1, {
+        campaignPost: true,
+        hp: 2200,
+        maxHp: 2200,
+      });
+      state.buildings.push(post);
+      for (const sign of [-1, 1]) {
+        const q = findFree({ x: p.x + sign * 160, y: p.y - 120 });
+        state.buildings.push(
+          makeBuilding("tower", 1, q.x, q.y, 1, {
+            campaignPost: post.id,
+            hp: 1800,
+            maxHp: 1800,
+          }),
+        );
+      }
+      const goal =
+        l.kind === "escort"
+          ? rules.route[Math.min(rules.route.length - 2, 2 + j * 2)]
+          : l.kind === "survival"
+            ? { x: camp.x, y: camp.y }
+            : l.kind === "settlement"
+              ? { x: state.buildings[1].x, y: state.buildings[1].y }
+              : { x: p.x - 350, y: p.y - 200 };
+      rules.posts.push({ id: post.id, x: p.x, y: p.y, goal });
+      const count = Math.round((8 + state.level * 2) * rules.strength);
+      for (let i = 0; i < count; i++) {
+        const type =
+          i === count - 1 && state.level >= 2
+            ? "trebuchet"
+            : i === count - 2 && state.level >= 2
+              ? "ram"
+              : i % 4 === 0
+                ? "archer"
+                : i % 7 === 0
+                  ? "knight"
+                  : "sword";
+        const q = findFree({
+          x: p.x - 150 + (i % 5) * 35,
+          y: p.y + 130 + Math.floor(i / 5) * 35,
+        });
+        state.units.push(
+          makeUnit(type, 1, q.x, q.y, {
+            campaignPost: post.id,
+            garrisonBase: post.id,
+            home: q,
+            stance: "fight",
+          }),
+        );
+      }
+      if (state.level >= 2)
+        for (const u of state.units.filter(
+          (u) =>
+            u.campaignPost === post.id && ["trebuchet", "ram"].includes(u.type),
+        ))
+          applyRank(
+            u,
+            u.type === "trebuchet"
+              ? 2
+              : Math.min(2, Math.floor(state.level / 2)),
+          );
+      if (state.level >= 3)
+        for (const u of state.units.filter(
+          (u) =>
+            u.campaignPost === post.id &&
+            !["trebuchet", "ram"].includes(u.type),
+        ))
+          applyRank(u, Math.min(2, Math.floor(state.level / 2)));
+      rebuildNavigation();
+    }
+    state.waveTimer = rules.grace;
+  }
+  function campaignPressure(dt) {
+    const rules = state.campaignRules;
+    if (!rules || state.mode !== "campaign") return;
+    rules.think = (rules.think || 0) - dt;
+    if (rules.think > 0) return;
+    rules.think = 1;
+    for (const post of rules.posts) {
+      const building = getObject(post.id);
+      if (!building || building.team !== 1) continue;
+      const local = fighters(1).filter(
+        (u) =>
+          !u.fixedDefense &&
+          !u.curtainGuard &&
+          !u.scout &&
+          !u.order?.formation &&
+          distance(u, post) < 650 &&
+          (!u.campaignPost || u.campaignPost === post.id),
+      );
+      for (const u of local) {
+        u.campaignPost = post.id;
+        u.garrisonBase = post.id;
+        u.home ||= findFree({
+          x: post.x - 120 + (u.id % 5) * 40,
+          y: post.y + 160,
+        });
+      }
+      if (state.waveTimer > 0 || local.length < 6) continue;
+      const visible = state.units
+        .filter(
+          (u) => u.team === 0 && enemyFog.sees(u) && distance(u, post) < 1800,
+        )
+        .sort(
+          (a, b) =>
+            (["pilgrim", "merchant"].includes(a.type) ? 0 : 1) -
+              (["pilgrim", "merchant"].includes(b.type) ? 0 : 1) ||
+            distance(a, post) - distance(b, post),
+        )[0];
+      const defense =
+        LEVELS[state.level].kind === "survival"
+          ? state.buildings
+              .filter(
+                (b) =>
+                  b.team === 0 &&
+                  b.hp > 0 &&
+                  b.progress >= 1 &&
+                  enemyFog.sees(b),
+              )
+              .sort((a, b) => distance(a, post) - distance(b, post))[0]
+          : null;
+      const members = local.slice(0, Math.max(4, local.length - 3)),
+        destination = findFree(
+          defense
+            ? routePossible(post, edgePoint(post, state.buildings[0], 40))
+              ? edgePoint(post, state.buildings[0], 40)
+              : edgePoint(post, defense, 40)
+            : visible || post.goal,
+        ),
+        id = ++uid,
+        center = members.reduce(
+          (p, u) => ({
+            x: p.x + u.x / members.length,
+            y: p.y + u.y / members.length,
+          }),
+          { x: 0, y: 0 },
+        );
+      const facing = Math.atan2(
+        destination.y - center.y,
+        destination.x - center.x,
+      );
+      members.forEach((u, i) => {
+        const rear =
+            Math.floor(i / 5) * 45 + (u.type === "trebuchet" ? 400 : 0),
+          side = ((i % 5) - 2) * 45;
+        const goal = findFree({
+          x: destination.x - Math.cos(facing) * rear - Math.sin(facing) * side,
+          y: destination.y - Math.sin(facing) * rear + Math.cos(facing) * side,
+        });
+        const order = { ...goal, attack: true, formation: id };
+        u.order = order;
+        u.marchOffset = {
+          x: goal.x - destination.x,
+          y: goal.y - destination.y,
+        };
+        u.path = [];
+        u.pathGoal = null;
+        u.pathRequest = null;
+        u.home = { ...destination };
+        if (u.type === "trebuchet" && u.deployment !== "packed") {
+          u.deployment = "packing";
+          u.deployTimer = 4;
+          u.pendingOrder = order;
+          u.order = null;
+        }
+      });
+      state.formations.push({
+        id,
+        members: members.map((u) => u.id),
+        anchor: center,
+        routeStart: findFree(center),
+        destination,
+        sharedRoute: true,
+        routeReady: false,
+        path: [],
+        revision: nav.revision,
+        speed: Math.min(...members.map((u) => TYPES[u.type].speed)),
+        arrived: false,
+        wait: 0,
+      });
+      rules.attacks++;
+    }
+    if (state.waveTimer <= 0) state.waveTimer = rules.interval;
+  }
   function startLevel(index, intro = true) {
+    actionTurns.clear();
+    formationRoutes.clear();
     sessionActive = true;
     const l = LEVELS[index];
     W = quickConfig?.width || 12800;
@@ -2150,6 +2682,14 @@
       },
       citadelTaken: false,
       occupation: 0,
+      campaignRules: quickConfig
+        ? null
+        : campaignRules(
+            index,
+            quickConfig?.difficulty ||
+              $("campaign-difficulty")?.value ||
+              "normal",
+          ),
       navDirty: false,
     };
     state.buildings.push(
@@ -2363,7 +2903,7 @@
     }
     const enemyHome = quickConfig
       ? state.buildings[1]
-      : { x: W - 2000, y: Math.floor(H * 0.34) };
+      : { x: W - 2000, y: Math.floor(H * (index >= 4 ? 0.46 : 0.34)) };
     if (!quickConfig) {
       // Forward capturable posts have no owner, troops or faction vision.
       for (const b of state.buildings) {
@@ -2424,6 +2964,117 @@
       makeBuilding("barracks", 1, enemyHome.x + 240, enemyHome.y + 200),
       makeBuilding("house", 1, enemyHome.x + 90, enemyHome.y + 300),
     );
+    if (!quickConfig) {
+      const capital = state.buildings.find(
+        (b) => b.kind === "towncenter" && b.team === 1,
+      );
+      if (index >= 4) {
+        capital.fortressShape = {
+          x: index === 5 ? 1.7 : 1.45,
+          y: index === 5 ? 2.9 : 2.5,
+          layers: 3,
+        };
+        Object.assign(capital, {
+          w: 320,
+          h: 280,
+          r: 220,
+          hp: index === 5 ? 16000 : 11000,
+          maxHp: index === 5 ? 16000 : 11000,
+          castle: true,
+        });
+      }
+      for (const p of defensivePlots(capital, 896))
+        state.buildings.push(
+          makeBuilding(p.kind, 1, p.x, p.y, 1, {
+            ...p,
+            kind: p.kind === "bastionwall" ? "wall" : p.kind,
+            defence: true,
+          }),
+        );
+      for (let i = 0; i < 12; i++)
+        state.buildings.push(
+          makeBuilding(
+            i < 8
+              ? "house"
+              : i === 8
+                ? "stable"
+                : i === 9
+                  ? "siegeworkshop"
+                  : i === 10
+                    ? "chapel"
+                    : "barracks",
+            1,
+            capital.x - 480 + (i % 4) * 220,
+            capital.y - 420 + Math.floor(i / 4) * 190,
+          ),
+        );
+    }
+    if (!quickConfig && index >= 4) {
+      const capital = state.buildings.find(
+        (b) => b.kind === "towncenter" && b.team === 1,
+      );
+      for (let i = 0; i < 60; i++) {
+        const angle = i * 2.399,
+          r = 600 + (i % 4) * 270;
+        state.buildings.push(
+          makeBuilding(
+            i < 42
+              ? "house"
+              : [
+                  "barracks",
+                  "stable",
+                  "siegeworkshop",
+                  "chapel",
+                  "farm",
+                  "mill",
+                ][i % 6],
+            1,
+            capital.x + Math.cos(angle) * r * 0.8,
+            capital.y + Math.sin(angle) * r * 1.6,
+          ),
+        );
+      }
+      for (let i = 0; i < 3; i++)
+        state.buildings.push(
+          makeBuilding(
+            "towncenter",
+            1,
+            capital.x - 420 + (i % 2) * 850,
+            capital.y - 1300 + i * 1250,
+            1,
+            { hp: 7000, maxHp: 7000, district: true },
+          ),
+        );
+      for (let i = 0; i < 60; i++) {
+        const angle = i * 2.399,
+          r = 650 + (i % 3) * 300;
+        state.units.push(
+          makeUnit(
+            i < 12
+              ? "trebuchet"
+              : i % 4 === 0
+                ? "knight"
+                : i % 3 === 0
+                  ? "archer"
+                  : "sword",
+            1,
+            capital.x + Math.cos(angle) * r * 0.8,
+            capital.y + Math.sin(angle) * r * 1.6,
+            {
+              deployment: i < 12 ? "deployed" : "packed",
+              fixedDefense: i < 12,
+              garrisonBase: capital.id,
+              home: {
+                x: capital.x + Math.cos(angle) * r * 0.8,
+                y: capital.y + Math.sin(angle) * r * 1.6,
+              },
+              rank: 2,
+              castleGuard: true,
+            },
+          ),
+        );
+      }
+    }
     for (let i = 0; i < (quickConfig?.workers || 6); i++)
       state.units.push(
         makeUnit(
@@ -2478,7 +3129,9 @@
         ),
     );
     rebuildNavigation();
+    if (!quickConfig) prepareCampaign();
     musterStartingUnits();
+    stationCurtainArchers();
     state.roads = planRoads();
     ensureGroundCover();
     for (const u of state.units)
@@ -2489,8 +3142,11 @@
       }
     fog = new window.CruciataFog(W, H);
     enemyFog = new window.CruciataFog(W, H, null, 1);
+    militiaFog = new window.CruciataFog(W, H, null, 3);
     fog.update(state.units, state.buildings);
     enemyFog.update(state.units, state.buildings);
+    militiaFog ||= new window.CruciataFog(W, H, null, 3);
+    militiaFog.update(state.units, state.buildings);
     for (const team of [0, 1])
       workers(team).forEach((u, i) =>
         assignGather(
@@ -2685,6 +3341,12 @@
     nav = new window.CruciataNavigation(W, H);
     state = saved.state;
     for (const b of state.buildings) {
+      if (b.team === 1) b.architecture ||= "islamic";
+      if (b.kind === "greatengine") {
+        b.w = BUILDINGS.greatengine.w;
+        b.h = BUILDINGS.greatengine.h;
+        b.r = Math.max(b.w, b.h) / 2;
+      }
       if (!["wall", "gate"].includes(b.kind) && !b.gate) continue;
       const reinforcedHp =
         b.kind === "wall" ? BUILDINGS.wall.hp : BUILDINGS.gate.hp;
@@ -2693,6 +3355,8 @@
         b.maxHp = reinforcedHp;
       }
     }
+    actionTurns.clear();
+    formationRoutes.clear();
     sessionActive = true;
     quickConfig = state.config;
     quickSlot = state.slot;
@@ -2717,7 +3381,10 @@
     makeWorld(false);
     fog = new window.CruciataFog(W, H, state.fog);
     enemyFog = new window.CruciataFog(W, H, state.enemyFog, 1);
+    militiaFog = new window.CruciataFog(W, H, state.militiaFog, 3);
     enemyFog.update(state.units, state.buildings);
+    militiaFog ||= new window.CruciataFog(W, H, null, 3);
+    militiaFog.update(state.units, state.buildings);
     fog.update(state.units, state.buildings);
     rebuildNavigation();
     state.roads = planRoads();
@@ -2872,10 +3539,10 @@
     );
   }
   function rebuildSpatial() {
-    spatial = new Map();
+    for (const bucket of spatial.values()) bucket.length = 0;
     objectIndex.clear();
-    for (const o of [...state.units, ...state.buildings, ...state.nodes])
-      objectIndex.set(o.id, o);
+    for (const list of [state.units, state.buildings, state.nodes])
+      for (const o of list) objectIndex.set(o.id, o);
     for (const u of state.units)
       if (u.hp > 0) {
         const key = Math.floor(u.x / 200) + "," + Math.floor(u.y / 200);
@@ -2893,6 +3560,25 @@
       for (let x = sx; x <= ex; x++)
         for (const other of spatial.get(x + "," + y) || [])
           if (other.hp > 0 && distance(u, other) < r) out.push(other);
+    return out;
+  }
+  function nearbyStructures(p, r) {
+    if (!combatStructures) return state.buildings;
+    const out = [],
+      reach = r + combatStructureRadius;
+    for (const [team, map] of combatStructures)
+      if (team !== p.team)
+        for (
+          let y = Math.floor((p.y - reach) / 256);
+          y <= Math.floor((p.y + reach) / 256);
+          y++
+        )
+          for (
+            let x = Math.floor((p.x - reach) / 256);
+            x <= Math.floor((p.x + reach) / 256);
+            x++
+          )
+            for (const b of map.get(x + "," + y) || []) out.push(b);
     return out;
   }
   function resourceCluster(target) {
@@ -2997,7 +3683,9 @@
   }
   function resourceAt(p) {
     const n = state.nodes
-      .filter((n) => n.remaining > 0 && distance(n, p) < n.r + 15)
+      .filter(
+        (n) => n.remaining > 0 && playerRemembers(n) && Art.hitResource(n, p),
+      )
       .sort((a, b) => distance(a, p) - distance(b, p))[0];
     if (n) return n;
     return state.buildings.find(
@@ -3192,6 +3880,7 @@
       }
     }
   }
+  const formationRoutes = new Map();
   function updateFormations() {
     state.formations ||= [];
     const unitById = new Map(state.units.map((u) => [u.id, u]));
@@ -3199,10 +3888,14 @@
       u &&
       u.hp > 0 &&
       (u.order?.formation === f.id || u.pendingOrder?.formation === f.id);
-    state.formations = state.formations.filter((f) =>
-      f.members.some((id) => active(unitById.get(id), f)),
-    );
+    state.formations = state.formations.filter((f) => {
+      const live = f.members.some((id) => active(unitById.get(id), f));
+      if (!live) nav.cancelOwner("formation:" + f.id);
+      return live;
+    });
+    formationRoutes.clear();
     for (const f of state.formations) {
+      formationRoutes.set(f.id, f);
       const members = f.members
         .map((id) => unitById.get(id))
         .filter((u) => active(u, f));
@@ -3221,7 +3914,28 @@
               u.order.y = goal.y;
             }
       }
-      // Arrival slots are stable goals. There is no moving anchor, waiting or slot chasing.
+      if (f.sharedRoute && !f.escortId) {
+        if (f.revision !== nav.revision) {
+          f.path = [];
+          f.routeReady = false;
+          f.routeStart = findFree(f.anchor);
+          f.revision = nav.revision;
+        }
+        if (!f.routeReady) {
+          const path = nav.query(
+            f.routeStart || findFree(f.anchor),
+            f.destination,
+            { priority: f.team === 0 ? 2 : 0, owner: "formation:" + f.id },
+          );
+          if (path !== null) {
+            f.path = path.length
+              ? [f.routeStart || findFree(f.anchor), ...path]
+              : [];
+            f.routeReady = true;
+          }
+        }
+      }
+      // Arrival slots are stable goals; the shared route leads to their center.
       f.anchor = members.reduce(
         (p, u) => ({
           x: p.x + u.x / members.length,
@@ -3234,8 +3948,11 @@
       );
     }
   }
-  function reserveSlot(p, slots) {
-    if (slots.some((q) => distance(p, q) < 24)) {
+  function reserveSlot(p, slots, anchor = null) {
+    const available = (q) =>
+      !slots.some((s) => distance(s, q) < 24) &&
+      (!anchor || nav.clearLine(anchor, q));
+    if (!available(p)) {
       let found = null;
       for (let radius = 32; radius <= 192 && !found; radius += 32)
         for (let i = 0; i < 16; i++) {
@@ -3243,11 +3960,23 @@
             x: p.x + Math.cos((i * Math.PI) / 8) * radius,
             y: p.y + Math.sin((i * Math.PI) / 8) * radius,
           });
-          if (!slots.some((s) => distance(s, q) < 24)) {
+          if (available(q)) {
             found = q;
             break;
           }
         }
+      if (!found && anchor)
+        for (let radius = 0; radius <= 960 && !found; radius += 32)
+          for (let i = 0; i < 32; i++) {
+            const q = marchPoint({
+              x: anchor.x + Math.cos((i * Math.PI) / 16) * radius,
+              y: anchor.y + Math.sin((i * Math.PI) / 16) * radius,
+            });
+            if (available(q)) {
+              found = q;
+              break;
+            }
+          }
       if (found) p = found;
     }
     slots.push(p);
@@ -3297,6 +4026,11 @@
       u.pathTimer = 0;
     }
     if (u.order && moveUnit(u, u.order, dt)) {
+      if (
+        formationRoutes.get(u.order.formation)?.escortId &&
+        getObject(formationRoutes.get(u.order.formation).escortId)
+      )
+        return;
       u.order = null;
       u.hold = false;
       u.marchGoal = null;
@@ -3307,24 +4041,102 @@
       const exit = findFree(u);
       u.x = exit.x;
       u.y = exit.y;
-      u.pathTimer = 0;
+      u.path = [];
+      u.pathGoal = null;
+      u.pathRequest = null;
     }
     let p = {
       x: clamp(destination.x, 25, W - 25),
       y: clamp(destination.y, 25, H - 25),
     };
-    if (distance(u, p) < stop) {
+    const distToGoal = distance(u, p);
+    if (distToGoal < stop) {
       u.moving = false;
+      u.vx = 0;
+      u.vy = 0;
       return true;
     }
-    u.pathTimer -= dt;
-    if (
-      !u.pathGoal ||
-      distance(p, u.pathGoal) > 24 ||
-      u.pathTimer <= 0 ||
-      u.pathRevision !== nav.revision ||
-      u.stuck > 1.2
-    ) {
+
+    const unitR = ["knight", "trebuchet", "ram", "ballista"].includes(u.type)
+      ? 26
+      : 14;
+    const reachDist = Math.max(20, unitR * 1.15);
+
+    const company = formationRoutes.get(u.order?.formation);
+    const shared =
+      company?.sharedRoute &&
+      !company.escortId &&
+      distance(destination, u.order) < 1;
+    if (shared && distToGoal >= 220) {
+      if (!company.routeReady || !company.path.length) {
+        u.moving = false;
+        return false;
+      }
+      if (
+        u.sharedRouteRevision !== company.revision ||
+        !u.path?.length ||
+        !u.pathGoal ||
+        distance(u.pathGoal, p) > 24
+      ) {
+        // The first point is the company origin; join the nearest visible route entry.
+        let entry = 0;
+        while (
+          entry + 1 < company.path.length &&
+          nav.clearLine(u, company.path[entry + 1])
+        )
+          entry++;
+        const route = company.path.slice(entry);
+        if (route.length && !nav.clearLine(u, route[0])) {
+          if (
+            !u.pathRequest ||
+            u.pathRequest.revision !== company.revision ||
+            distance(u.pathRequest.goal, route[0]) > 1
+          )
+            u.pathRequest = {
+              start: { x: u.x, y: u.y },
+              goal: route[0],
+              revision: company.revision,
+            };
+          const connector = nav.query(u.pathRequest.start, u.pathRequest.goal, {
+            priority: u.team === 0 ? 2 : 0,
+            owner: "unit:" + u.id,
+          });
+          if (connector === null) {
+            u.moving = false;
+            return false;
+          }
+          if (!connector.length) {
+            u.moving = false;
+            return false;
+          }
+          route.unshift(...connector.slice(0, -1));
+        }
+        u.path = [...route, p];
+        u.pathGoal = p;
+        u.pathRevision = company.revision;
+        u.sharedRouteRevision = company.revision;
+        u.pathRequest = null;
+        u.stuck = 0;
+      }
+    }
+    // Direct line-of-sight shortcuts directly to destination
+    if (distToGoal < 220 && nav.clearLine(u, p)) {
+      u.path = [p];
+      u.pathGoal = p;
+      u.pathRequest = null;
+      u.pathRevision = nav.revision;
+      u.stuck = 0;
+    }
+
+    // Only query a new path when genuinely needed (no periodic repathing destroying working paths)
+    const hasValidPath = u.path && u.path.length > 0;
+    const sameGoal = u.pathGoal && distance(p, u.pathGoal) <= 24;
+    const sameRevision = u.pathRevision === nav.revision;
+    const notStuck = (u.stuck || 0) < 0.8;
+    const needsNewPath =
+      !hasValidPath || !sameGoal || !sameRevision || (!notStuck && !shared);
+
+    if (needsNewPath) {
       if (
         !u.pathRequest ||
         u.pathRequest.revision !== nav.revision ||
@@ -3335,9 +4147,12 @@
           goal: p,
           revision: nav.revision,
         };
-      const path = nav.query(u.pathRequest.start, u.pathRequest.goal);
+      const path = nav.query(u.pathRequest.start, u.pathRequest.goal, {
+        priority: u.team === 0 ? (u.order ? 2 : 1) : 0,
+        owner: "unit:" + u.id,
+      });
       if (path === null) {
-        // Keep a valid existing route while its replacement is being computed.
+        // Keep valid existing route while replacement is being computed
         if (u.pathRevision !== nav.revision || !u.path?.length) {
           u.moving = false;
           return false;
@@ -3346,95 +4161,406 @@
         u.path = path;
         u.pathRequest = null;
         u.pathGoal = p;
-        u.pathTimer = 2 + (u.id % 5) * 0.13;
         u.pathRevision = nav.revision;
         u.stuck = 0;
+
+        // Immediately prune stale waypoints that are behind the unit or shortcutted
+        while (u.path.length > 1) {
+          const p0 = u.path[0],
+            p1 = u.path[1];
+          const segX = p1.x - p0.x,
+            segY = p1.y - p0.y;
+          const dot = (u.x - p0.x) * segX + (u.y - p0.y) * segY;
+          if (
+            (dot > 0 || distance(u, p0) < reachDist) &&
+            nav.clearLine(u, p1)
+          ) {
+            u.path.shift();
+          } else {
+            break;
+          }
+        }
       }
     }
-    // Finish at the exact order instead of repeatedly revisiting its nav cell.
-    if (
-      distance(u, p) < 60 &&
-      Array.from({ length: 9 }, (_, i) => i / 8).every((t) =>
-        groundFree(u.x + (p.x - u.x) * t, u.y + (p.y - u.y) * t, 6),
-      )
-    )
-      u.path = [p];
+
+    // Advance waypoints along path smoothly
+    while (u.path.length > 0) {
+      const cur = u.path[0];
+      const distToCur = distance(u, cur);
+      if (
+        distToCur < reachDist &&
+        (u.path.length < 2 || nav.clearLine(u, u.path[1]))
+      ) {
+        u.path.shift();
+        continue;
+      }
+      if (u.path.length >= 2) {
+        const nextWp = u.path[1];
+        const segX = nextWp.x - cur.x,
+          segY = nextWp.y - cur.y;
+        const dot = (u.x - cur.x) * segX + (u.y - cur.y) * segY;
+        if (dot > 0 && nav.clearLine(u, nextWp)) {
+          u.path.shift();
+          continue;
+        }
+        if (distance(u, nextWp) < 220 && nav.clearLine(u, nextWp)) {
+          u.path.shift();
+          continue;
+        }
+      }
+      break;
+    }
+
     if (!u.path.length) {
-      u.stuck += dt;
-      u.moving = false;
-      return false;
+      if (distToGoal < stop) {
+        u.moving = false;
+        u.vx = 0;
+        u.vy = 0;
+        return true;
+      }
+      if (groundFree(p.x, p.y, 6) && distToGoal < 75) {
+        u.path = [p];
+      } else {
+        u.stuck = (u.stuck || 0) + dt;
+        u.moving = false;
+        return false;
+      }
     }
-    let next = u.path[0];
-    if (distance(u, next) < 0.1) {
-      u.path.shift();
-      if (!u.path.length) {
-        u.pathTimer = 0;
-        if (distance(u, p) < stop) {
-          u.moving = false;
-          return true;
-        }
-        // The final nav cell is only a route hint; finish at the actual destination.
-        next = groundFree(p.x, p.y, 6) && distance(u, p) < 60 ? p : null;
-        if (!next) {
-          u.moving = false;
-          return false;
-        }
-      } else next = u.path[0];
+
+    let next = u.path[0] || p;
+    const d = distance(u, next);
+    const baseSpeed = TYPES[u.type].speed;
+    const speed = baseSpeed;
+
+    // --- 1. Path Force (steer along navigation path toward next waypoint) ---
+    const pDirX = d > 0.001 ? (next.x - u.x) / d : 0;
+    const pDirY = d > 0.001 ? (next.y - u.y) / d : 0;
+    const pathSpeed =
+      u.path.length <= 1 && distToGoal < 30
+        ? speed * Math.min(1, Math.max(0.35, distToGoal / 25))
+        : speed;
+    let fPathX = pDirX * pathSpeed;
+    let fPathY = pDirY * pathSpeed;
+
+    // --- 2. Cohesion Force (flock towards company center) ---
+    let fCohX = 0,
+      fCohY = 0;
+    const formation = u.order?.formation
+      ? state.formations.find((f) => f.id === u.order.formation)
+      : null;
+    const cohTarget = formation?.anchor;
+    if (cohTarget && distToGoal > 220 && nav.clearLine(u, cohTarget)) {
+      const cdx = cohTarget.x - u.x,
+        cdy = cohTarget.y - u.y,
+        cd = Math.hypot(cdx, cdy);
+      if (cd > 24) {
+        const cohFade = Math.min(1, Math.max(0, (distToGoal - 35) / 50));
+        const cohStrength = Math.min(speed * 0.35, cd * 0.4) * cohFade;
+        fCohX = (cdx / cd) * cohStrength;
+        fCohY = (cdy / cd) * cohStrength;
+      }
     }
-    const d = distance(u, next),
-      speed =
-        (u.autoScout || u.team === 1) && u.order?.formation
-          ? Math.min(
-              TYPES[u.type].speed,
-              state.formations.find((f) => f.id === u.order.formation)?.speed ||
-                TYPES[u.type].speed,
-            )
-          : TYPES[u.type].speed,
-      amount = Math.min(d, speed * dt);
-    let nx = u.x + ((next.x - u.x) / d) * amount,
-      ny = u.y + ((next.y - u.y) / d) * amount;
-    if (!groundFree(nx, ny, 6)) {
-      const heading = Math.atan2(next.y - u.y, next.x - u.x);
-      for (const turn of [0.4, -0.4, 0.8, -0.8, 1.2, -1.2, 1.6, -1.6]) {
-        const tx = u.x + Math.cos(heading + turn) * amount;
-        const ty = u.y + Math.sin(heading + turn) * amount;
-        if (groundFree(tx, ty, 6)) {
-          nx = tx;
-          ny = ty;
-          break;
+
+    // --- 3. Alignment Force (match headings with moving flockmates) ---
+    let fAlignX = 0,
+      fAlignY = 0,
+      alignCount = 0;
+    for (const other of nearby(u, 90)) {
+      if (
+        other.id !== u.id &&
+        other.team === u.team &&
+        other.hp > 0 &&
+        other.moving &&
+        (other.vx !== undefined || other.vy !== undefined)
+      ) {
+        fAlignX += other.vx || 0;
+        fAlignY += other.vy || 0;
+        alignCount++;
+      }
+    }
+    if (alignCount > 0 && distToGoal > 30) {
+      const avgVx = fAlignX / alignCount,
+        avgVy = fAlignY / alignCount;
+      fAlignX = (avgVx - (u.vx || 0)) * 0.3;
+      fAlignY = (avgVy - (u.vy || 0)) * 0.3;
+    } else {
+      fAlignX = 0;
+      fAlignY = 0;
+    }
+
+    // --- 4. Separation Force (maintain space between nearby units) ---
+    let fSepX = 0,
+      fSepY = 0;
+    const myR = ["knight", "trebuchet", "ram", "ballista"].includes(u.type)
+      ? 26
+      : 14;
+    for (const other of nearby(u, myR + 28)) {
+      if (other.id === u.id || other.hp <= 0) continue;
+      const otherR = ["knight", "trebuchet", "ram", "ballista"].includes(
+        other.type,
+      )
+        ? 26
+        : 14;
+      const sepDist = (myR + otherR) * 0.92;
+      const odx = u.x - other.x,
+        ody = u.y - other.y,
+        od = Math.hypot(odx, ody);
+      if (
+        u.order &&
+        !u.order.attack &&
+        distToGoal > 30 &&
+        distToGoal < 220 &&
+        other.team === u.team &&
+        !other.moving &&
+        od < sepDist + 12 &&
+        od > 0.1 &&
+        -(odx * pDirX + ody * pDirY) > od * 0.4 &&
+        nav.clearLine(u, p)
+      ) {
+        // Step around settled allies instead of balancing against their separation force.
+        const cross = pDirX * ody - pDirY * odx;
+        u.arrivalAvoidSide ||=
+          Math.abs(cross) > 1 ? Math.sign(cross) : u.id % 2 ? 1 : -1;
+        const side = u.arrivalAvoidSide;
+        fSepX += -pDirY * side * speed * 0.8;
+        fSepY += pDirX * side * speed * 0.8;
+      }
+      if (od < sepDist) {
+        if (od > 0.1) {
+          const rep = ((sepDist - od) / sepDist) * speed * 1.6;
+          fSepX += (odx / od) * rep;
+          fSepY += (ody / od) * rep;
+        } else {
+          fSepX += (u.id % 2 === 0 ? 1 : -1) * speed;
+          fSepY += (u.id % 3 === 0 ? 1 : -1) * speed;
         }
       }
     }
+    if (distToGoal < 24) {
+      const f = Math.max(0.15, distToGoal / 24);
+      fSepX *= f;
+      fSepY *= f;
+    }
+
+    // --- 5. Obstacle Avoidance Force (avoid terrain boundaries & impassable obstacles) ---
+    let fObsX = 0,
+      fObsY = 0;
+    if (u.x < 42) fObsX += ((42 - u.x) / 18) * speed * 1.8;
+    else if (u.x > W - 42) fObsX -= ((u.x - (W - 42)) / 18) * speed * 1.8;
+    if (u.y < 42) fObsY += ((42 - u.y) / 18) * speed * 1.8;
+    else if (u.y > H - 42) fObsY -= ((u.y - (H - 42)) / 18) * speed * 1.8;
+
+    const lookDist = Math.min(
+      26,
+      speed * 0.32 + 8,
+      distToGoal < 30 && nav.clearLine(u, p)
+        ? Math.max(0, distToGoal - stop)
+        : Infinity,
+    );
+    const aheadX = u.x + pDirX * lookDist,
+      aheadY = u.y + pDirY * lookDist;
+    if (!groundFree(aheadX, aheadY, 6)) {
+      const h = Math.atan2(pDirY, pDirX);
+      const lx = u.x + Math.cos(h + 0.6) * lookDist,
+        ly = u.y + Math.sin(h + 0.6) * lookDist;
+      const rx = u.x + Math.cos(h - 0.6) * lookDist,
+        ry = u.y + Math.sin(h - 0.6) * lookDist;
+      const leftOk = groundFree(lx, ly, 6),
+        rightOk = groundFree(rx, ry, 6);
+      if (leftOk && !rightOk) {
+        fObsX += -pDirY * speed * 1.4;
+        fObsY += pDirX * speed * 1.4;
+      } else if (rightOk && !leftOk) {
+        fObsX += pDirY * speed * 1.4;
+        fObsY += -pDirX * speed * 1.4;
+      } else {
+        fObsX += -pDirX * speed * 1.2;
+        fObsY += -pDirY * speed * 1.2;
+      }
+    }
+
+    // --- 6. Tactical / Stance Force (steer archers away from threats, melee towards enemies) ---
+    let fTactX = 0,
+      fTactY = 0;
+    const stance = u.stance || (u.hold ? "hold" : "fight");
+    if (stance === "fight" && !u.hold && !u.manualTarget) {
+      if (u.type === "archer") {
+        const threats = nearby(u, 170).filter(
+          (e) =>
+            e.team !== u.team &&
+            e.team !== 2 &&
+            e.hp > 0 &&
+            e.type !== "civilian",
+        );
+        for (const threat of threats) {
+          const tdx = u.x - threat.x,
+            tdy = u.y - threat.y,
+            td = Math.hypot(tdx, tdy);
+          const kiteRange = threat.type === "knight" ? 170 : 135;
+          if (td < kiteRange && td > 0.1) {
+            const rep = ((kiteRange - td) / kiteRange) * speed * 1.5;
+            fTactX += (tdx / td) * rep;
+            fTactY += (tdy / td) * rep;
+          }
+        }
+      } else if (u.type === "sword" || u.type === "knight") {
+        let targetEnemy = u.target ? getObject(u.target) : null;
+        if (
+          !targetEnemy ||
+          targetEnemy.team === u.team ||
+          targetEnemy.hp <= 0
+        ) {
+          if (u.order?.attack || !u.order) {
+            const foes = nearby(u, 220).filter(
+              (e) =>
+                e.team !== u.team &&
+                e.team !== 2 &&
+                e.hp > 0 &&
+                e.type !== "civilian",
+            );
+            if (foes.length) {
+              targetEnemy = foes.sort(
+                (a, b) => distance(a, u) - distance(b, u),
+              )[0];
+            }
+          }
+        }
+        if (targetEnemy) {
+          const tdx = targetEnemy.x - u.x,
+            tdy = targetEnemy.y - u.y,
+            td = Math.hypot(tdx, tdy);
+          const combatRange = TYPES[u.type].range + (targetEnemy.kind ? 15 : 6);
+          if (td > combatRange && td < 240) {
+            const pull = Math.min(
+              speed * 1.3,
+              speed * ((td - combatRange) / 80 + 0.3),
+            );
+            fTactX += (tdx / td) * pull;
+            fTactY += (tdy / td) * pull;
+          }
+        }
+      }
+      if (u.order && !u.order.attack && distToGoal < 30) {
+        const fade = distToGoal / 30;
+        fTactX *= fade;
+        fTactY *= fade;
+      }
+    }
+
+    // --- Combine Forces into Smooth Velocity ---
+    let desVx = fPathX + fSepX + fCohX + fAlignX + fObsX + fTactX;
+    let desVy = fPathY + fSepY + fCohY + fAlignY + fObsY + fTactY;
+    const desMag = Math.hypot(desVx, desVy);
+    if (desMag > baseSpeed) {
+      desVx = (desVx / desMag) * baseSpeed;
+      desVy = (desVy / desMag) * baseSpeed;
+    }
+    u.vx = (u.vx || 0) * 0.5 + desVx * 0.5;
+    u.vy = (u.vy || 0) * 0.5 + desVy * 0.5;
+    const vMag = Math.hypot(u.vx, u.vy);
+    if (vMag > baseSpeed) {
+      u.vx = (u.vx / vMag) * baseSpeed;
+      u.vy = (u.vy / vMag) * baseSpeed;
+    }
+
+    // --- Integrate Position with Slide on Collision ---
+    let nx = u.x + u.vx * dt,
+      ny = u.y + u.vy * dt;
+    if (!groundFree(nx, ny, 6)) {
+      if (groundFree(nx, u.y, 6)) {
+        ny = u.y;
+        u.vy = 0;
+      } else if (groundFree(u.x, ny, 6)) {
+        nx = u.x;
+        u.vx = 0;
+      } else {
+        const heading = Math.atan2(u.vy || pDirY, u.vx || pDirX);
+        const stepLen = Math.max(0.1, Math.min(d, speed * dt));
+        let turned = false;
+        for (const turn of [0.4, -0.4, 0.8, -0.8, 1.2, -1.2, 1.6, -1.6]) {
+          const tx = u.x + Math.cos(heading + turn) * stepLen;
+          const ty = u.y + Math.sin(heading + turn) * stepLen;
+          if (groundFree(tx, ty, 6)) {
+            nx = tx;
+            ny = ty;
+            turned = true;
+            break;
+          }
+        }
+        if (!turned) {
+          nx = u.x;
+          ny = u.y;
+          u.vx = 0;
+          u.vy = 0;
+        }
+      }
+    }
+
     if (groundFree(nx, ny, 6)) {
-      u.angle = Math.atan2(ny - u.y, nx - u.x);
-      u.x = nx;
-      u.y = ny;
+      if (nx !== u.x || ny !== u.y) {
+        u.angle = Math.atan2(ny - u.y, nx - u.x);
+        u.x = nx;
+        u.y = ny;
+      }
       u.moving = true;
-      u.anim += dt * 10;
+      if (visualActive(u)) u.anim += dt * 10;
       u.stuck = 0;
-      if (u.path[0] && distance(u, u.path[0]) < 0.1) u.path.shift();
+      if (
+        u.path[0] &&
+        distance(u, u.path[0]) < reachDist &&
+        (u.path.length < 2 || nav.clearLine(u, u.path[1]))
+      )
+        u.path.shift();
       if (distance(u, p) < stop) {
         u.moving = false;
+        u.vx = 0;
+        u.vy = 0;
         return true;
       }
     } else {
-      u.stuck += dt;
-      u.pathTimer = Math.min(u.pathTimer, 0.8);
+      u.stuck = (u.stuck || 0) + dt;
     }
     return false;
   }
+  const actionTurns = new Map();
+  function selectedStructures(predicate = () => true) {
+    return state.buildings.filter(
+      (b) =>
+        b.team === 0 &&
+        b.hp > 0 &&
+        (selectedBuildings.has(b.id) || selectedBuilding === b.id) &&
+        predicate(b),
+    );
+  }
+  function nextStructure(key, buildings, advance = false) {
+    if (!buildings.length) return null;
+    const last = actionTurns.get(key);
+    const index = buildings.findIndex((b) => b.id === last);
+    let b = buildings[(index + 1) % buildings.length];
+    if (
+      index < 0 &&
+      (selectedBuilding === last || selectedBuildings.has(last))
+    ) {
+      const lastPosition = state.buildings.findIndex(
+        (item) => item.id === last,
+      );
+      b =
+        buildings.find(
+          (item) => state.buildings.indexOf(item) > lastPosition,
+        ) || buildings[0];
+    }
+    if (advance) actionTurns.set(key, b.id);
+    return b;
+  }
   function producerFor(type) {
     const kind = TYPES[type].producer;
-    const selectedProducer = state.buildings
-      .filter(
-        (b) =>
-          (b.id === selectedBuilding || selectedBuildings.has(b.id)) &&
-          b.kind === kind &&
-          b.progress >= 1 &&
-          b.hp > 0 &&
-          b.team === 0,
-      )
-      .sort((a, b) => a.queue.length - b.queue.length)[0];
+    const selectedProducer = nextStructure(
+      "train:" + type,
+      selectedStructures(
+        (b) => b.kind === kind && b.progress >= 1 && b.queue.length < 8,
+      ),
+    );
+    if (selectedStructures().length) return selectedProducer;
     return (
       selectedProducer ||
       completeBuildings(kind).sort((a, b) => a.queue.length - b.queue.length)[0]
@@ -3442,19 +4568,6 @@
   }
   function recruit(type, assignedProducer = null) {
     if (!playable()) return false;
-    if (!assignedProducer) {
-      const producers = completeBuildings(TYPES[type].producer).filter((b) =>
-        selectedBuildings.has(b.id),
-      );
-      if (producers.length > 1) {
-        let queued = 0;
-        for (const b of producers) if (recruit(type, b)) queued++;
-        toast(
-          `${queued} selected buildings queued ${TYPES[type].name.toLowerCase()} training.`,
-        );
-        return queued > 0;
-      }
-    }
     const t = TYPES[type],
       b = assignedProducer || producerFor(type),
       pop = population();
@@ -3477,6 +4590,7 @@
       return false;
     }
     pay(t.cost);
+    actionTurns.set("train:" + type, b.id);
     b.queue.push({
       kind: "unit",
       type,
@@ -3498,14 +4612,18 @@
     )
       return false;
     const t = TECHS[key],
-      b = completeBuildings(t.producer)
-        .filter((b) => b.id === selectedBuilding || selectedBuildings.has(b.id))
-        .sort((a, b) => a.queue.length - b.queue.length)[0];
+      b = nextStructure(
+        "research",
+        selectedStructures(
+          (b) => b.kind === t.producer && b.progress >= 1 && b.queue.length < 8,
+        ),
+      );
     if (!b || !afford(t.cost)) {
       toast("Research needs its completed structure and the listed resources.");
       return false;
     }
     pay(t.cost);
+    actionTurns.set("research", b.id);
     b.queue.push({
       kind: "research",
       tech: key,
@@ -3517,7 +4635,7 @@
     return true;
   }
   function beginBuild(kind) {
-    if (!playable()) return;
+    if (!playable() || kind === "gate") return;
     const builders = workers().filter((u) => selected.has(u.id));
 
     if (!afford(BUILDINGS[kind].cost)) {
@@ -3529,7 +4647,7 @@
     placementRotation = 0;
     mode = "build";
     toast(
-      `Place ${BUILDINGS[kind].name.toLowerCase()} on clear, explored ground. Unfinished foundations provide no vision. ${kind === "wall" ? "Drag to lay a continuous wall; bends join automatically. " : ""}Right-click or Escape cancels.`,
+      `Place ${BUILDINGS[kind].name.toLowerCase()} on clear, explored ground. Unfinished foundations provide no vision. ${["wall", "bastionwall"].includes(kind) ? "Drag to lay a continuous wall; bends join automatically. " : ""}Right-click or Escape cancels.`,
     );
     updateUI();
   }
@@ -3543,20 +4661,15 @@
       ? { ...spec, w: spec.h, h: spec.w }
       : spec;
   }
-  function rotatePlacement() {
-    if (!playable() || placement !== "gate") return;
-    placementRotation = placementRotation === 90 ? 0 : 90;
-    toast("Gate rotated. Press R or Rotate gate to turn it again.");
-    updateUI();
-  }
   function validSite(
     kind,
     p,
     team = 0,
     rotation = team === 0 ? placementRotation : 0,
+    footprint = null,
   ) {
     if (team === 0 ? !playerRemembers(p) : !enemyFog.remembers(p)) return false;
-    const t = placementSpec(kind, team, rotation);
+    const t = footprint || placementSpec(kind, team, rotation);
     if (
       state.units.some(
         (u) =>
@@ -3566,14 +4679,15 @@
       )
     )
       return false;
+    const minBorder = ["wall", "bastionwall"].includes(kind) ? 0 : 32;
     if (
-      p.x - t.w / 2 < 32 ||
-      p.y - t.h / 2 < 32 ||
-      p.x + t.w / 2 > W - 32 ||
-      p.y + t.h / 2 > H - 32
+      p.x - t.w / 2 < minBorder ||
+      p.y - t.h / 2 < minBorder ||
+      p.x + t.w / 2 > W - minBorder ||
+      p.y + t.h / 2 > H - minBorder
     )
       return false;
-    if (kind === "wall") {
+    if (["wall", "bastionwall"].includes(kind)) {
       // A masonry end may meet a cliff or shore; its center must remain on land.
       if (!groundFree(p.x, p.y, 0, null, "all")) return false;
     } else {
@@ -3602,9 +4716,13 @@
     return true;
   }
   function wallLine(a, b) {
+    const minX = 32,
+      maxX = Math.max(minX, Math.floor((W - 16) / 32) * 32),
+      minY = 32,
+      maxY = Math.max(minY, Math.floor((H - 16) / 32) * 32);
     const snap = (p) => ({
-      x: Math.round(p.x / 32) * 32,
-      y: Math.round(p.y / 32) * 32,
+      x: clamp(Math.round(p.x / 32) * 32, minX, maxX),
+      y: clamp(Math.round(p.y / 32) * 32, minY, maxY),
     });
     a = snap(a);
     b = snap(b);
@@ -3621,6 +4739,7 @@
     return points;
   }
   function placeWallLine(a, b, append = false) {
+    const wallKind = placement === "bastionwall" ? "bastionwall" : "wall";
     const builders = workers().filter((u) => selected.has(u.id)),
       projects = [];
     const points = wallLine(a, b);
@@ -3631,10 +4750,10 @@
         )
       )
         continue;
-      if (!validSite("wall", p) || !afford(BUILDINGS.wall.cost)) continue;
-      pay(BUILDINGS.wall.cost);
+      if (!validSite("wall", p) || !afford(BUILDINGS[wallKind].cost)) continue;
+      pay(BUILDINGS[wallKind].cost);
       const next = points[i + 1] || points[i - 1] || { x: p.x + 32, y: p.y };
-      const wall = makeBuilding("wall", 0, p.x, p.y, 0, {
+      const wall = makeBuilding(wallKind, 0, p.x, p.y, 0, {
         wallAngle: Math.atan2(next.y - p.y, next.x - p.x),
       });
       state.buildings.push(wall);
@@ -3646,7 +4765,7 @@
     }
     wallDrag = null;
     wallAnchor = append ? points.at(-1) : null;
-    placement = append ? "wall" : null;
+    placement = append ? wallKind : null;
     mode = append ? "build" : "move";
     updateUI();
     toast(
@@ -3655,9 +4774,224 @@
         : "No clear ground or insufficient stone for this wall.",
     );
   }
-  function wallConnections(b) {
+  function straightWall(b) {
+    if (b.kind !== "wall" || b.progress < 1 || b.hp <= 0 || b.team !== 0)
+      return false;
+    const links = Object.values(b.links || {});
+    if (links.length > 2) return false;
+    return (
+      links.length < 2 ||
+      (Math.abs(links[0].x * links[1].y - links[0].y * links[1].x) < 1 &&
+        links[0].x * links[1].x + links[0].y * links[1].y < 0)
+    );
+  }
+  function availableWall(b) {
+    return (
+      b.kind === "wall" &&
+      b.team === 0 &&
+      b.hp > 0 &&
+      b.progress >= 1 &&
+      !b.queue.length &&
+      !b.upgradeOwner
+    );
+  }
+  function gatePartner(b, upgrading = false) {
+    if (!straightWall(b) || (!upgrading && !availableWall(b))) return null;
+    return state.buildings.find(
+      (other) =>
+        other.id !== b.id &&
+        straightWall(other) &&
+        (upgrading ? other.upgradeOwner === b.id : availableWall(other)) &&
+        Math.abs(other.x - b.x) <= 40 &&
+        Math.abs(other.y - b.y) <= 40 &&
+        distance(other, b) >= 24 &&
+        Object.values(b.links || {}).some(
+          (p) =>
+            Math.abs(p.x * 2 - (other.x - b.x)) < 1 &&
+            Math.abs(p.y * 2 - (other.y - b.y)) < 1,
+        ),
+    );
+  }
+  function wallUpgradeCost(kind, first = null) {
+    const walls =
+      kind === "gate" ? [first, first ? gatePartner(first) : null] : [first];
+    return Object.fromEntries(
+      Object.entries(
+        BUILDINGS[
+          kind === "gate" && walls.some((b) => b?.fortified)
+            ? "bastiongate"
+            : kind
+        ].cost,
+      ).map(([r, n]) => [
+        r,
+        Math.max(
+          0,
+          n -
+            walls.reduce(
+              (sum, wall) =>
+                sum +
+                (BUILDINGS[wall?.fortified ? "bastionwall" : "wall"].cost[r] ||
+                  0),
+              0,
+            ),
+        ),
+      ]),
+    );
+  }
+  function queueWallUpgrade(kind) {
+    if (!playable()) return;
+    const first = nextStructure(
+      "wall-upgrade:" + kind,
+      selectedStructures(
+        (b) => availableWall(b) && (kind !== "gate" || gatePartner(b)),
+      ),
+    );
+    if (!first) return;
+    const cost = wallUpgradeCost(kind, first);
+    if (!afford(cost)) {
+      toast("Not enough resources for this wall upgrade.");
+      return;
+    }
+    const partner = kind === "gate" ? gatePartner(first) : null;
+    pay(cost);
+    first.queue.push({
+      kind: "building-upgrade",
+      targetKind: kind,
+      targetSpec:
+        kind === "gate" && (first.fortified || partner?.fortified)
+          ? "bastiongate"
+          : kind,
+      partnerId: partner?.id || null,
+      time: 0,
+      duration:
+        BUILDINGS[
+          kind === "gate" && (first.fortified || partner?.fortified)
+            ? "bastiongate"
+            : kind
+        ].time,
+      cost,
+    });
+    if (partner) partner.upgradeOwner = first.id;
+    actionTurns.set("wall-upgrade:" + kind, first.id);
+    toast((kind === "gate" ? "Gatehouse" : "Guard tower") + " upgrade queued.");
+    updateUI();
+  }
+  function releaseWallUpgrade(b, item) {
+    const partner = getObject(item?.partnerId);
+    if (partner?.upgradeOwner === b.id) delete partner.upgradeOwner;
+  }
+  function completeWallUpgrade(first, item) {
+    if (item.targetKind === "tower") {
+      const health = first.hp / first.maxHp;
+      first.wallAttachment = {
+        x: first.x,
+        y: first.y,
+        w: first.w,
+        h: first.h,
+        wallAngle: first.wallAngle,
+        fortified: !!first.fortified,
+        links: first.links,
+      };
+      Object.assign(first, {
+        kind: "tower",
+        w: BUILDINGS.tower.w,
+        h: BUILDINGS.tower.h,
+        r: Math.max(BUILDINGS.tower.w, BUILDINGS.tower.h) / 2,
+        maxHp: Math.max(first.maxHp, BUILDINGS.tower.hp),
+        guardCooldown: 1,
+      });
+      first.hp = first.maxHp * health;
+      first.spent = { ...first.spent };
+      for (const [r, n] of Object.entries(item.cost))
+        first.spent[r] = (first.spent[r] || 0) + n;
+      rebuildNavigation();
+      updateUI();
+      toast("Wall upgraded to a guard tower.");
+      return;
+    }
+    const second = getObject(item.partnerId);
+    if (
+      !second ||
+      second.hp <= 0 ||
+      !straightWall(first) ||
+      !straightWall(second)
+    ) {
+      releaseWallUpgrade(first, item);
+      pay(item.cost, -1);
+      return;
+    }
+    const segments = [first, second].map((b) => ({
+      x: b.x,
+      y: b.y,
+      w: b.w,
+      h: b.h,
+      wallAngle: b.wallAngle,
+      fortified: !!b.fortified,
+      links: JSON.parse(JSON.stringify(b.links || {})),
+    }));
+    const gate = makeBuilding(
+      "gate",
+      0,
+      (first.x + second.x) / 2,
+      (first.y + second.y) / 2,
+      1,
+      {
+        gateSegments: segments,
+        gateAngle: Math.atan2(second.y - first.y, second.x - first.x),
+        closed: true,
+        rotation: 0,
+      },
+    );
+    gate.w = Math.abs(first.x - second.x) + 32;
+    gate.h = Math.abs(first.y - second.y) + 32;
+    gate.r = Math.hypot(gate.w, gate.h) / 2;
+    gate.maxHp = Math.max(gate.maxHp, first.maxHp, second.maxHp);
+    if (segments.some((part) => part.fortified)) {
+      gate.bastionGate = true;
+      gate.fortified = true;
+      gate.maxHp = BUILDINGS.bastiongate.hp;
+    }
+    gate.hp =
+      (gate.maxHp * (first.hp / first.maxHp + second.hp / second.maxHp)) / 2;
+    state.buildings = state.buildings.filter(
+      (b) => b.id !== first.id && b.id !== second.id,
+    );
+    state.buildings.push(gate);
+    const wasSelected =
+      selectedBuildings.has(first.id) ||
+      selectedBuildings.has(second.id) ||
+      selectedBuilding === first.id ||
+      selectedBuilding === second.id;
+    selectedBuildings.delete(first.id);
+    selectedBuildings.delete(second.id);
+    if (wasSelected) selectedBuildings.add(gate.id);
+    if (selectedBuilding === first.id || selectedBuilding === second.id)
+      selectedBuilding = gate.id;
+    rebuildNavigation();
+    updateUI();
+    toast("Gatehouse upgrade complete.");
+  }
+  function destroySelectedBuilding() {
+    if (!playable()) return;
+    const b = nextStructure(
+      "destroy",
+      selectedStructures((b) => !b.cityCenter),
+      true,
+    );
+    if (!b) return;
+    // Use combat destruction so rubble, navigation, and capital victory rules agree.
+    for (const item of b.queue) releaseWallUpgrade(b, item);
+    damage(b, b.maxHp * 100, { team: 0 }, true);
+    if (b.hp <= 0) {
+      selectedBuildings.delete(b.id);
+      selectedBuilding = [...selectedBuildings][0] || null;
+    }
+    rebuildNavigation();
+    updateUI();
+  }
+  function wallConnections(b, curtain) {
     const links = {};
-    for (const other of state.buildings)
+    for (const other of curtain)
       if (
         other.id !== b.id &&
         other.team === b.team &&
@@ -3675,7 +5009,7 @@
         if (
           Math.abs(dx) > 12 &&
           Math.abs(dy) > 12 &&
-          state.buildings.some(
+          curtain.some(
             (c) =>
               c.hp > 0 &&
               c.team === b.team &&
@@ -3692,7 +5026,11 @@
           const key =
             (dy < -12 ? "n" : dy > 12 ? "s" : "") +
             (dx < -12 ? "w" : dx > 12 ? "e" : "");
-          if (key) links[key] = { x: dx / 2, y: dy / 2 };
+          if (key)
+            links[key] = {
+              x: b.fortified && other.gateSegments ? 0 : dx / 2,
+              y: b.fortified && other.gateSegments ? 0 : dy / 2,
+            };
         }
       }
     const neighbors = Object.values(links);
@@ -3775,6 +5113,24 @@
     updateUI();
     return true;
   }
+  function cancelSiegeTargeting() {
+    if (!playable()) return;
+    for (const u of friendUnits().filter(
+      (u) => selected.has(u.id) && u.type === "trebuchet",
+    )) {
+      u.fireTarget = null;
+      u.target = null;
+      u.manualTarget = false;
+    }
+    for (const b of selectedStructures(
+      (b) => b.kind === "greatengine" && b.progress >= 1,
+    )) {
+      b.fireTarget = null;
+      b.attackTarget = null;
+    }
+    updateUI();
+    toast("Siege targeting cancelled. Engines resume watching for enemies.");
+  }
   function cancel() {
     wallDrag = null;
     wallAnchor = null;
@@ -3784,22 +5140,28 @@
       updateUI();
       return;
     }
-    const targets = state.buildings.filter(
-      (b) =>
-        (b.id === selectedBuilding || selectedBuildings.has(b.id)) &&
-        b.team === 0 &&
-        b.hp > 0,
-    );
+    const targets = [
+      ...new Map(
+        selectedStructures().map((b) => {
+          const target = b.upgradeOwner ? getObject(b.upgradeOwner) || b : b;
+          return [target.id, target];
+        }),
+      ).values(),
+    ];
     const removed = new Set();
     let cancelled = 0;
-    for (const b of targets) {
+    const cancellable = targets.filter((b) => b.progress < 1 || b.queue.length);
+    const target = nextStructure("cancel", cancellable, true);
+    for (const b of target ? [target] : []) {
       if (b.progress < 1) {
         for (const [r, n] of Object.entries(b.spent))
           state.resources[r] += n * (1 - b.progress) * 0.75;
         removed.add(b.id);
         cancelled++;
       } else if (b.queue.length) {
-        pay(b.queue.shift().cost, -1);
+        const item = b.queue.shift();
+        releaseWallUpgrade(b, item);
+        pay(item.cost, -1);
         cancelled++;
       }
     }
@@ -3861,8 +5223,8 @@
       building = state.buildings.find(
         (b) =>
           b.hp > 0 &&
-          Math.abs(p.x - b.x) < b.w / 2 + 6 &&
-          Math.abs(p.y - b.y) < b.h / 2 + 6,
+          (b.team === 0 || playerSees(b)) &&
+          Art.hitStructure(b, p, 6),
       ),
       enemy =
         state.units
@@ -3872,7 +5234,7 @@
               u.team !== 2 &&
               u.hp > 0 &&
               playerSees(u) &&
-              distance(u, p) < 24,
+              Art.hitUnit(u, p, state.time, 24),
           )
           .sort((a, b) => distance(a, p) - distance(b, p))[0] ||
         (building &&
@@ -3883,11 +5245,30 @@
           ? building
           : null);
     const escort = friendUnits().find(
-      (u) => ["pilgrim", "merchant"].includes(u.type) && distance(u, p) < 35,
+      (u) =>
+        ["pilgrim", "merchant"].includes(u.type) &&
+        Art.hitUnit(u, p, state.time, 35),
     );
     const units = friendUnits().filter(
       (u) => selected.has(u.id) && !["pilgrim", "merchant"].includes(u.type),
     );
+    const greatEngines = selectedStructures(
+      (b) => b.kind === "greatengine" && b.progress >= 1,
+    );
+    for (const engine of greatEngines) {
+      const d = distance(engine, enemy || p),
+        spec = BUILDINGS.greatengine;
+      if (d < spec.minRange || d > spec.range) {
+        toast("Outside great engine range (320-2200).");
+        continue;
+      }
+      engine.attackTarget = enemy?.id || null;
+      engine.fireTarget = enemy ? null : { x: p.x, y: p.y };
+      sound("attack", engine);
+      toast(
+        "Great siege engine target set. The platform will turn and fire when ready.",
+      );
+    }
     if (!units.length) {
       const producers = state.buildings.filter(
         (b) =>
@@ -3901,25 +5282,32 @@
       toast(
         producers.length
           ? "New troops from selected training buildings will rally here."
-          : "This building cannot train troops and has no rally point.",
+          : greatEngines.length
+            ? "Right-click a target within great engine range (320-2200)."
+            : "This building cannot train troops and has no rally point.",
       );
       return;
     }
+    if (enemy && units.some((u) => TYPES[u.type].damage > 0))
+      sound("attack", p);
     for (const u of units.filter(
       (u) => u.type === "trebuchet" && u.deployment !== "packed",
     )) {
       u.autoScout = null;
       u.target = null;
       u.manualTarget = false;
+      if (enemy) u.stance = "fight";
       if (u.stance === "stand-down") {
         u.fireTarget = null;
         toast("This engine is standing down. Choose Hold or Fight to fire.");
         continue;
       }
       if (u.deployment === "deployed" || u.deployment === "setting-up") {
-        const d = distance(u, p);
+        const d = distance(u, enemy || p);
         if (d >= 180 && d <= 690) {
-          u.fireTarget = { ...p };
+          u.fireTarget = enemy ? null : { ...p };
+          u.target = enemy?.id || null;
+          u.manualTarget = !!enemy;
           u.hold = false;
           u.order = null;
           toast("Trebuchet target set. The engine will fire when ready.");
@@ -3946,7 +5334,12 @@
     const a = Math.atan2(p.y - center.y, p.x - center.x),
       front = { x: Math.cos(a), y: Math.sin(a) },
       side = { x: -front.y, y: front.x },
-      cols = Math.max(3, Math.ceil(Math.sqrt(combat.length))),
+      cols = Math.max(1, Math.ceil(Math.sqrt(combat.length))),
+      spacing = combat.some((u) =>
+        ["knight", "trebuchet", "ram", "ballista"].includes(u.type),
+      )
+        ? 56
+        : 32,
       sorted = [...combat].sort(
         (a, b) => TYPES[a.type].rank - TYPES[b.type].rank,
       ),
@@ -3954,52 +5347,98 @@
       slots = [];
     sorted.forEach((u, i) => {
       u.autoScout = null;
+      u.fireTarget = null;
       if (u.type === "worker") {
         u.job = null;
         if (!append) u.buildQueue = [];
       }
       const row = Math.floor(i / cols),
         column = (i % cols) - (cols - 1) / 2,
-        extra = u.type === "chaplain" ? 100 : u.type === "trebuchet" ? 170 : 0;
+        extra =
+          attack || enemy
+            ? u.type === "chaplain"
+              ? 100
+              : u.type === "trebuchet"
+                ? 170
+                : 0
+            : 0;
       let goal = marchPoint({
-        x: p.x + side.x * column * 32 - front.x * (row * 32 + extra),
-        y: p.y + side.y * column * 32 - front.y * (row * 32 + extra),
+        x: p.x + side.x * column * spacing - front.x * (row * spacing + extra),
+        y: p.y + side.y * column * spacing - front.y * (row * spacing + extra),
       });
-      if (u.type === "knight") {
+      if (u.type === "knight" && (attack || enemy)) {
         const flank = i % 2 ? -1 : 1;
         goal = findFree({
           x: goal.x + side.x * flank * 55,
           y: goal.y + side.y * flank * 55,
         });
       }
-      goal = reserveSlot(goal, slots);
+      goal = reserveSlot(goal, slots, marchPoint(p));
       const order = {
         x: goal.x,
         y: goal.y,
         attack: attack || !!enemy || !!escort,
         formation: formationId,
       };
-      u.target = u.type === "chaplain" || attack ? null : enemy?.id || null;
-      u.manualTarget = !!enemy && !attack && u.type !== "chaplain";
+      u.target = u.type === "chaplain" ? null : enemy?.id || null;
+      if (enemy) u.stance = "fight";
+      u.manualTarget = !!enemy && u.type !== "chaplain";
       u.hold = false;
-      u.pathTimer = 0;
+      u.path = [];
+      u.pathGoal = null;
+      u.pathRequest = null;
+      u.stuck = 0;
+      u.arrivalAvoidSide = null;
       u.formation = { id: formationId, x: goal.x, y: goal.y };
       u.marchOffset = { x: goal.x - p.x, y: goal.y - p.y };
       u.order = order;
     });
-    if (sorted.length)
+    // Nearby troops on the same clear ground form separate route-sharing companies.
+    const remaining = new Set(sorted);
+    while (remaining.size) {
+      const members = [[...remaining][0]];
+      remaining.delete(members[0]);
+      for (let i = 0; i < members.length; i++)
+        for (const other of remaining)
+          if (
+            distance(members[i], other) <= 240 &&
+            nav.clearLine(members[i], other)
+          ) {
+            remaining.delete(other);
+            members.push(other);
+          }
+      const id = ++uid;
+      const mean = (points) =>
+        points.reduce(
+          (c, p) => ({
+            x: c.x + p.x / points.length,
+            y: c.y + p.y / points.length,
+          }),
+          { x: 0, y: 0 },
+        );
+      const anchor = mean(members),
+        destination = marchPoint(p);
+      for (const u of members) {
+        u.order.formation = id;
+        u.formation.id = id;
+        u.sharedRouteRevision = null;
+      }
       state.formations.push({
-        id: formationId,
-        members: sorted.map((u) => u.id),
-        anchor: { ...center },
-        destination: p,
+        id,
+        members: members.map((u) => u.id),
+        anchor,
+        routeStart: findFree(anchor),
+        destination: findFree(destination),
         path: [],
+        sharedRoute: true,
+        routeReady: false,
         revision: nav.revision,
-        speed: Math.min(...sorted.map((u) => TYPES[u.type].speed)),
+        speed: Math.min(...members.map((u) => TYPES[u.type].speed)),
         arrived: false,
         wait: 0,
         escortId: escort?.id || null,
       });
+    }
     for (const u of units.filter(
       (u) => u.type === "worker" && !combat.includes(u),
     )) {
@@ -4054,7 +5493,7 @@
       toast(
         "The company will guard and follow the caravan. Defeat nearby threats to keep it moving.",
       );
-    sound("order");
+    if (!enemy) sound("order");
     updateUI();
   }
   function selectArmy() {
@@ -4139,6 +5578,18 @@
     updateUI();
   }
   function surfaceDistance(u, target) {
+    if (target.kind === "wall" && Number.isFinite(target.wallAngle))
+      return Math.max(
+        0,
+        Math.min(
+          ...wallArms(target).map((arm) =>
+            segmentDistance(u, target, {
+              x: target.x + arm.x,
+              y: target.y + arm.y,
+            }),
+          ),
+        ) - (target.fortified ? 24 : 15),
+      );
     return target.w
       ? Math.hypot(
           Math.max(0, Math.abs(u.x - target.x) - target.w / 2),
@@ -4281,14 +5732,26 @@
           contact.expires < state.time
         ) {
           const candidates = [];
+          const arms =
+            b.kind === "wall" && Number.isFinite(b.wallAngle)
+              ? wallArms(b)
+              : null;
+          const halfW = arms
+            ? Math.max(...arms.map((a) => Math.abs(a.x))) +
+              (b.fortified ? 24 : 15)
+            : b.w / 2;
+          const halfH = arms
+            ? Math.max(...arms.map((a) => Math.abs(a.y))) +
+              (b.fortified ? 24 : 15)
+            : b.h / 2;
           for (let i = 0; i < 24; i++) {
             const angle = (i * Math.PI) / 12,
               cx = Math.cos(angle),
               cy = Math.sin(angle);
             const radius =
               Math.min(
-                b.w / 2 / Math.max(0.01, Math.abs(cx)),
-                b.h / 2 / Math.max(0.01, Math.abs(cy)),
+                halfW / Math.max(0.01, Math.abs(cx)),
+                halfH / Math.max(0.01, Math.abs(cy)),
               ) + 10;
             const p = { x: b.x + cx * radius, y: b.y + cy * radius };
             if (groundFree(p.x, p.y, 6)) candidates.push(p);
@@ -4314,13 +5777,14 @@
         u.workPhase %= 1;
         sound("build", u);
         for (let i = 0; i < 4; i++)
-          state.particles.push({
+          emitParticle({
             x: u.x + Math.cos(u.angle) * 15,
             y: u.y + Math.sin(u.angle) * 15,
             vx: Math.cos(i * 2) * 24,
             vy: Math.sin(i * 2) * 24,
             t: 0,
             life: 0.55,
+            sprite: "spark_01",
             color: i % 2 ? "#c9ac77" : "#877452",
             r: 1.5,
           });
@@ -4331,7 +5795,10 @@
           constructionFinished(u, b);
           return;
         }
-        const progress = Math.min(1 - b.progress, dt / BUILDINGS[b.kind].time);
+        const progress = Math.min(
+          1 - b.progress,
+          dt / BUILDINGS[b.fortified ? "bastionwall" : b.kind].time,
+        );
         b.progress = Math.min(1, b.progress + progress);
         b.hp = Math.min(b.maxHp, b.hp + b.maxHp * 0.8 * progress);
         if (b.progress >= 1) {
@@ -4451,11 +5918,11 @@
           u.x = p.x;
           u.y = p.y;
           u.moving = true;
-          u.anim += dt * 10;
+          if (visualActive(u)) u.anim += dt * 10;
           return;
         }
         if (farm || surfaceDistance(u, target) > 60) {
-          moveUnit(u, edgePoint(u, target, 12), dt);
+          moveUnit(u, farm ? workSpot : edgePoint(u, target, 12), dt);
           return;
         }
       }
@@ -4480,7 +5947,7 @@
         sound(job.resource, u);
         if (!farm)
           for (let i = 0; i < 3; i++)
-            state.particles.push({
+            emitParticle({
               x: u.x + Math.cos(u.angle) * 16,
               y: u.y + Math.sin(u.angle) * 16,
               vx: Math.cos(i * 2) * 20,
@@ -4658,15 +6125,15 @@
     }
     if (best) return best;
     return (
-      state.buildings
+      nearbyStructures(u, r)
         .filter(
           (b) =>
             b.team !== u.team &&
             b.team !== 2 &&
             !b.cityCenter &&
             b.hp > 0 &&
-            observerSees(u, b) &&
             distance(u, b) < r + b.r &&
+            observerSees(u, b) &&
             (mayPursue || surfaceDistance(u, b) <= TYPES[u.type].range + 15),
         )
         .sort((a, b) => distance(a, u) - distance(b, u))[0] || null
@@ -4681,6 +6148,7 @@
       target: target.id,
       team: u.team,
       damage,
+      siege: u.type === "ballista",
       life: 2.5,
       sx: u.x,
       sy: u.y,
@@ -4710,7 +6178,10 @@
     )
       return;
     const fortified =
-      target.kind === "wall" || target.kind === "gate" || target.gate;
+      target.kind === "wall" ||
+      target.kind === "gate" ||
+      target.gate ||
+      target.wallAttachment;
     const armored = fortified
       ? siege
         ? 3
@@ -4760,14 +6231,17 @@
         );
         sound("horn");
       } else toast(BUILDINGS[target.kind].name + " has fallen.");
+      sound("collapse", target);
       for (let i = 0; i < 24; i++)
-        state.particles.push({
+        emitParticle({
           x: target.x,
           y: target.y,
           vx: (Math.random() - 0.5) * 190,
           vy: (Math.random() - 0.5) * 190,
           t: 0,
           life: 1,
+          sprite: "dirt_01",
+          growth: 1.2,
           color: i % 2 ? "#c3aa79" : "#6d5b42",
           r: 3,
         });
@@ -4797,7 +6271,7 @@
       blood(target.x, target.y, 35);
     } else
       for (let i = 0; i < 8; i++)
-        state.particles.push({
+        emitParticle({
           x: target.x,
           y: target.y,
           vx: (Math.random() - 0.5) * 65,
@@ -4810,7 +6284,7 @@
   }
   function blood(x, y, count) {
     for (let i = 0; i < count; i++)
-      state.particles.push({
+      emitParticle({
         x,
         y,
         vx: (Math.random() - 0.5) * 130,
@@ -4844,16 +6318,38 @@
       if (u.deployment === "packed" && u.order) marchUnit(u, dt);
       return;
     }
+    const commanded = u.manualTarget ? getObject(u.target) : null;
+    if (
+      u.manualTarget &&
+      (!commanded || commanded.team === u.team || commanded.team === 2)
+    ) {
+      u.manualTarget = false;
+      u.target = null;
+      u.order = null;
+      u.pendingOrder = null;
+      u.fireTarget = null;
+    }
     let target = u.target ? getObject(u.target) : null;
     if (
       target?.team === u.team ||
       target?.team === 2 ||
-      (target && !observerSees(u, target))
+      (target && !u.manualTarget && !observerSees(u, target))
     )
       target = null;
     if (u.deployment === "deployed") {
       if (u.hold) return;
       if (u.fireTarget) target = u.fireTarget;
+      if (
+        target &&
+        u.manualTarget &&
+        (distance(u, target) < 180 || distance(u, target) > 690)
+      ) {
+        if (u.team === 0) return;
+        u.deployment = "packing";
+        u.deployTimer = 4;
+        u.pendingOrder = { x: target.x, y: target.y, attack: true };
+        return;
+      }
       if (target && (distance(u, target) < 180 || distance(u, target) > 690))
         target = null;
       if (!target) {
@@ -4911,9 +6407,18 @@
       return;
     }
     if (u.order) {
-      if (u.order.attack && u.team === 1 && (u.stance || "fight") === "fight") {
+      if (
+        u.order.attack &&
+        (u.team === 1 || u.manualTarget) &&
+        (u.stance || "fight") === "fight"
+      ) {
         target = target || acquire(u, 690);
-        if (target && distance(u, target) < 620 && distance(u, target) > 210) {
+        if (
+          target &&
+          distance(u, target) < 620 &&
+          distance(u, target) > 210 &&
+          u.team !== 0
+        ) {
           u.target = target.id;
           u.deployment = "setting-up";
           u.deployTimer = 6;
@@ -4952,18 +6457,30 @@
       siegeAI(u, dt);
       return;
     }
+    const commanded = u.manualTarget ? getObject(u.target) : null;
+    if (
+      u.manualTarget &&
+      (!commanded || commanded.team === u.team || commanded.team === 2)
+    ) {
+      u.manualTarget = false;
+      u.target = null;
+      u.order = null;
+      u.pendingOrder = null;
+      u.fireTarget = null;
+    }
     let target = u.target ? getObject(u.target) : null;
     if (
       target &&
       (target.team === u.team ||
         target.team === 2 ||
-        !observerSees(u, target) ||
+        (!u.manualTarget && !observerSees(u, target)) ||
         (distance(u, target) > 650 && !u.manualTarget))
     )
       target = null;
     const autonomous = (u.stance || "fight") === "fight" && !u.hold;
     if (
       !autonomous &&
+      !u.manualTarget &&
       target &&
       surfaceDistance(u, target) > TYPES[u.type].range + (target.kind ? 15 : 5)
     )
@@ -5015,7 +6532,7 @@
     }
     if (target && u.type === "archer")
       u.aimAngle = Math.atan2(target.y - u.y, target.x - u.x);
-    if (target && u.type === "archer" && autonomous) {
+    if (target && u.type === "archer" && autonomous && !u.manualTarget) {
       const threat = nearby(u, 100)
         .filter(
           (e) =>
@@ -5057,7 +6574,7 @@
       u.angle = Math.atan2(target.y - u.y, target.x - u.x);
       if (d <= range) {
         if (u.cooldown <= 0) fire(u, target);
-      } else if (autonomous) {
+      } else if (autonomous || u.manualTarget) {
         let goal = target.kind
           ? edgePoint(u, target, 16)
           : { x: target.x, y: target.y };
@@ -5102,8 +6619,8 @@
     if (stock(u.team).food < 1) n *= 0.75;
     if (nearby(u, 180).some((a) => a.team === u.team && a.type === "standard"))
       n *= 1.12;
-    if (u.type === "archer") projectile(u, target, n);
-    else damage(target, n, u);
+    if (u.type === "archer" || u.type === "ballista") projectile(u, target, n);
+    else damage(target, n, u, u.type === "ram" || u.type === "ballista");
     sound(u.type === "archer" ? "arrow" : "hit", u);
   }
   const DIFFICULTIES = {
@@ -5132,85 +6649,130 @@
       grace: 180,
     },
   };
+  function defensivePlots(base, radius = 640) {
+    const plots = [],
+      seen = new Set(),
+      snap = (n) => Math.round(n / 32) * 32;
+    const phase = ((base.id || 0) % 7) * 0.035;
+    for (const [layer, scale] of (base.fortressShape?.layers === 3
+      ? [1, 0.72, 0.44]
+      : radius >= 600
+        ? [1, 0.64]
+        : [1]
+    ).entries()) {
+      const ring = Array.from({ length: 16 }, (_, i) => {
+        const angle = (i * Math.PI) / 8 + phase,
+          bulge = i % 4 === 0 ? 1.13 : i % 2 ? 0.94 : 1.04;
+        return {
+          x: snap(
+            clamp(
+              base.x +
+                Math.cos(angle) *
+                  radius *
+                  scale *
+                  bulge *
+                  (base.fortressShape?.x || 1),
+              128,
+              W - 128,
+            ),
+          ),
+          y: snap(
+            clamp(
+              base.y +
+                Math.sin(angle) *
+                  radius *
+                  scale *
+                  bulge *
+                  (base.fortressShape?.y || 1),
+              128,
+              H - 128,
+            ),
+          ),
+        };
+      });
+      for (let edge = 0; edge < ring.length; edge++) {
+        const a = ring[edge],
+          b = ring[(edge + 1) % ring.length],
+          points = wallLine(a, b),
+          angle = Math.atan2(b.y - a.y, b.x - a.x),
+          middle = Math.floor(points.length / 2);
+        for (let i = 0; i < points.length; i++) {
+          const p = points[i],
+            key = p.x + "," + p.y;
+          if (seen.has(key)) continue;
+          seen.add(key);
+          if (edge % 4 === 1 && i === middle && points[i + 1]) {
+            const q = points[++i];
+            seen.add(q.x + "," + q.y);
+            plots.push({
+              kind: "gate",
+              hp: 18000,
+              maxHp: 18000,
+              bastionGate: true,
+              x: (p.x + q.x) / 2,
+              y: (p.y + q.y) / 2,
+              gateAngle: angle,
+              gateSegments: [p, q].map((part) => ({
+                ...part,
+                w: 32,
+                h: 32,
+                wallAngle: angle,
+                fortified: true,
+                links: {
+                  forward: { x: (q.x - p.x) / 2, y: (q.y - p.y) / 2 },
+                  backward: { x: (p.x - q.x) / 2, y: (p.y - q.y) / 2 },
+                },
+              })),
+              w: Math.abs(q.x - p.x) + 32,
+              h: Math.abs(q.y - p.y) + 32,
+              closed: false,
+              defenceLayer: layer,
+            });
+          } else if (
+            i === 0 ||
+            (i % 10 === 5 && !(edge % 4 === 1 && Math.abs(i - middle) < 4))
+          )
+            plots.push({
+              kind: "tower",
+              ...p,
+              hp: 11000,
+              maxHp: 11000,
+              w: 48,
+              h: 48,
+              wallAttachment: {
+                ...p,
+                w: 32,
+                h: 32,
+                fortified: true,
+                wallAngle: angle,
+                links: {},
+              },
+              defenceLayer: layer,
+            });
+          else
+            plots.push({
+              kind: "bastionwall",
+              ...p,
+              wallAngle: angle,
+              defenceLayer: layer,
+            });
+        }
+      }
+    }
+    return plots;
+  }
   function enemyFortifications(base, ws) {
     const ai = state.enemy;
-    if (!ai.fortification) {
-      const owned = completeBuildings(null, 1).filter(
-        (b) =>
-          !["wall", "gate", "tower"].includes(b.kind) &&
-          distance(b, base) < 750,
-      );
-      const snap = (n) => Math.round(n / 32) * 32;
-      const left = snap(
-          Math.max(96, Math.min(...owned.map((b) => b.x - b.w / 2)) - 96),
-        ),
-        right = snap(
-          Math.min(W - 96, Math.max(...owned.map((b) => b.x + b.w / 2)) + 96),
-        );
-      const top = snap(
-          Math.max(96, Math.min(...owned.map((b) => b.y - b.h / 2)) - 96),
-        ),
-        bottom = snap(
-          Math.min(H - 96, Math.max(...owned.map((b) => b.y + b.h / 2)) + 96),
-        );
-      const cx = snap((left + right) / 2),
-        cy = snap((top + bottom) / 2),
-        plots = [];
-      const gates = [
-        { x: left, y: cy, rotation: 90 },
-        { x: right, y: cy, rotation: 90 },
-        { x: cx, y: top, rotation: 0 },
-        { x: cx, y: bottom, rotation: 0 },
-      ];
-      for (const g of gates) plots.push({ kind: "gate", ...g });
-      for (const [a, b] of [
-        [
-          { x: left, y: top },
-          { x: left, y: bottom },
-        ],
-        [
-          { x: right, y: top },
-          { x: right, y: bottom },
-        ],
-        [
-          { x: left, y: top },
-          { x: right, y: top },
-        ],
-        [
-          { x: left, y: bottom },
-          { x: right, y: bottom },
-        ],
-      ])
-        for (const point of wallLine(a, b)) {
-          if (
-            gates.some((g) => distance(g, point) < 80) ||
-            plots.some((p) => distance(p, point) < 1)
-          )
-            continue;
-          plots.push({ kind: "wall", ...point });
-        }
-      for (const g of gates)
-        for (const sign of [-1, 1])
-          plots.push({
-            kind: "wall",
-            x: g.x + (g.rotation === 0 ? 56 * sign : 0),
-            y: g.y + (g.rotation === 90 ? 56 * sign : 0),
-          });
-      for (const p of [
-        { x: left + 80, y: top + 80 },
-        { x: left + 80, y: bottom - 80 },
-        { x: right - 80, y: top + 80 },
-        { x: right - 80, y: bottom - 80 },
-      ])
-        plots.push({ kind: "tower", ...p });
-      plots.sort(
-        (a, b) =>
-          (a.kind === "gate" ? 0 : a.kind === "tower" ? 1 : 2) -
-            (b.kind === "gate" ? 0 : b.kind === "tower" ? 1 : 2) ||
-          distance(a, base) - distance(b, base),
-      );
-      ai.fortification = { plots, left, right, top, bottom };
-    }
+    ai.fortifications ||= {};
+    ai.fortifications[base.id] ||= {
+      plots: defensivePlots(
+        base,
+        state.mode !== "quickmatch" && base.id === state.capitals?.enemy
+          ? 896
+          : 640,
+      ),
+    };
+    const fortification = ai.fortifications[base.id];
     const active = state.buildings.filter(
       (b) => b.team === 1 && b.defence && b.hp > 0 && b.progress < 1,
     );
@@ -5220,10 +6782,11 @@
           !["build", "repair"].includes(u.job?.kind) &&
           u.fleeUntil <= state.time,
       )
+      .sort((a, b) => distance(a, base) - distance(b, base))
       .slice(0, Math.max(1, Math.floor(ws.length / 4)));
     if (!builders.length || active.length >= 8) return;
     const ids = [];
-    for (const p of ai.fortification.plots) {
+    for (const p of fortification.plots) {
       if (ids.length >= 3 || ids.length + active.length >= 8) break;
       if (
         state.buildings.some(
@@ -5233,23 +6796,47 @@
         continue;
       if (!afford(BUILDINGS[p.kind].cost, 1)) continue;
       const spec = BUILDINGS[p.kind];
-      if (!validSite(p.kind, p, 1, p.rotation || 0)) continue;
+      if (
+        !validSite(
+          p.wallAttachment ? "wall" : p.kind,
+          p,
+          1,
+          p.rotation || 0,
+          p.w ? p : null,
+        )
+      )
+        continue;
       pay(spec.cost, 1, 1);
       const b = makeBuilding(p.kind, 1, p.x, p.y, 0, {
-        rotation: p.rotation || 0,
-        closed: false,
+        ...p,
+        kind: p.kind === "bastionwall" ? "wall" : p.kind,
         defence: true,
-        wallAngle:
-          Math.abs(p.x - ai.fortification.left) < 1 ||
-          Math.abs(p.x - ai.fortification.right) < 1
-            ? Math.PI / 2
-            : 0,
       });
+      if (p.maxHp) {
+        b.maxHp = p.maxHp;
+        b.hp = p.maxHp * 0.2;
+      }
       state.buildings.push(b);
       ids.push(b.id);
       state.navDirty = true;
     }
     if (ids.length) queueConstruction(builders, ids, false);
+    else {
+      const survey = fortification.plots.find((p) => !enemyFog.remembers(p));
+      const worker = builders.find((u) => !u.order);
+      if (survey && worker) {
+        const angle = Math.atan2(base.y - survey.y, base.x - survey.x);
+        worker.job = null;
+        worker.order = {
+          ...findFree({
+            x: survey.x + Math.cos(angle) * 80,
+            y: survey.y + Math.sin(angle) * 80,
+          }),
+          attack: false,
+        };
+        worker.pathTimer = 0;
+      }
+    }
   }
   function enemyEconomy(dt) {
     const ai = state.enemy,
@@ -5262,6 +6849,11 @@
     const ws = workers(1),
       army = fighters(1),
       pop = population(1);
+    for (const u of army)
+      if (u.garrisonBase && !getObject(u.garrisonBase)) {
+        delete u.garrisonBase;
+        u.home = null;
+      }
     const known = Object.values(enemyFog.known).filter(
       (b) => b.team === 0 && b.hp > 0,
     );
@@ -5289,7 +6881,7 @@
       pop.queued++;
       return true;
     }
-    function build(kind) {
+    function build(kind, settlement = base) {
       if (
         !afford(BUILDINGS[kind].cost, 1) ||
         state.buildings.some(
@@ -5302,7 +6894,10 @@
       for (let i = 0; i < 100; i++) {
         const a = i * 2.399,
           r = 310 + Math.floor(i / 12) * 65,
-          p = { x: base.x + Math.cos(a) * r, y: base.y + Math.sin(a) * r };
+          p = {
+            x: settlement.x + Math.cos(a) * r,
+            y: settlement.y + Math.sin(a) * r,
+          };
         if (!validSite(kind, p, 1)) continue;
         pay(BUILDINGS[kind].cost, 1, 1);
         const b = makeBuilding(kind, 1, p.x, p.y, 0);
@@ -5317,19 +6912,79 @@
       }
       return false;
     }
+    if (
+      state.time > 180 &&
+      completeBuildings("towncenter", 1).length < 4 &&
+      !state.buildings.some(
+        (b) => b.team === 1 && b.kind === "towncenter" && b.progress < 1,
+      ) &&
+      ws.length >= 8
+    ) {
+      const resource = state.nodes
+        .filter(
+          (n) =>
+            n.remaining > 0 &&
+            enemyFog.remembers(n) &&
+            completeBuildings("towncenter", 1).every(
+              (b) => distance(b, n) > 1500,
+            ),
+        )
+        .sort((a, b) => distance(a, base) - distance(b, base))[0];
+      if (resource && afford(BUILDINGS.towncenter.cost, 1)) {
+        for (let i = 0; i < 32; i++) {
+          const p = {
+            x: resource.x + Math.cos(i * 2.399) * 300,
+            y: resource.y + Math.sin(i * 2.399) * 300,
+          };
+          if (!validSite("towncenter", p, 1)) continue;
+          pay(BUILDINGS.towncenter.cost, 1, 1);
+          const outpost = makeBuilding("towncenter", 1, p.x, p.y, 0);
+          state.buildings.push(outpost);
+          state.navDirty = true;
+          queueConstruction(
+            ws.filter((u) => u.job?.kind !== "build").slice(0, 3),
+            [outpost.id],
+            false,
+          );
+          break;
+        }
+      }
+    }
     if (pop.cap - pop.used - pop.queued < 5) build("house");
     if (ws.length < plan.workers) train("worker");
     for (const kind of ["lumbercamp", "miningcamp", "mill"])
       if (!completeBuildings(kind, 1).length) build(kind);
     const farms = completeBuildings("farm", 1).filter((b) => b.remaining > 0);
     if (farms.length < Math.ceil(ws.length / 7)) build("farm");
-    if (state.time > 45 && ws.length >= 6) enemyFortifications(base, ws);
+    if (state.time > 45 && ws.length >= 6)
+      for (const settlement of completeBuildings("towncenter", 1))
+        enemyFortifications(settlement, ws);
     for (const kind of ["barracks", "stable", "chapel", "siegeworkshop"])
       if (
         !completeBuildings(kind, 1).length &&
         (kind !== "siegeworkshop" || state.time > 150)
       )
         build(kind);
+    for (const settlement of completeBuildings("towncenter", 1).slice(1)) {
+      if (
+        !completeBuildings("barracks", 1).some(
+          (b) => distance(b, settlement) < 900,
+        )
+      )
+        build("barracks", settlement);
+      const stationed = army.filter((u) => u.garrisonBase === settlement.id);
+      for (const u of army
+        .filter((u) => !u.scout && !u.garrisonBase && !u.order && !u.target)
+        .slice(0, Math.max(0, 6 - stationed.length))) {
+        u.garrisonBase = settlement.id;
+        u.home = findFree({
+          x: settlement.x + ((u.id % 3) - 1) * 90,
+          y: settlement.y + 190,
+        });
+        u.order = { ...u.home, attack: true };
+        u.pathTimer = 0;
+      }
+    }
     const damaged = completeBuildings(null, 1).filter(
       (b) =>
         b.hp < b.maxHp * (b.defence ? 0.9 : 0.7) &&
@@ -5377,8 +7032,10 @@
       "chaplain",
       "standard",
       "trebuchet",
+      "ram",
+      "ballista",
     ];
-    for (let i = 0; i < (state.difficulty === "hard" ? 2 : 1); i++)
+    for (let i = 0; i < (state.difficulty === "hard" ? 4 : 2); i++)
       train(cycle[(army.length + i) % cycle.length]);
     if (state.difficulty !== "easy" && state.time > 300) {
       for (const type of ["sword", "archer", "knight"]) {
@@ -5411,7 +7068,10 @@
     const scoutLimit =
       state.difficulty === "hard" ? 3 : state.difficulty === "easy" ? 1 : 2;
     for (const u of army
-      .filter((u) => !u.scout && ["knight", "archer"].includes(u.type))
+      .filter(
+        (u) =>
+          !u.scout && !u.garrisonBase && ["knight", "archer"].includes(u.type),
+      )
       .slice(0, Math.max(0, scoutLimit - scouts.length))) {
       u.scout = true;
       u.squad = null;
@@ -5448,14 +7108,17 @@
       }
     const active = army.filter((u) => !u.scout),
       visibleThreats = state.units.filter(
-        (u) => u.team === 0 && enemyFog.sees(u) && distance(u, base) < 850,
+        (u) =>
+          u.team === 0 &&
+          enemyFog.sees(u) &&
+          completeBuildings("towncenter", 1).some((b) => distance(u, b) < 950),
       );
     if (visibleThreats.length) {
       const target = visibleThreats.sort(
         (a, b) => distance(a, base) - distance(b, base),
       )[0];
       const defenders = active.filter(
-        (u) => !u.order?.formation && distance(u, base) < 950,
+        (u) => !u.order?.formation && distance(u, target) < 1200,
       );
       if (defenders.length > 2) {
         const id = ++uid,
@@ -5480,12 +7143,18 @@
             x: goal.x - destination.x,
             y: goal.y - destination.y,
           };
-          u.pathTimer = 0;
+          u.path = [];
+          u.pathGoal = null;
+          u.pathRequest = null;
+          u.stuck = 0;
         });
         state.formations.push({
           id,
           members: defenders.map((u) => u.id),
           anchor: center,
+          routeStart: findFree(center),
+          sharedRoute: true,
+          routeReady: false,
           destination,
           path: [],
           revision: nav.revision,
@@ -5497,7 +7166,15 @@
       return;
     }
     const healthy = active.filter(
-      (u) => u.hp / u.maxHp > plan.retreat && distance(u, base) < 1200,
+      (u) =>
+        !u.garrisonBase &&
+        !u.campaignPost &&
+        !u.fixedDefense &&
+        !u.curtainGuard &&
+        !u.regionalMission &&
+        !u.order?.formation &&
+        u.hp / u.maxHp > plan.retreat &&
+        distance(u, base) < 1200,
     );
     // Reinforcements muster at home instead of trickling into the battle.
     for (const u of active)
@@ -5520,11 +7197,7 @@
       known.length &&
       healthy.length >= plan.attack &&
       state.time >= plan.grace &&
-      state.time - ai.attack > 100 &&
-      !state.formations.some(
-        (f) =>
-          !f.arrived && f.members.some((id) => active.some((u) => u.id === id)),
-      )
+      state.time - ai.attack > 65
     ) {
       ai.attack = state.time;
       if (ai.faith >= 30 && state.difficulty !== "easy") {
@@ -5582,7 +7255,10 @@
           x: goal.x - destination.x,
           y: goal.y - destination.y,
         };
-        u.pathTimer = 0;
+        u.path = [];
+        u.pathGoal = null;
+        u.pathRequest = null;
+        u.stuck = 0;
         if (u.type === "trebuchet" && u.deployment === "deployed") {
           u.deployment = "packing";
           u.deployTimer = 4;
@@ -5595,6 +7271,9 @@
           id: formationId,
           members: group.map((u) => u.id),
           anchor: { ...center },
+          routeStart: findFree(center),
+          sharedRoute: true,
+          routeReady: false,
           destination,
           path: [],
           revision: nav.revision,
@@ -5604,8 +7283,226 @@
         });
     }
   }
+  function regionalCompany(members, destination, base) {
+    if (!members.length) return;
+    const id = ++uid,
+      center = members.reduce(
+        (p, u) => ({
+          x: p.x + u.x / members.length,
+          y: p.y + u.y / members.length,
+        }),
+        { x: 0, y: 0 },
+      ),
+      goal = findFree(destination),
+      angle = Math.atan2(goal.y - center.y, goal.x - center.x);
+    members.forEach((u, i) => {
+      const rear = Math.floor(i / 5) * 48 + (u.type === "trebuchet" ? 380 : 0),
+        side = ((i % 5) - 2) * 48,
+        p = findFree({
+          x: goal.x - Math.cos(angle) * rear - Math.sin(angle) * side,
+          y: goal.y - Math.sin(angle) * rear + Math.cos(angle) * side,
+        });
+      const order = { ...p, attack: true, formation: id };
+      u.regionalMission = base.id;
+      u.order = order;
+      u.marchOffset = { x: p.x - goal.x, y: p.y - goal.y };
+      u.path = [];
+      u.pathGoal = null;
+      u.pathRequest = null;
+      if (u.type === "trebuchet" && u.deployment !== "packed") {
+        u.deployment = "packing";
+        u.deployTimer = 4;
+        u.pendingOrder = order;
+        u.order = null;
+      }
+    });
+    state.formations.push({
+      id,
+      members: members.map((u) => u.id),
+      anchor: center,
+      routeStart: findFree(center),
+      destination: goal,
+      sharedRoute: true,
+      routeReady: false,
+      path: [],
+      revision: nav.revision,
+      speed: Math.min(...members.map((u) => TYPES[u.type].speed)),
+      arrived: false,
+      wait: 0,
+    });
+  }
+  function regionalAI(dt) {
+    state.regionalThink = (state.regionalThink || 0) - dt;
+    if (state.regionalThink > 0) return;
+    state.regionalThink = 5;
+    state.regions ||= {};
+    state.cityEconomies ||= {};
+    const level = state.mode === "campaign" ? state.level : 0,
+      scale = DIFFICULTIES[state.difficulty]?.think || 6;
+    for (const base of state.buildings.filter(
+      (b) =>
+        b.kind === "towncenter" &&
+        [1, 3].includes(b.team) &&
+        b.hp > 0 &&
+        b.progress >= 1,
+    )) {
+      const city =
+        base.team === 3 ? state.cities.find((c) => c.id === base.city) : null;
+      if (base.team === 3 && (!city || city.captured)) continue;
+      const sight = base.team === 3 ? militiaFog : enemyFog;
+      if (!sight) continue;
+      const region = (state.regions[base.id] ||= {
+        patrolAt: state.time + 70 + (base.id % 4) * 12,
+        invasionAt: state.time + Math.max(80, 180 - level * 17),
+        phase: 0,
+        patrols: 0,
+        invasions: 0,
+      });
+      const troops = fighters(base.team).filter(
+        (u) =>
+          (base.team === 3 ? u.city === city.id : !u.campaignPost) &&
+          !u.fixedDefense &&
+          !u.curtainGuard &&
+          !u.scout &&
+          distance(u, base) < (city?.radius || 1400),
+      );
+      for (const u of troops)
+        if (
+          u.regionalMission === base.id &&
+          !u.order &&
+          !u.pendingOrder &&
+          !u.target
+        )
+          delete u.regionalMission;
+      const available = troops.filter(
+        (u) =>
+          !u.order?.formation &&
+          !u.pendingOrder &&
+          !u.regionalMission &&
+          u.hp / u.maxHp > 0.55,
+      );
+      if (city) {
+        const economy = (state.cityEconomies[city.id] ||= {
+          food: 700,
+          wood: 700,
+          gold: 900,
+          stone: 500,
+          time: state.time,
+          cycle: 0,
+        });
+        const elapsed = Math.min(10, state.time - economy.time),
+          citizens = state.units.filter(
+            (u) => u.city === city.id && u.type === "civilian" && u.hp > 0,
+          ).length;
+        economy.time = state.time;
+        for (const [resource, share] of Object.entries({
+          food: 0.4,
+          wood: 0.25,
+          gold: 0.25,
+          stone: 0.1,
+        }))
+          economy[resource] = Math.min(
+            3000,
+            economy[resource] + elapsed * citizens * 0.8 * share,
+          );
+        if (
+          state.units.filter(
+            (u) => u.city === city.id && u.team === 3 && u.hp > 0,
+          ).length <
+          110 + level * 8
+        ) {
+          const cycle = ["sword", "archer", "sword", "knight", "archer"],
+            type = cycle[economy.cycle % cycle.length],
+            spec = TYPES[type];
+          const producer = state.buildings
+            .filter(
+              (b) =>
+                b.city === city.id &&
+                b.team === 3 &&
+                b.kind === spec.producer &&
+                b.progress >= 1 &&
+                b.hp > 0,
+            )
+            .sort((a, b) => a.queue.length - b.queue.length)[0];
+          if (
+            producer &&
+            producer.queue.length < 2 &&
+            Object.entries(spec.cost).every(([r, n]) => economy[r] >= n)
+          ) {
+            for (const [r, n] of Object.entries(spec.cost)) economy[r] -= n;
+            producer.queue.push({
+              kind: "unit",
+              type,
+              time: 0,
+              duration: spec.train,
+              cost: { ...spec.cost },
+            });
+            economy.cycle++;
+          }
+        }
+      }
+      const known = Object.values(sight.known)
+        .filter((b) => b.team === 0 && b.hp > 0 && distance(b, base) < 6000)
+        .sort((a, b) => distance(a, base) - distance(b, base));
+      const reserve = city ? 28 + level * 4 : 8;
+      if (
+        state.time >= region.invasionAt &&
+        known.length &&
+        available.length >= reserve + 8
+      ) {
+        const size = Math.min(24, available.length - reserve),
+          target = known[0];
+        regionalCompany(
+          available
+            .sort((a, b) => distance(a, target) - distance(b, target))
+            .slice(0, size),
+          target,
+          base,
+        );
+        region.invasions++;
+        region.invasionAt =
+          state.time + Math.max(65, 150 - level * 10) * (scale / 6);
+        continue;
+      }
+      if (state.time >= region.patrolAt && available.length >= reserve + 4) {
+        const angle = region.phase++ * 1.91 + base.id * 0.17,
+          radius =
+            (city?.radius || 700) + 250 + Math.min(1800, region.phase * 220),
+          destination = {
+            x: clamp(base.x + Math.cos(angle) * radius, 250, W - 250),
+            y: clamp(base.y + Math.sin(angle) * radius, 250, H - 250),
+          };
+        const gate = state.buildings
+          .filter(
+            (b) =>
+              b.team === base.team &&
+              b.kind === "gate" &&
+              b.hp > 0 &&
+              (city ? b.city === city.id : distance(b, base) < 1800),
+          )
+          .sort(
+            (a, b) => distance(a, destination) - distance(b, destination),
+          )[0];
+        regionalCompany(
+          available
+            .sort(
+              (a, b) =>
+                distance(a, gate || destination) -
+                distance(b, gate || destination),
+            )
+            .slice(0, 4),
+          destination,
+          base,
+        );
+        region.patrols++;
+        region.patrolAt =
+          state.time + Math.max(55, 110 - level * 9) * (scale / 6);
+      }
+    }
+  }
   function strategicAI(dt) {
     enemyEconomy(dt);
+    regionalAI(dt);
   }
   function civilianAI(u, dt) {
     const threats = nearby(u, 180).filter(
@@ -5646,9 +7543,20 @@
             "merchant",
           ].includes(a.type),
       ),
-      danger = nearby(u, 210).some(
-        (a) => a.team === 1 && TYPES[a.type].damage > 0,
-      );
+      danger =
+        nearby(u, 260).some(
+          (a) => a.team !== 0 && a.team !== 2 && TYPES[a.type].damage > 0,
+        ) ||
+        state.buildings.some(
+          (b) =>
+            b.team !== 0 &&
+            b.team !== 2 &&
+            b.hp > 0 &&
+            b.progress >= 1 &&
+            BUILDINGS[b.kind].damage &&
+            distance(b, u) < BUILDINGS[b.kind].range + 50 &&
+            playerSees(b),
+        );
     u.escortWaiting = !escort || danger;
     if (u.escortWaiting) return;
     const goal = u.route[u.routeIndex];
@@ -5657,8 +7565,14 @@
       u.routeIndex++;
       u.pathTimer = 0;
       if (u.routeIndex >= u.route.length) {
-        state.stats.rescued++;
-        toast("A pilgrim caravan has reached the refuge.");
+        if (u.type === "merchant")
+          state.stats.delivered = (state.stats.delivered || 0) + 1;
+        else state.stats.rescued++;
+        toast(
+          u.type === "merchant"
+            ? "A supply caravan has reached the road settlement."
+            : "A pilgrim caravan has reached the refuge.",
+        );
         u.evacuated = true;
         u.hp = 0;
       }
@@ -5666,6 +7580,7 @@
   }
   function objectiveState() {
     const l = LEVELS[state.level],
+      rules = state.campaignRules,
       fort = state.buildings[1];
     if (state.mode === "quickmatch") {
       const remaining = state.buildings.filter(
@@ -5683,18 +7598,21 @@
         food = state.stats.gathered.food;
       return {
         progress:
-          (Math.min(2, farms) / 2 +
-            Math.min(200, food) / 200 +
+          (Math.min(rules?.farms || 2, farms) / (rules?.farms || 2) +
+            Math.min(rules?.food || 200, food) / (rules?.food || 200) +
             (fort.team === 0 ? 1 : 0)) /
           3,
-        text: `Farms ${Math.min(2, farms)}/2 · food gathered ${Math.floor(Math.min(200, food))}/200 · outpost ${fort.team === 0 ? "secured" : "unclaimed"}`,
-        won: farms >= 2 && food >= 200 && fort.team === 0,
+        text: `Farms ${Math.min(rules?.farms || 2, farms)}/${rules?.farms || 2} · food gathered ${Math.floor(Math.min(rules?.food || 200, food))}/${rules?.food || 200} · outpost ${fort.team === 0 ? "secured" : "unclaimed"}`,
+        won:
+          farms >= (rules?.farms || 2) &&
+          food >= (rules?.food || 200) &&
+          fort.team === 0,
       };
     }
     if (l.kind === "escort") {
-      const tower = completeBuildings("tower").some(
-          (b) => distance(b, { x: riverX(1150), y: 1150 }) < 280,
-        ),
+      const tower = completeBuildings(null)
+          .filter((b) => ["tower", "watchtower"].includes(b.kind))
+          .some((b) => distance(b, { x: riverX(1150), y: 1150 }) < 280),
         rescued = state.stats.rescued;
       return {
         progress: (Math.min(2, rescued) / 2 + (tower ? 1 : 0)) / 2,
@@ -5705,26 +7623,39 @@
     if (l.kind === "survival") {
       const chapel = completeBuildings("chapel").length > 0;
       return {
-        progress: (Math.min(360, state.time) / 360 + (chapel ? 1 : 0)) / 2,
-        text: `Hold ${Math.floor(Math.min(state.time, 360))}/360s · chapel ${chapel ? "complete" : "needed"}`,
-        won: state.time >= 360 && chapel,
+        progress:
+          (Math.min(rules?.survival || 360, state.time) /
+            (rules?.survival || 360) +
+            (chapel ? 1 : 0)) /
+          2,
+        text: `Hold ${Math.floor(Math.min(state.time, rules?.survival || 360))}/${rules?.survival || 360}s · chapel ${chapel ? "complete" : "needed"}`,
+        won: state.time >= (rules?.survival || 360) && chapel,
       };
     }
     if (l.kind === "liberation") {
       const sites = state.sites.filter((s) => !s.optional && s.captured).length;
       return {
-        progress: (sites / 2 + Math.min(90, state.occupation) / 90) / 2,
-        text: `Villages ${sites}/2 · hold ${Math.floor(state.occupation)}/90s`,
-        won: sites === 2 && state.occupation >= 90,
+        progress:
+          (sites / 2 +
+            Math.min(rules?.hold || 90, state.occupation) /
+              (rules?.hold || 90)) /
+          2,
+        text: `Supplies ${state.stats.delivered || 0}/${rules?.deliveries || 0} | villages ${sites}/2 · hold ${Math.floor(state.occupation)}/${rules?.hold || 90}s`,
+        won:
+          sites === 2 &&
+          state.occupation >= (rules?.hold || 90) &&
+          (state.stats.delivered || 0) >= (rules?.deliveries || 0),
       };
     }
     if (l.kind === "siege") {
       const gates = state.buildings.filter((b) => b.gate && b.hp <= 0).length;
       return {
         progress:
-          (Math.min(2, gates) / 2 + (state.stats.siegeHits > 0 ? 1 : 0)) / 2,
-        text: `Gatehouses ${gates}/2 · siege hits ${state.stats.siegeHits}`,
-        won: gates >= 2 && state.stats.siegeHits > 0,
+          (Math.min(rules?.gates || 2, gates) / (rules?.gates || 2) +
+            (state.stats.siegeHits > 0 ? 1 : 0)) /
+          2,
+        text: `Gatehouses ${gates}/${rules?.gates || 2} · siege hits ${state.stats.siegeHits}`,
+        won: gates >= (rules?.gates || 2) && state.stats.siegeHits > 0,
       };
     }
     const sites = state.sites.filter((s) => !s.optional && s.captured).length;
@@ -5732,10 +7663,13 @@
       progress:
         ((state.citadelTaken ? 1 : 0) +
           sites / 2 +
-          Math.min(90, state.occupation) / 90) /
+          Math.min(rules?.hold || 90, state.occupation) / (rules?.hold || 90)) /
         3,
-      text: `Sites ${sites}/2 · citadel ${state.citadelTaken ? "taken" : "standing"} · hold ${Math.floor(state.occupation)}/90s`,
-      won: state.citadelTaken && sites === 2 && state.occupation >= 90,
+      text: `Sites ${sites}/2 · citadel ${state.citadelTaken ? "taken" : "standing"} · hold ${Math.floor(state.occupation)}/${rules?.hold || 90}s`,
+      won:
+        state.citadelTaken &&
+        sites === 2 &&
+        state.occupation >= (rules?.hold || 90),
     };
   }
   function update(dt) {
@@ -5753,6 +7687,7 @@
     if (
       enemyCapital?.hp <= 0 ||
       (state.mode !== "quickmatch" &&
+        !state.campaignRules &&
         !state.buildings[1]?.outpost &&
         state.buildings[1]?.hp <= 0)
     ) {
@@ -5775,9 +7710,13 @@
     if (visionTimer <= 0) {
       fog.update(state.units, state.buildings);
       enemyFog.update(state.units, state.buildings);
+      militiaFog ||= new window.CruciataFog(W, H, null, 3);
+      militiaFog.update(state.units, state.buildings);
       visionTimer = 0.2;
     }
     state.waveTimer -= dt;
+    campaignPressure(dt);
+    state.screenShake = Math.max(0, (state.screenShake || 0) - dt * 16);
     state.saveTimer -= dt;
     const foodUse = fighters().length * 0.025 * dt;
     state.resources.food = Math.max(0, state.resources.food - foodUse);
@@ -5820,6 +7759,24 @@
           gate.team === 2
         )
           continue;
+        const passage =
+          gate.team === 3 &&
+          nearby(gate, 280).some(
+            (u) =>
+              u.team === 3 &&
+              u.regionalMission &&
+              u.hp > 0 &&
+              distance(u, gate) < 280,
+          );
+        if (gate.team === 3 && passage && gate.closed) {
+          gate.closed = false;
+          gate.militiaPassage = true;
+          state.navDirty = true;
+        } else if (gate.team === 3 && gate.militiaPassage && !passage) {
+          gate.closed = true;
+          delete gate.militiaPassage;
+          state.navDirty = true;
+        }
         const threat = nearby(gate, gate.autoClosed ? 200 : 145).some(
           (u) =>
             u.hp > 0 &&
@@ -5846,13 +7803,38 @@
     updateFormations(dt);
     strategicAI(dt);
     for (const b of state.buildings) {
+      if (b.upgradeOwner) {
+        const owner = getObject(b.upgradeOwner);
+        if (
+          !owner ||
+          owner.hp <= 0 ||
+          !owner.queue.some((q) => q.partnerId === b.id)
+        )
+          delete b.upgradeOwner;
+      }
       if (b.hp <= 0 || b.progress < 1) continue;
       const item = b.queue[0];
+      if (item?.kind === "building-upgrade" && item.targetKind === "gate") {
+        const partner = getObject(item.partnerId);
+        if (
+          !partner ||
+          partner.hp <= 0 ||
+          !straightWall(b) ||
+          !straightWall(partner)
+        ) {
+          b.queue.shift();
+          releaseWallUpgrade(b, item);
+          pay(item.cost, -1);
+          continue;
+        }
+      }
       if (item) {
         item.time += dt;
         if (item.time >= item.duration) {
           b.queue.shift();
-          if (item.kind === "research") {
+          if (item.kind === "building-upgrade") {
+            completeWallUpgrade(b, item);
+          } else if (item.kind === "research") {
             const t = TECHS[item.tech];
             (b.team === 0 ? state.upgrades : state.enemy.upgrades)[t.type] =
               t.rank;
@@ -5867,6 +7849,11 @@
           } else {
             const p = spawnPoint(b),
               u = makeUnit(item.type, b.team, p.x, p.y);
+            if (b.team === 3 && b.city) {
+              u.city = b.city;
+              u.cityDefender = true;
+              u.home = { ...p };
+            }
             applyRank(u, rankFor(item.type, b.team));
             if (b.rally)
               u.order = {
@@ -5885,12 +7872,71 @@
       if (spec.range && b.team !== 2) {
         b.guardCooldown -= dt;
         if (b.guardCooldown <= 0) {
-          const target = nearby(b, spec.range)
-            .filter(
-              (u) => u.team !== b.team && u.team !== 2 && observerSees(b, u),
-            )
-            .sort((a, c) => distance(a, b) - distance(c, b))[0];
+          let locked =
+            b.kind === "greatengine" ? getObject(b.attackTarget) : null;
+          if (locked && (locked.team === b.team || locked.team === 2)) {
+            b.attackTarget = null;
+            locked = null;
+          }
+          const target =
+            b.kind === "greatengine"
+              ? b.fireTarget
+                ? distance(b, b.fireTarget) >= spec.minRange &&
+                  distance(b, b.fireTarget) <= spec.range
+                  ? b.fireTarget
+                  : null
+                : locked
+                  ? distance(b, locked) >= spec.minRange &&
+                    distance(b, locked) <= spec.range
+                    ? locked
+                    : null
+                  : state.buildings
+                      .filter(
+                        (e) =>
+                          e.team !== b.team &&
+                          e.team !== 2 &&
+                          e.hp > 0 &&
+                          distance(b, e) >= spec.minRange &&
+                          distance(b, e) <= spec.range &&
+                          observerSees(b, e),
+                      )
+                      .sort((a, c) => distance(a, b) - distance(c, b))[0]
+              : nearby(b, spec.range)
+                  .filter(
+                    (u) =>
+                      u.team !== b.team && u.team !== 2 && observerSees(b, u),
+                  )
+                  .sort((a, c) => distance(a, b) - distance(c, b))[0];
           if (target) {
+            if (b.kind === "greatengine") {
+              const aim = Math.atan2(target.y - b.y, target.x - b.x);
+              b.aimAngle ??= -Math.PI / 2;
+              const delta = Math.atan2(
+                Math.sin(aim - b.aimAngle),
+                Math.cos(aim - b.aimAngle),
+              );
+              b.aimAngle += clamp(delta, -0.85 * dt, 0.85 * dt);
+              if (Math.abs(delta) > 0.06) continue;
+              b.guardCooldown = 18;
+              b.lastShot = state.time;
+              sound("great-launch", { x: b.x, y: b.y, team: b.team });
+              state.boulders.push({
+                x: b.x,
+                y: b.y,
+                tx: target.x,
+                ty: target.y,
+                sx: b.x,
+                sy: b.y,
+                t: 0,
+                duration: 3.6 + distance(b, target) / 1500,
+                heavy: true,
+                team: b.team,
+                source: b.id,
+                damage: spec.damage,
+                r: 230,
+              });
+              continue;
+            }
             b.guardCooldown = 2.3;
             projectile({ ...b, type: "archer" }, target, spec.damage);
           }
@@ -5928,39 +7974,60 @@
       else if (u.type === "pilgrim" || u.type === "merchant") caravanAI(u, dt);
       else combatAI(u, dt);
     }
-    // Local crowd separation preserves formation slots without pushing units through walls.
+    // Local crowd separation prevents overlapping and preserves spacing without pushing units through walls.
     for (const u of state.units) {
       if (u.hp <= 0 || !u.moving) continue;
-      for (const other of nearby(u, 24)) {
+      const myR = ["knight", "trebuchet", "ram", "ballista"].includes(u.type)
+        ? 26
+        : 14;
+      for (const other of nearby(u, myR + 28)) {
         if (other.id <= u.id || other.hp <= 0) continue;
+        const otherR = ["knight", "trebuchet", "ram", "ballista"].includes(
+          other.type,
+        )
+          ? 26
+          : 14;
         const d = distance(u, other),
-          r =
-            u.type === "knight" ||
-            other.type === "knight" ||
-            u.type === "trebuchet" ||
-            other.type === "trebuchet"
-              ? 26
-              : 18;
-        if (d < r && d > 0.1) {
-          if (
-            u.order?.formation &&
-            u.order.formation === other.order?.formation &&
-            distance(u, u.order) > 180 &&
-            distance(other, other.order) > 180
-          )
-            continue;
-          const push = (r - d) * Math.min(0.06, dt * 1.5),
+          minDist = (myR + otherR) * 0.85;
+        if (d < minDist && d > 0.1) {
+          const push = (minDist - d) * Math.min(0.08, dt * 2.0),
             dx = ((u.x - other.x) / d) * push,
             dy = ((u.y - other.y) / d) * push;
-          if (groundFree(u.x + dx, u.y + dy, 7)) {
+          if (groundFree(u.x + dx, u.y + dy, 6)) {
             u.x += dx;
             u.y += dy;
           }
-          if (other.moving && groundFree(other.x - dx, other.y - dy, 7)) {
+          if (other.moving && groundFree(other.x - dx, other.y - dy, 6)) {
             other.x -= dx;
             other.y -= dy;
           }
         }
+      }
+    }
+    for (const u of state.units) {
+      if (u.hp > 0 && u.type === "standard") {
+        if (visualActive(u)) Art.updateStandard(u, dt);
+        else Art.suspendStandard(u);
+      }
+      if (
+        u.hp > 0 &&
+        u.moving &&
+        visualActive(u) &&
+        state.time >= (u.dustAt || 0)
+      ) {
+        u.dustAt = state.time + 0.4 + (u.id % 5) * 0.05;
+        emitParticle({
+          x: u.x - Math.cos(u.angle) * 8,
+          y: u.y - Math.sin(u.angle) * 8,
+          vx: -Math.cos(u.angle) * 12,
+          vy: -Math.sin(u.angle) * 12,
+          t: 0,
+          life: 0.8,
+          color: "#b5a48288",
+          r: u.type === "knight" ? 12 : 6,
+          sprite: "dirt_01",
+          growth: 1.1,
+        });
       }
     }
     for (const a of state.arrows) {
@@ -5972,7 +8039,12 @@
       const d = Math.hypot(a.tx - a.x, a.ty - a.y);
       if (d < 480 * dt) {
         if (target?.hp > 0)
-          damage(target, a.damage, { id: 0, team: a.team, type: "archer" });
+          damage(
+            target,
+            a.damage,
+            { id: 0, team: a.team, type: a.siege ? "ballista" : "archer" },
+            !!a.siege,
+          );
         a.life = 0;
       } else {
         a.x += ((a.tx - a.x) / d) * 480 * dt;
@@ -5983,21 +8055,28 @@
     state.arrows = state.arrows.filter((a) => a.life > 0);
     for (const stone of state.boulders) {
       stone.t += dt;
-      const flight = clamp(stone.t / stone.duration, 0, 1),
+      const flight = clamp(
+          Math.max(0, stone.t - dt * 2) / stone.duration,
+          0,
+          1,
+        ),
         px = stone.sx + (stone.tx - stone.sx) * flight,
         py =
           stone.sy +
           (stone.ty - stone.sy) * flight -
-          Math.sin(flight * Math.PI) * 150;
-      state.particles.push({
+          Math.sin(flight * Math.PI) * (stone.heavy ? 340 : 150);
+      emitParticle({
         x: px,
         y: py,
         vx: (Math.random() - 0.5) * 20,
         vy: -12,
         t: 0,
         life: 0.45,
+        sprite: stone.heavy ? "smoke_04" : "flame_01",
+        trail: true,
+        growth: 1.6,
         color: Math.random() < 0.5 ? "#f4a342" : "#4c433ecc",
-        r: 3 + Math.random() * 4,
+        r: (stone.heavy ? 8 : 3) + Math.random() * (stone.heavy ? 10 : 4),
       });
       if (stone.t >= stone.duration && !stone.hit) {
         stone.hit = true;
@@ -6020,19 +8099,69 @@
           r: stone.r,
         });
         for (let i = 0; i < 68; i++)
-          state.particles.push({
+          emitParticle({
             x: stone.tx,
             y: stone.ty,
             vx: (Math.random() - 0.5) * 240,
             vy: (Math.random() - 0.5) * 240,
             t: 0,
             life: 0.6 + Math.random() * 1.4,
+            sprite: i % 3 ? "dirt_01" : "spark_01",
+            growth: i % 3 ? 1.4 : 0,
             color: ["#ffd778", "#ee8633", "#d0461d", "#594e42", "#88735a"][
               i % 5
             ],
-            r: 2 + Math.random() * 7,
+            r: 6 + Math.random() * 16,
           });
-        sound("explosion", { x: stone.tx, y: stone.ty });
+        emitParticle({
+          x: stone.tx,
+          y: stone.ty,
+          vx: 0,
+          vy: 0,
+          t: 0,
+          life: 0.3,
+          color: "#ffe6b3",
+          r: stone.heavy ? 120 : 65,
+          sprite: "light_02",
+          glow: true,
+          growth: 1.2,
+        });
+        if (stone.heavy) {
+          state.screenShake = Math.max(
+            state.screenShake || 0,
+            13 *
+              clamp(
+                1 - distance({ x: stone.tx, y: stone.ty }, camera) / 1800,
+                0,
+                1,
+              ),
+          );
+          state.rings.push({
+            x: stone.tx,
+            y: stone.ty,
+            t: 0,
+            color: "#ffe2a9",
+            r: stone.r * 1.8,
+          });
+          for (let i = 0; i < 40; i++)
+            emitParticle({
+              x: stone.tx,
+              y: stone.ty,
+              vx: Math.cos(i * 2.399) * (80 + i * 5),
+              vy: Math.sin(i * 2.399) * (80 + i * 5),
+              t: 0,
+              life: 2.2 + Math.random(),
+              sprite: i % 3 ? "smoke_01" : "flame_01",
+              growth: 2,
+              color: i % 3 ? "#8a776588" : "#f2b458",
+              r: 12 + Math.random() * 24,
+            });
+        }
+        sound(stone.heavy ? "great-impact" : "explosion", {
+          x: stone.tx,
+          y: stone.ty,
+          team: stone.team,
+        });
       }
     }
     state.boulders = state.boulders.filter((s) => !s.hit);
@@ -6112,13 +8241,17 @@
       state.occupation += dt;
     else state.occupation = 0;
     for (const p of state.particles) {
+      if (!visualParticle(p)) {
+        p.t = p.life;
+        continue;
+      }
       p.t += dt;
       p.x += p.vx * dt;
       p.y += p.vy * dt;
       p.vx *= 0.9;
       p.vy *= 0.9;
     }
-    state.particles = state.particles.filter((p) => p.t < p.life).slice(-400);
+    state.particles = state.particles.filter((p) => p.t < p.life).slice(-800);
     for (const r of state.rings) r.t += dt;
     state.rings = state.rings.filter((r) => r.t < 1).slice(-80);
     for (const c of state.corpses) c.t += dt;
@@ -6129,6 +8262,16 @@
     state.squads = state.squads.filter(
       (s) => s.role === "guard" || state.units.some((u) => u.squad === s.id),
     );
+    if (
+      state.campaignRules?.deliveries &&
+      (state.stats.delivered || 0) +
+        state.units.filter((u) => u.type === "merchant" && u.missionSupply)
+          .length <
+        state.campaignRules.deliveries
+    ) {
+      finish(false);
+      return;
+    }
     if (
       LEVELS[state.level].kind === "escort" &&
       state.stats.rescued +
@@ -6195,7 +8338,8 @@
         Art.structure(
           g,
           {
-            kind: art.kind,
+            kind: art.kind === "bastionwall" ? "wall" : art.kind,
+            fortified: art.kind === "bastionwall",
             team: 0,
             x: 0,
             y: 0,
@@ -6215,6 +8359,11 @@
       }
     };
     paint();
+    // Atlas pages decode asynchronously. Repaint menu previews once their
+    // referenced page is available so first-open build cards are not blank.
+    window.CruciataAtlas?.ready?.then(() => {
+      if (c.isConnected) paint();
+    });
 
     const strong = document.createElement("strong");
     strong.textContent = name;
@@ -6231,6 +8380,16 @@
     }
     return b;
   }
+  ROLES.ram = {
+    label: "Armored siege assault",
+    description:
+      "Slow, durable engine that deals heavy siege damage to masonry. Escort it against enemy troops.",
+  };
+  ROLES.ballista = {
+    label: "Direct-fire siege",
+    description:
+      "Mobile ranged engine that damages troops and fortifications. Fragile when surrounded.",
+  };
   function initActions() {
     for (const key of [
       "worker",
@@ -6240,6 +8399,8 @@
       "chaplain",
       "standard",
       "trebuchet",
+      "ram",
+      "ballista",
     ]) {
       const t = TYPES[key];
       $("recruit-list").append(
@@ -6257,7 +8418,10 @@
       ["Settlement", ["towncenter", "house", "chapel"]],
       ["Economy", ["farm", "mill", "lumbercamp", "miningcamp"]],
       ["Military", ["barracks", "stable", "siegeworkshop"]],
-      ["Fortification", ["watchtower", "tower", "wall", "gate"]],
+      [
+        "Fortification",
+        ["watchtower", "tower", "wall", "bastionwall", "greatengine"],
+      ],
     ]) {
       const group = document.createElement("section");
       group.className = "build-category";
@@ -6296,11 +8460,51 @@
   const groupButtons = new Map();
   function updateUI() {
     if (!state) return;
-    $("rotate-placement").hidden = placement !== "gate";
     const stanceUnits = fighters().filter((u) => selected.has(u.id));
-    $("stance-control").hidden = !stanceUnits.length;
-    const stances = new Set(stanceUnits.map((u) => u.stance || "fight"));
-    $("unit-stance").value = stances.size === 1 ? [...stances][0] : "mixed";
+    for (const stance of ["fight", "hold", "stand-down"]) {
+      const button = $("stance-" + stance);
+      button.hidden = !stanceUnits.length;
+      button.classList.toggle(
+        "active",
+        !!stanceUnits.length &&
+          stanceUnits.every((u) => (u.stance || "fight") === stance),
+      );
+    }
+    $("destroy-button").hidden = !selectedStructures((b) => !b.cityCenter)
+      .length;
+    $("upgrade-gate-button").hidden = !selectedStructures((b) => gatePartner(b))
+      .length;
+    $("upgrade-tower-button").hidden = !selectedStructures((b) =>
+      availableWall(b),
+    ).length;
+    for (const kind of ["gate", "tower"]) {
+      const button = $("upgrade-" + kind + "-button");
+      const first = nextStructure(
+        "wall-upgrade:" + kind,
+        selectedStructures(
+          (b) => availableWall(b) && (kind !== "gate" || gatePartner(b)),
+        ),
+      );
+      const cost = wallUpgradeCost(kind, first);
+      const bastion =
+        kind === "gate" &&
+        (first?.fortified || gatePartner(first || {})?.fortified);
+      const upgradeSpec = BUILDINGS[bastion ? "bastiongate" : kind];
+      if (kind === "gate")
+        button.textContent = bastion
+          ? "Upgrade to bastion gate"
+          : "Upgrade to gate";
+      button.disabled = !afford(cost) || !!state.result;
+      button.title =
+        (kind === "gate"
+          ? "Upgrade two straight wall sections to a gatehouse"
+          : "Upgrade a wall section to an armed guard tower") +
+        ": " +
+        costText(cost) +
+        ". " +
+        upgradeSpec.time +
+        "s. Cancel returns the upgrade resources.";
+    }
     const audioState = window.CruciataAudio.status();
     $("music-now-playing").textContent =
       settings.musicVolume === 0
@@ -6398,7 +8602,11 @@
           ? state.sites.find((s) => s.id === b.site)?.name || "Outpost"
           : b.kind === "chapel" && b.team === 1
             ? "Prayer house"
-            : spec.name;
+            : b.kind === "wall" && b.fortified
+              ? BUILDINGS.bastionwall.name
+              : b.bastionGate
+                ? BUILDINGS.bastiongate.name
+                : spec.name;
       $("selection-label").textContent =
         b.team === 0
           ? "YOUR STRUCTURE"
@@ -6412,26 +8620,38 @@
           ? Math.floor(b.progress * 100) + "% constructed"
           : Math.round(b.hp) + " / " + b.maxHp + " health";
       health = b.hp / b.maxHp;
-      icon.scale(Math.min(56 / b.w, 56 / b.h), Math.min(56 / b.w, 56 / b.h));
+      const artHeight = Art.visualHeight(b);
+      const portraitScale = Math.min(
+        54 / (b.w + 12),
+        58 / (b.h + artHeight + 20),
+      );
+      icon.translate(0, artHeight * portraitScale * 0.45);
+      icon.scale(portraitScale, portraitScale);
       Art.structure(icon, { ...b, x: 0, y: 0 }, state.time);
-      if (b.queue.length) {
-        const q = b.queue[0];
-        $("queue-detail").textContent =
-          (q.kind === "unit"
-            ? unitName({
-                type: q.type,
-                team: b.team,
-                rank: rankFor(q.type, b.team),
-              })
-            : b.team === 1
-              ? ENEMY_VARIANTS[TECHS[q.tech].type]?.[TECHS[q.tech].rank] ||
-                TECHS[q.tech].name
-              : TECHS[q.tech].name) +
-          " · " +
-          Math.ceil(q.duration - q.time) +
-          "s · " +
-          b.queue.length +
-          " queued";
+      if (b.queue.length || b.upgradeOwner) {
+        const q = b.queue[0] || getObject(b.upgradeOwner)?.queue[0];
+        if (q) {
+          $("queue-detail").textContent =
+            (q.kind === "unit"
+              ? unitName({
+                  type: q.type,
+                  team: b.team,
+                  rank: rankFor(q.type, b.team),
+                })
+              : q.kind === "building-upgrade"
+                ? q.targetKind === "gate"
+                  ? "Gatehouse upgrade"
+                  : "Guard tower upgrade"
+                : b.team === 1
+                  ? ENEMY_VARIANTS[TECHS[q.tech].type]?.[TECHS[q.tech].rank] ||
+                    TECHS[q.tech].name
+                  : TECHS[q.tech].name) +
+            " · " +
+            Math.ceil(q.duration - q.time) +
+            "s · " +
+            (b.queue.length || (b.upgradeOwner ? 1 : 0)) +
+            " queued";
+        }
       }
     } else if (units.length) {
       $("selection-label").textContent = units.every((u) => u.type === "worker")
@@ -6465,7 +8685,35 @@
           detail = "Rear guard · healing & benediction";
       }
       $("selection-detail").textContent = detail;
-      icon.scale(1.5, 1.5);
+      const machinePortrait = ["ram", "ballista", "trebuchet"].includes(
+        single.type,
+      );
+      const mountedPortrait = ["knight", "pilgrim", "merchant"].includes(
+        single.type,
+      );
+      const caravanPortrait = ["pilgrim", "merchant"].includes(single.type);
+      const unitScale = machinePortrait
+        ? 0.5
+        : single.type === "standard"
+          ? 0.6
+          : caravanPortrait
+            ? 0.7
+            : mountedPortrait
+              ? 0.85
+              : 1.3;
+      icon.translate(
+        0,
+        machinePortrait
+          ? 15
+          : single.type === "standard"
+            ? 0
+            : caravanPortrait
+              ? 7
+              : mountedPortrait
+                ? 17
+                : 12,
+      );
+      icon.scale(unitScale, unitScale);
       drawUnit(icon, { ...single, angle: -Math.PI / 2 }, state.time);
     } else {
       $("selection-label").textContent = "CRUSADER HOST";
@@ -6499,11 +8747,15 @@
       "chaplain",
       "standard",
       "trebuchet",
+      "ram",
+      "ballista",
     ])
       $("recruit-" + key).hidden = !state.buildings.some(
         (b) =>
           (selectedBuildings.has(b.id) || selectedBuilding === b.id) &&
           b.team === 0 &&
+          b.hp > 0 &&
+          b.progress >= 1 &&
           b.kind === TYPES[key].producer,
       );
     for (const [key, t] of Object.entries(TECHS))
@@ -6512,6 +8764,7 @@
           (c) =>
             c.team === 0 &&
             c.hp > 0 &&
+            c.progress >= 1 &&
             (c.id === selectedBuilding || selectedBuildings.has(c.id)) &&
             c.kind === t.producer,
         ) || rankFor(t.type) !== t.rank - 1;
@@ -6519,11 +8772,14 @@
       (c) =>
         c.team === 0 &&
         c.hp > 0 &&
+        c.progress >= 1 &&
         (c.id === selectedBuilding || selectedBuildings.has(c.id)) &&
         Object.values(TECHS).some((t) => t.producer === c.kind),
     );
     $("gate-button") &&
-      ($("gate-button").hidden = b?.kind !== "gate" || b.team !== 0);
+      ($("gate-button").hidden = !selectedStructures(
+        (b) => b.kind === "gate" && b.progress >= 1,
+      ).length);
     $("clear-patch") && ($("clear-patch").hidden = !selectedNode);
     if (selectedBuildings.size > 1) {
       const buildings = state.buildings.filter(
@@ -6532,7 +8788,7 @@
       $("selection-title").textContent =
         buildings.length + " selected structures";
       $("selection-detail").textContent =
-        "Training applies to every compatible selected building. Cancel affects every selected foundation or first queued order.";
+        "Training and building actions take turns among compatible selected structures.";
       $("queue-detail").textContent =
         buildings.reduce((n, b) => n + b.queue.length, 0) + " total queued";
     }
@@ -6575,14 +8831,30 @@
       const city = state.cities.find((c) => c.id === b.city);
       $("selection-role").textContent =
         city.name +
-        ": defensive city. Breach its walls, then hold the center with 3 soldiers for 12 seconds without hostile troops nearby. All surviving buildings and units join you. Capture the center rather than demolishing it.";
+        ": fortified city. Reach the capital with a combat troop to capture it immediately. Claim 1,800 food, 2,400 wood, 1,800 stone, 2,200 gold, and all surviving buildings and defenders.";
     }
+    if (b?.kind === "greatengine")
+      $("selection-role").textContent =
+        "Permanent siege engine. Range 320-2200. Right-click ground to bombard it, or an enemy to lock bombardment. Reload: " +
+        Math.ceil(Math.max(0, b.guardCooldown || 0)) +
+        "s. Keep friendly troops outside the huge impact zone.";
     if (isCapital(b))
       $("selection-role").textContent =
         "Capital and resource depot. Its destruction decides the battle immediately, regardless of other objectives. Trains villagers and accepts every resource.";
     icon.restore();
     $("selection-health").style.width = health * 100 + "%";
-    $("attack-button").classList.toggle("active", mode === "attack");
+    $("scout-button").hidden = !stanceUnits.length;
+    $("deploy-button").hidden = !units.some((u) => u.type === "trebuchet");
+    const selectedSiege = units.filter((u) => u.type === "trebuchet"),
+      selectedGreat = selectedStructures(
+        (b) => b.kind === "greatengine" && b.progress >= 1,
+      );
+    $("cancel-targeting-button").hidden =
+      !selectedSiege.length && !selectedGreat.length;
+    $("cancel-targeting-button").disabled =
+      !selectedSiege.some((u) => u.fireTarget || u.manualTarget) &&
+      !selectedGreat.some((b) => b.fireTarget || b.attackTarget);
+    $("bless-button").hidden = !stanceUnits.length;
     $("scout-button").disabled = !units.some((u) => u.type !== "worker");
     $("scout-button").classList.toggle(
       "active",
@@ -6607,8 +8879,9 @@
           b.team === 0 &&
           b.hp > 0 &&
           (b.id === selectedBuilding || selectedBuildings.has(b.id)) &&
-          (b.progress < 1 || b.queue.length),
+          (b.progress < 1 || b.queue.length || b.upgradeOwner),
       );
+    $("cancel-button").hidden = $("cancel-button").disabled;
     for (const key of [
       "worker",
       "sword",
@@ -6617,6 +8890,8 @@
       "chaplain",
       "standard",
       "trebuchet",
+      "ram",
+      "ballista",
     ]) {
       const t = TYPES[key],
         producer = producerFor(key);
@@ -6630,7 +8905,7 @@
         !!state.result;
     }
     for (const [k, t] of Object.entries(BUILDINGS))
-      if (t.cost) {
+      if (t.cost && $("build-" + k)) {
         $("build-" + k).disabled = !afford(t.cost) || !!state.result;
         $("build-" + k).classList.toggle("active", placement === k);
       }
@@ -6639,7 +8914,9 @@
         !!state.techs[k] ||
         rankFor(t.type) !== t.rank - 1 ||
         state.buildings.some((b) => b.queue.some((q) => q.tech === k)) ||
-        !completeBuildings(t.producer).length ||
+        !selectedStructures(
+          (b) => b.kind === t.producer && b.progress >= 1 && b.queue.length < 8,
+        ).length ||
         !afford(t.cost) ||
         !!state.result;
       $("research-" + k).classList.toggle("completed", !!state.techs[k]);
@@ -6723,151 +9000,22 @@
     ctx.restore();
   }
   function drawUnit(g, u, time, drawAngle = u.angle) {
-    g.scale(0.72, 0.72);
-    if (u.type === "trebuchet") {
-      g.save();
-      g.rotate(drawAngle + Math.PI / 2);
-      Art.rect(g, -16, -24, 32, 48, "#8d7147", "#594a31");
-      for (const x of [-20, 20])
-        for (const y of [-16, 16]) Art.ellipse(g, x, y, 4, 9, "#554631");
-      const deployed =
-          u.deployment === "deployed" || u.deployment === "setting-up",
-        unfold = deployed
-          ? u.deployment === "setting-up"
-            ? 1 - u.deployTimer / 6
-            : 1
-          : u.deployment === "packing"
-            ? u.deployTimer / 4
-            : 0;
-      Art.line(
-        g,
-        [
-          [-12, -15],
-          [-12 - unfold * 10, 25],
-        ],
-        4,
-        "#b79b63",
-      );
-      Art.line(
-        g,
-        [
-          [12, -15],
-          [12 + unfold * 10, 25],
-        ],
-        4,
-        "#b79b63",
-      );
-      const release = u.strike > 0 ? Math.sin((1 - u.strike) * Math.PI) : 0;
-      const swing = release * 18;
-      g.translate(0, release * 2);
-      for (const x of [-1, 1]) {
-        Art.line(
-          g,
-          [
-            [x * 14, -14],
-            [x * (14 + unfold * 10), 22],
-          ],
-          4,
-          "#c49b63",
-        );
-        Art.line(
-          g,
-          [
-            [x * 14, -14],
-            [x * 8, 14],
-          ],
-          2,
-          "#e3c491",
-        );
-        Art.ellipse(g, x * (18 + unfold * 8), 23, 5, 3, "#9c8260");
-      }
-      for (const y of [-18, -9, 0, 9, 18])
-        Art.line(
-          g,
-          [
-            [-14, y],
-            [14, y],
-          ],
-          0.7,
-          "#b18a55",
-        );
-      Art.ellipse(g, -10, 13, 4, 4, "#4c4539");
-      const winch =
-        u.deployment === "setting-up" || u.deployment === "packing"
-          ? time * 4
-          : 0;
-      Art.line(
-        g,
-        [
-          [-10 + Math.cos(winch) * 4, 13 + Math.sin(winch) * 4],
-          [-10 - Math.cos(winch) * 4, 13 - Math.sin(winch) * 4],
-        ],
-        1.5,
-        "#b99b6c",
-      );
-      Art.line(
-        g,
-        [
-          [0, 16],
-          [swing, -35 - unfold * 18],
-        ],
-        5,
-        "#c2a56d",
-      );
-      Art.rect(g, -8, 7, 16, 14, "#69624c", "#afa483");
-      Art.ellipse(g, swing, -36 - unfold * 18, 6, 6, "#8c907a");
-      Art.line(
-        g,
-        [
-          [-13, -7],
-          [13, -7],
-        ],
-        3,
-        "#574a33",
-      );
-      g.restore();
+    if (["ram", "ballista", "trebuchet"].includes(u.type)) {
+      Art.siegeMachine(g, u, time, drawAngle);
       return;
     }
+    g.scale(0.72, 0.72);
     if (u.type === "pilgrim" || u.type === "merchant") {
-      g.save();
-      g.rotate(drawAngle + Math.PI / 2);
-      Art.rect(
-        g,
-        -14,
-        -18,
-        28,
-        38,
-        u.type === "pilgrim" ? "#d9c69e" : "#ad8b56",
-        "#6c593c",
-      );
-      for (const x of [-18, 18])
-        for (const y of [-12, 13]) Art.ellipse(g, x, y, 4, 7, "#67543a");
-      if (u.type === "pilgrim") Art.cross(g, 0, 0, 9, "#963d30");
-      else
-        for (let i = 0; i < 3; i++)
-          Art.ellipse(g, -7 + i * 7, 0, 4, 8, "#c3a364");
-      Art.line(
-        g,
-        [
-          [0, -18],
-          [0, -42],
-        ],
-        2,
-        "#846a43",
-      );
-      Art.ellipse(g, 0, -45, 7, 12, "#aa9370");
-      g.restore();
+      Art.caravan(g, u, time, drawAngle);
       return;
     }
     Art.unit(g, u, time, drawAngle);
     if (u.type === "standard") {
-      g.save();
-      g.rotate(drawAngle + Math.PI / 2);
-      Art.banner(g, 9, -20, u.team, time);
-      g.restore();
+      Art.armyStandard(g, u);
     }
   }
   function healthBar(g, x, y, ratio, w = 32, team = 0) {
+    if (Art.deferOverlay(g, () => healthBar(g, x, y, ratio, w, team))) return;
     Art.rect(g, x - w / 2, y, w, 4, "#38402c99");
     Art.rect(
       g,
@@ -6886,6 +9034,15 @@
       o.y - (o.ry || 0) <= view.y + view.h + margin
     );
   }
+  function visualActive(o) {
+    return onScreen(o, 130) && (o.team === 0 || playerSees(o));
+  }
+  function visualParticle(p) {
+    return onScreen(p, Math.max(32, (p.r || 1) * (1 + (p.growth || 0))));
+  }
+  function emitParticle(p) {
+    if (visualParticle(p)) state.particles.push(p);
+  }
   function render() {
     const r = canvas.getBoundingClientRect(),
       dpr = Math.min(2, devicePixelRatio || 1),
@@ -6901,19 +9058,30 @@
       0,
       0,
       view.scale * dpr,
-      -view.x * view.scale * dpr,
-      -view.y * view.scale * dpr,
+      (-view.x * view.scale +
+        Math.sin(state.time * 83) * (state.screenShake || 0)) *
+        dpr,
+      (-view.y * view.scale +
+        Math.cos(state.time * 97) * (state.screenShake || 0) * 0.7) *
+        dpr,
     );
-    ctx.clearRect(view.x, view.y, view.w, view.h);
+    ctx.clearRect(view.x - 40, view.y - 40, view.w + 80, view.h + 80);
     ctx.drawImage(terrain, 0, 0, W, H);
     const time = state.time;
+    Art.beginFrame(ctx);
     for (const u of state.units) {
+      if (!visualActive(u)) {
+        visibleFacing.delete(u);
+        continue;
+      }
       const desired =
         u.type === "archer" &&
         (u.strike > 0 || u.target) &&
         Number.isFinite(u.aimAngle)
           ? u.aimAngle
           : u.angle;
+      if (!visibleFacing.has(u)) u.visualAngle = desired;
+      visibleFacing.add(u);
       u.visualAngle ??= desired;
       const turn = Math.atan2(
         Math.sin(desired - u.visualAngle),
@@ -6994,32 +9162,8 @@
       if (onScreen(d)) {
         if (d.kind === "rockmass") Art.rockMass(ctx, d);
         else if (d.kind === "cliff") Art.cliff(ctx, d);
-        else if (d.kind === "rock") {
-          Art.ellipse(ctx, d.x + 4, d.y + 4, d.r, d.r * 0.8, "#4a553c35");
-          Art.polygon(
-            ctx,
-            [
-              [d.x - d.r, d.y],
-              [d.x - d.r * 0.4, d.y - d.r],
-              [d.x + d.r * 0.6, d.y - d.r * 0.7],
-              [d.x + d.r, d.y + d.r * 0.4],
-              [d.x - d.r * 0.4, d.y + d.r * 0.7],
-            ],
-            "#9c9f83",
-            "#7f896a",
-          );
-          Art.line(
-            ctx,
-            [
-              [d.x - d.r * 0.4, d.y - d.r],
-              [d.x, d.y],
-              [d.x + d.r * 0.6, d.y - d.r * 0.7],
-            ],
-            1,
-            "#babe9a",
-          );
-        } else
-          Art.tree(ctx, d.x, d.y, d.scale, LEVELS[state.level].terrain >= 3);
+        else if (d.kind === "rock") Art.boulder(ctx, d);
+        else Art.tree(ctx, d.x, d.y, d.scale, LEVELS[state.level].terrain >= 3);
       }
     for (const n of state.nodes)
       if (n.remaining > 0 && onScreen(n)) Art.resource(ctx, n, time);
@@ -7057,42 +9201,12 @@
               );
             }
           }
-          if (["trebuchet", "pilgrim", "merchant"].includes(c.type)) {
-            ctx.rotate(c.angle + 0.2);
-            Art.rect(
-              ctx,
-              -15,
-              -16,
-              30,
-              34,
-              c.type === "pilgrim" ? "#b49b73" : "#866d47",
-              "#5b4b32",
-            );
-            Art.line(
-              ctx,
-              [
-                [-17, -13],
-                [9, 20],
-              ],
-              4,
-              "#bda06a",
-            );
-            Art.line(
-              ctx,
-              [
-                [11, -20],
-                [-4, 21],
-              ],
-              3,
-              "#755936",
-            );
-            for (const [x, y] of [
-              [-20, -15],
-              [19, 12],
-              [-18, 19],
-            ])
-              Art.ellipse(ctx, x, y, 4, 6, "#5e4c33");
-            if (c.type === "pilgrim") Art.cross(ctx, 0, 0, 7, "#8f4637");
+          if (
+            ["trebuchet", "ram", "ballista", "pilgrim", "merchant"].includes(
+              c.type,
+            )
+          ) {
+            Art.corpse(ctx, c);
           } else if (c.t < 0.3) {
             ctx.rotate(c.t * 4);
             drawUnit(
@@ -7117,9 +9231,12 @@
       .map((b) => (b.team === 0 || playerSees(b) ? b : fog.known[b.id]))
       .filter(Boolean);
     for (const b of knownBuildings)
-      if (onScreen(b)) {
+      if (onScreen(b, Math.max(120, Art.visualHeight(b) + b.h / 2))) {
         Art.structure(ctx, b, time);
-        if (selectedBuilding === b.id && b.rally) {
+        if (
+          (selectedBuilding === b.id || selectedBuildings.has(b.id)) &&
+          b.rally
+        ) {
           Art.banner(ctx, b.rally.x, b.rally.y, 0, time);
           ctx.save();
           ctx.setLineDash([6, 8]);
@@ -7130,7 +9247,7 @@
           ctx.stroke();
           ctx.restore();
         }
-        if (selectedBuilding === b.id) {
+        if (selectedBuilding === b.id || selectedBuildings.has(b.id)) {
           ctx.strokeStyle = "#eed5a0";
           ctx.lineWidth = 2;
           ctx.strokeRect(
@@ -7168,6 +9285,49 @@
         engines[0].x + 190,
         engines[0].y,
       );
+    }
+    for (const b of selectedStructures(
+      (b) => b.kind === "greatengine" && b.progress >= 1,
+    )) {
+      ctx.save();
+      ctx.strokeStyle = "#e8b64bcc";
+      ctx.fillStyle = "#d7a34b10";
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.arc(b.x, b.y, 2200, 0, Math.PI * 2);
+      ctx.arc(b.x, b.y, 320, 0, Math.PI * 2, true);
+      ctx.fill("evenodd");
+      ctx.stroke();
+      ctx.setLineDash([14, 10]);
+      ctx.strokeStyle = "#d96b4f99";
+      ctx.beginPath();
+      ctx.arc(b.x, b.y, 320, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.setLineDash([]);
+      ctx.fillStyle = "#f5d497";
+      ctx.font = "bold 13px Georgia";
+      ctx.fillText("GREAT ENGINE | 320-2200", b.x + 140, b.y - 100);
+      if (b.fireTarget) {
+        Art.line(
+          ctx,
+          [
+            [b.fireTarget.x - 14, b.fireTarget.y],
+            [b.fireTarget.x + 14, b.fireTarget.y],
+          ],
+          2,
+          "#f2aa4e",
+        );
+        Art.line(
+          ctx,
+          [
+            [b.fireTarget.x, b.fireTarget.y - 14],
+            [b.fireTarget.x, b.fireTarget.y + 14],
+          ],
+          2,
+          "#f2aa4e",
+        );
+      }
+      ctx.restore();
     }
     for (const u of engines) {
       ctx.save();
@@ -7213,7 +9373,7 @@
           healthBar(ctx, s.x, s.y + s.r + 10, s.claimProgress || 0, 70);
       }
     for (const city of state.cities || [])
-      if (onScreen(city, 420) && playerRemembers(city)) {
+      if (onScreen(city, 1200) && playerRemembers(city)) {
         ctx.strokeStyle = city.captured ? "#e9cf8599" : "#d8ae5899";
         ctx.lineWidth = 2;
         ctx.setLineDash([8, 6]);
@@ -7229,7 +9389,7 @@
         ctx.fillText(
           city.captured
             ? "CITY CAPTURED"
-            : "CITY CENTER - 3 SOLDIERS / 12 SECONDS",
+            : "REACH THE CAPITAL TO CAPTURE THE CITY",
           city.x,
           city.y + 90,
         );
@@ -7238,7 +9398,7 @@
       }
     const visible = state.units
       .filter(
-        (u) => u.hp > 0 && onScreen(u, 45) && (u.team === 0 || playerSees(u)),
+        (u) => u.hp > 0 && onScreen(u, 130) && (u.team === 0 || playerSees(u)),
       )
       .sort((a, b) => a.y - b.y);
     for (const u of visible) {
@@ -7311,6 +9471,14 @@
         );
       }
     }
+    Art.flushFrame();
+    // Smoke and sparks remain behind arrowheads and boulders in the canvas stack.
+    for (const p of state.particles)
+      if (onScreen(p, Math.max(20, p.r * (1 + (p.growth || 0))))) {
+        ctx.globalAlpha = 1 - p.t / p.life;
+        Art.particle(ctx, p);
+      }
+    ctx.globalAlpha = 1;
     for (const a of state.arrows)
       if (onScreen(a)) {
         const angle = Math.atan2(a.ty - a.y, a.tx - a.x),
@@ -7333,30 +9501,68 @@
     for (const b of state.boulders) {
       const t = b.t / b.duration,
         x = b.sx + (b.tx - b.sx) * t,
-        y = b.sy + (b.ty - b.sy) * t;
-      ctx.strokeStyle = "#b99a6477";
-      ctx.lineWidth = 1.5;
-      ctx.beginPath();
-      ctx.arc(b.tx, b.ty, b.r, 0, Math.PI * 2);
-      ctx.stroke();
-      Art.ellipse(ctx, x, y, 7, 6, "#44513955");
-      const height = Math.sin(t * Math.PI) * 150,
+        y = b.sy + (b.ty - b.sy) * t,
+        height = Math.sin(t * Math.PI) * (b.heavy ? 340 : 150),
         fy = y - height;
-      const glow = ctx.createRadialGradient(x, fy, 1, x, fy, 21);
+      if (onScreen({ x: b.tx, y: b.ty }, b.r)) {
+        ctx.strokeStyle = "#b99a6477";
+        ctx.lineWidth = 1.5;
+        ctx.beginPath();
+        ctx.arc(b.tx, b.ty, b.r, 0, Math.PI * 2);
+        ctx.stroke();
+      }
+      if (onScreen({ x, y }, 12)) Art.ellipse(ctx, x, y, 7, 6, "#44513955");
+      if (!onScreen({ x, y: fy }, 55)) continue;
+      const arcScale = 1 + Math.sin(t * Math.PI) * 0.3;
+      const glowRadius = (b.heavy ? 42 : 17) * arcScale;
+      const glow = ctx.createRadialGradient(x, fy, 1, x, fy, glowRadius);
       glow.addColorStop(0, "#fff3b3aa");
       glow.addColorStop(1, "#ef642900");
       ctx.fillStyle = glow;
-      ctx.fillRect(x - 21, fy - 21, 42, 42);
-      Art.ellipse(ctx, x, fy, 8, 8, "#c8451c");
-      Art.ellipse(ctx, x - 1, fy - 1, 6, 6, "#f5a23b");
-      Art.ellipse(ctx, x - 2, fy - 2, 3, 3, "#ffe6a0");
-    }
-    for (const p of state.particles)
-      if (onScreen(p, 20)) {
-        ctx.globalAlpha = 1 - p.t / p.life;
-        Art.ellipse(ctx, p.x, p.y, p.r, p.r, p.color);
+      ctx.fillRect(
+        x - glowRadius,
+        fy - glowRadius,
+        glowRadius * 2,
+        glowRadius * 2,
+      );
+      if (b.heavy) {
+        ctx.save();
+        ctx.translate(x, fy);
+        ctx.scale(arcScale, arcScale);
+        Art.ellipse(ctx, 0, 0, 17, 15, "#2b2623");
+        Art.ellipse(ctx, -3, -4, 14, 12, "#837b66");
+        for (let i = 0; i < 5; i++)
+          Art.line(
+            ctx,
+            [
+              [-10 + i * 5, -10],
+              [-12 + i * 5, 10],
+            ],
+            2,
+            "#423d35",
+          );
+        Art.ellipse(ctx, -5, -6, 5, 3, "#d7c8a6");
+        ctx.restore();
+      } else Art.ellipse(ctx, x, fy, 6 * arcScale, 6 * arcScale, "#c8451c");
+      if (!b.heavy) {
+        Art.ellipse(
+          ctx,
+          x - 1,
+          fy - 1,
+          4.5 * arcScale,
+          4.5 * arcScale,
+          "#f5a23b",
+        );
+        Art.ellipse(
+          ctx,
+          x - 2,
+          fy - 2,
+          2.3 * arcScale,
+          2.3 * arcScale,
+          "#ffe6a0",
+        );
       }
-    ctx.globalAlpha = 1;
+    }
     for (const ring of state.rings)
       if (onScreen(ring)) {
         ctx.globalAlpha = 1 - ring.t;
@@ -7387,7 +9593,7 @@
     }
     const wallPreview =
       wallDrag ||
-      (wallAnchor && placement === "wall"
+      (wallAnchor && ["wall", "bastionwall"].includes(placement)
         ? { start: wallAnchor, end: mouse }
         : null);
     if (wallPreview) {
@@ -7414,10 +9620,38 @@
       ctx.font = "bold 14px Georgia";
       ctx.fillStyle = "#fff1c9";
       ctx.fillText(
-        `${count} sections / ${count * 12} stone / ${count * 3} wood`,
+        `${count} sections / ${count * BUILDINGS[placement || "wall"].cost.stone} stone / ${count * BUILDINGS[placement || "wall"].cost.wood} wood`,
         wallPreview.end.x + 24,
         wallPreview.end.y - 24,
       );
+    }
+    const attackTargets = new Set([
+      ...friendUnits()
+        .filter((u) => selected.has(u.id) && u.manualTarget)
+        .map((u) => u.target),
+      ...selectedStructures((b) => b.kind === "greatengine").map(
+        (b) => b.attackTarget,
+      ),
+    ]);
+    for (const id of attackTargets) {
+      const target = getObject(id);
+      if (!target || target.hp <= 0 || !playerSees(target)) continue;
+      const r = (target.r || 18) + 12 + Math.sin(state.time * 8) * 3;
+      ctx.save();
+      ctx.strokeStyle = "#ff5544";
+      ctx.lineWidth = 3;
+      ctx.beginPath();
+      ctx.arc(target.x, target.y, r, 0, Math.PI * 2);
+      ctx.stroke();
+      for (const sign of [-1, 1]) {
+        ctx.beginPath();
+        ctx.moveTo(target.x + sign * (r + 10), target.y);
+        ctx.lineTo(target.x + sign * (r - 5), target.y);
+        ctx.moveTo(target.x, target.y + sign * (r + 10));
+        ctx.lineTo(target.x, target.y + sign * (r - 5));
+        ctx.stroke();
+      }
+      ctx.restore();
     }
     if (placement && !wallPreview) {
       const spec = placementSpec(placement),
@@ -7560,7 +9794,7 @@
     }
     if (e.button !== 0) return;
     if (mode === "build") {
-      if (placement === "wall") {
+      if (["wall", "bastionwall"].includes(placement)) {
         wallDrag = { start: wallAnchor || mouse, end: mouse };
         canvas.setPointerCapture(e.pointerId);
       } else placeBuild(mouse, e.shiftKey);
@@ -7617,7 +9851,7 @@
     }
     if (distance(d.start, d.end) < 8) {
       const u = friendUnits()
-        .filter((u) => distance(u, d.end) < 27)
+        .filter((u) => Art.hitUnit(u, d.end, state.time))
         .sort((a, b) => distance(a, d.end) - distance(b, d.end))[0];
       if (u) {
         if (d.shift && selected.has(u.id)) selected.delete(u.id);
@@ -7628,17 +9862,16 @@
           (b) =>
             b.hp > 0 &&
             (b.team === 0 || playerSees(b)) &&
-            Math.abs(b.x - d.end.x) < b.w / 2 &&
-            Math.abs(b.y - d.end.y) < b.h / 2,
+            Art.hitStructure(b, d.end),
         );
         if (!b && playerRemembers(d.end))
           selectedNode = resourceAt(d.end)?.id || null;
         if (b) {
-          selectedBuilding = b.id;
           if (d.shift && selectedBuildings.has(b.id))
             selectedBuildings.delete(b.id);
           else selectedBuildings.add(b.id);
-          selected.clear();
+          selectedBuilding = [...selectedBuildings][0] || null;
+          if (!d.shift) selected.clear();
           if (
             [
               "towncenter",
@@ -7709,8 +9942,15 @@
       mode === "attack",
     );
   });
-  $("unit-stance").addEventListener("change", (e) => setStance(e.target.value));
-  $("rotate-placement").addEventListener("click", rotatePlacement);
+  for (const stance of ["fight", "hold", "stand-down"])
+    $("stance-" + stance).addEventListener("click", () => setStance(stance));
+  $("destroy-button").addEventListener("click", destroySelectedBuilding);
+  $("upgrade-gate-button").addEventListener("click", () =>
+    queueWallUpgrade("gate"),
+  );
+  $("upgrade-tower-button").addEventListener("click", () =>
+    queueWallUpgrade("tower"),
+  );
   function controlGroupMembers(group, owned = null) {
     owned ||= new Map(
       [...state.units, ...state.buildings]
@@ -7821,7 +10061,6 @@
       KeyF: setAttack,
       KeyH: hold,
       KeyG: autoScout,
-      KeyR: rotatePlacement,
       KeyB: bless,
       KeyT: toggleDeployment,
       KeyE: selectWorkers,
@@ -7878,12 +10117,11 @@
       },
     ],
     ["home-view", home],
-    ["attack-button", setAttack],
-    ["hold-button", hold],
     ["scout-button", autoScout],
     ["bless-button", bless],
     ["deploy-button", toggleDeployment],
     ["cancel-button", cancel],
+    ["cancel-targeting-button", cancelSiegeTargeting],
     ["pause-button", togglePause],
     ["save-button", () => saveGame(true)],
     ["restart-button", () => startLevel(state.level)],
@@ -8170,8 +10408,13 @@
       );
     },
     gate: () => {
-      const b = getObject(selectedBuilding);
-      if (b?.kind === "gate") {
+      if (!playable()) return;
+      const b = nextStructure(
+        "gate",
+        selectedStructures((b) => b.kind === "gate" && b.progress >= 1),
+        true,
+      );
+      if (b) {
         b.autoClosed = false;
         b.closed = !b.closed;
         state.navDirty = true;
@@ -8243,6 +10486,8 @@
         rebuildSpatial();
         fog.update(state.units, state.buildings);
         enemyFog.update(state.units, state.buildings);
+        militiaFog ||= new window.CruciataFog(W, H, null, 3);
+        militiaFog.update(state.units, state.buildings);
         updateUI();
       }
     },
@@ -8253,6 +10498,12 @@
     site: (kind, p) => (TEST && BUILDINGS[kind] ? validSite(kind, p) : false),
     free: (p) => (TEST ? groundFree(p.x, p.y, 8) : false),
     route: (a, b) => (TEST ? nav.find(a, b) : []),
+    order: (ids, target, attack = false) => {
+      if (TEST) {
+        selected = new Set(ids);
+        issueOrder(target.x, target.y, attack, false);
+      }
+    },
     save: () => saveGame(true),
   };
 })();

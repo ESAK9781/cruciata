@@ -2,37 +2,95 @@
 (() => {
   "use strict";
   class Heap {
-    constructor() {
-      this.items = [];
+    constructor(cap = 1024) {
+      this.ids = new Int32Array(cap);
+      this.scores = new Float64Array(cap);
+      this.length = 0;
+      this._popped = { id: 0, f: 0 };
+    }
+    grow() {
+      const nextCap = this.ids.length << 1;
+      const nextIds = new Int32Array(nextCap);
+      const nextScores = new Float64Array(nextCap);
+      nextIds.set(this.ids);
+      nextScores.set(this.scores);
+      this.ids = nextIds;
+      this.scores = nextScores;
     }
     push(node) {
-      const a = this.items;
-      a.push(node);
-      let i = a.length - 1;
+      this.pushItem(node.id, node.f);
+    }
+    pushItem(id, f) {
+      if (this.length >= this.ids.length) this.grow();
+      const ids = this.ids,
+        scores = this.scores;
+      let i = this.length++;
       while (i > 0) {
         const p = (i - 1) >> 1;
-        if (a[p].f <= node.f) break;
-        a[i] = a[p];
+        if (scores[p] <= f) break;
+        ids[i] = ids[p];
+        scores[i] = scores[p];
         i = p;
       }
-      a[i] = node;
+      ids[i] = id;
+      scores[i] = f;
     }
     pop() {
-      const a = this.items,
-        first = a[0],
-        last = a.pop();
-      if (a.length) {
+      if (!this.length) return undefined;
+      const ids = this.ids,
+        scores = this.scores,
+        firstId = ids[0],
+        firstScore = scores[0],
+        lastIndex = --this.length,
+        lastId = ids[lastIndex],
+        lastScore = scores[lastIndex];
+      if (this.length > 0) {
         let i = 0;
-        while (i * 2 + 1 < a.length) {
-          let c = i * 2 + 1;
-          if (c + 1 < a.length && a[c + 1].f < a[c].f) c++;
-          if (a[c].f >= last.f) break;
-          a[i] = a[c];
+        const half = this.length >> 1;
+        while (i < half) {
+          let c = (i << 1) + 1;
+          if (c + 1 < this.length && scores[c + 1] < scores[c]) c++;
+          if (scores[c] >= lastScore) break;
+          ids[i] = ids[c];
+          scores[i] = scores[c];
           i = c;
         }
-        a[i] = last;
+        ids[i] = lastId;
+        scores[i] = lastScore;
       }
-      return first;
+      this._popped.id = firstId;
+      this._popped.f = firstScore;
+      return this._popped;
+    }
+    popId() {
+      if (!this.length) return -1;
+      const ids = this.ids,
+        scores = this.scores,
+        firstId = ids[0],
+        lastIndex = --this.length,
+        lastId = ids[lastIndex],
+        lastScore = scores[lastIndex];
+      if (this.length > 0) {
+        let i = 0;
+        const half = this.length >> 1;
+        while (i < half) {
+          let c = (i << 1) + 1;
+          if (c + 1 < this.length && scores[c + 1] < scores[c]) c++;
+          if (scores[c] >= lastScore) break;
+          ids[i] = ids[c];
+          scores[i] = scores[c];
+          i = c;
+        }
+        ids[i] = lastId;
+        scores[i] = lastScore;
+      }
+      return firstId;
+    }
+    get items() {
+      return this;
+    }
+    clear() {
+      this.length = 0;
     }
   }
   class Navigation {
@@ -59,6 +117,7 @@
       this.pending = new Map();
       this.jobs = [];
       this.activeJob = null;
+      this.ownerKeys = new Map();
     }
     rebuild(test, waypoints = [], regions = null) {
       this.physicalFree = test;
@@ -172,39 +231,28 @@
       return true;
     }
     chunkId(x, y) {
-      return (
-        Math.floor(y / this.chunkCells) * this.chunkCols +
-        Math.floor(x / this.chunkCells)
-      );
+      return ((y >> 5) * this.chunkCols + (x >> 5)) | 0;
     }
     edgeOpen(a, b) {
-      const low = Math.min(a, b),
-        delta = Math.abs(a - b),
-        x = low % this.cols,
-        y = Math.floor(low / this.cols),
-        chunk = this.chunkId(x, y),
-        key =
-          ((y % this.chunkCells) * this.chunkCells + (x % this.chunkCells)) *
-            4 +
-          (delta === 1
-            ? 0
-            : delta === this.cols
-              ? 1
-              : delta === this.cols + 1
-                ? 2
-                : 3),
-        cache = (this.edgeCaches[chunk] ||= new Uint8Array(
-          this.chunkCells * this.chunkCells * 4,
-        ));
+      const low = a < b ? a : b,
+        delta = a > b ? a - b : b - a,
+        cols = this.cols,
+        x = low % cols,
+        y = (low / cols) | 0,
+        chunk = (y >> 5) * this.chunkCols + (x >> 5),
+        edgeType =
+          delta === 1 ? 0 : delta === cols ? 1 : delta === cols + 1 ? 2 : 3,
+        key = (((y & 31) << 5) | (x & 31)) * 4 + edgeType,
+        cache = (this.edgeCaches[chunk] ||= new Uint8Array(4096));
       if (cache[key]) return cache[key] === 2;
       const clear = this.clearLine(
         {
-          x: ((a % this.cols) + 0.5) * this.cell,
-          y: (Math.floor(a / this.cols) + 0.5) * this.cell,
+          x: (x + 0.5) * this.cell,
+          y: (y + 0.5) * this.cell,
         },
         {
-          x: ((b % this.cols) + 0.5) * this.cell,
-          y: (Math.floor(b / this.cols) + 0.5) * this.cell,
+          x: ((b % cols) + 0.5) * this.cell,
+          y: (((b / cols) | 0) + 0.5) * this.cell,
         },
       );
       cache[key] = clear ? 2 : 1;
@@ -388,12 +436,19 @@
       return null;
     }
     clearLine(a, b) {
-      const length = Math.hypot(b.x - a.x, b.y - a.y),
+      const dx = b.x - a.x,
+        dy = b.y - a.y,
+        length = Math.hypot(dx, dy),
         steps = Math.ceil(length / 3);
+      if (!steps) return this.physicalFree(a.x, a.y);
+      const stepX = dx / steps,
+        stepY = dy / steps;
+      let cx = a.x,
+        cy = a.y;
       for (let i = 0; i <= steps; i++) {
-        const t = steps ? i / steps : 0;
-        if (!this.physicalFree(a.x + (b.x - a.x) * t, a.y + (b.y - a.y) * t))
-          return false;
+        if (!this.physicalFree(cx, cy)) return false;
+        cx += stepX;
+        cy += stepY;
       }
       return true;
     }
@@ -469,7 +524,8 @@
       return [];
     }
     find(start, destination) {
-      const key = [start.x, start.y, destination.x, destination.y].join(",");
+      const key =
+        start.x + "," + start.y + "," + destination.x + "," + destination.y;
       const cached = this.pathCache.get(key);
       if (cached) return cached.map((p) => ({ ...p }));
       const path = this.findRoute(start, destination, false);
@@ -490,12 +546,64 @@
     }
     // Live simulation searches resume under one shared frame budget. Synchronous
     // find remains available for deterministic tools and navigation tests.
-    query(start, destination) {
-      const key = [start.x, start.y, destination.x, destination.y].join(",");
+    cancelOwner(owner) {
+      const key = this.ownerKeys.get(owner);
+      if (key === undefined) return;
+      const job = this.pending.get(key);
+      if (job?.owners) {
+        job.owners.delete(owner);
+        if (job.owners.size) {
+          this.ownerKeys.delete(owner);
+          return;
+        }
+      }
+      this.pending.delete(key);
+      this.jobs = this.jobs.filter((j) => j.key !== key);
+      if (this.activeJob?.key === key) this.activeJob = null;
+      this.ownerKeys.delete(owner);
+    }
+    query(start, destination, options = {}) {
+      const key =
+        start.x + "," + start.y + "," + destination.x + "," + destination.y;
+      const priority = options.priority || 0,
+        owner = options.owner;
+      if (owner !== undefined && this.ownerKeys.get(owner) !== key) {
+        this.cancelOwner(owner);
+        this.ownerKeys.set(owner, key);
+      }
       const cached = this.pathCache.get(key);
       if (cached) return cached.map((p) => ({ ...p }));
       const existing = this.pending.get(key);
-      if (existing) existing.lastUsed = performance.now();
+      const reprioritize = !existing || priority > (existing.priority || 0);
+      if (existing) {
+        existing.lastUsed = performance.now();
+        existing.priority = Math.max(existing.priority || 0, priority);
+        if (owner !== undefined) existing.owners.add(owner);
+      }
+      // A clear player order starts immediately, even behind a long background search.
+      if (
+        !existing &&
+        priority > 0 &&
+        this.physicalFree(destination.x, destination.y) &&
+        this.clearLine(start, destination)
+      ) {
+        this.searches++;
+        const path = [{ ...destination }];
+        this.pathCache.set(key, path);
+        if (this.pathCache.size > 512)
+          this.pathCache.delete(this.pathCache.keys().next().value);
+        return path.map((p) => ({ ...p }));
+      }
+      if (!existing && this.pending.size >= 128 && priority > 0) {
+        const obsolete = [...this.pending.values()]
+          .filter((j) => (j.priority || 0) < priority && j !== this.activeJob)
+          .sort((a, b) => a.lastUsed - b.lastUsed)[0];
+        if (obsolete) {
+          this.pending.delete(obsolete.key);
+          this.jobs = this.jobs.filter((j) => j !== obsolete);
+          for (const id of obsolete.owners) this.ownerKeys.delete(id);
+        }
+      }
       if (!existing && this.pending.size < 128) {
         const job = {
           key,
@@ -503,10 +611,22 @@
           destination: { ...destination },
           revision: this.revision,
           lastUsed: performance.now(),
+          priority,
+          owners: new Set(owner === undefined ? [] : [owner]),
         };
         this.pending.set(key, job);
         this.jobs.push(job);
       }
+      if (priority > (this.activeJob?.priority || 0)) {
+        const interrupted = this.activeJob;
+        if (interrupted) {
+          interrupted.steps = null;
+          this.jobs.push(interrupted);
+          this.activeJob = null;
+        }
+      }
+      if (reprioritize)
+        this.jobs.sort((a, b) => (b.priority || 0) - (a.priority || 0));
       return null;
     }
     process(budget = 3, workLimit = Infinity) {
@@ -516,6 +636,9 @@
         const job = this.activeJob || this.jobs.shift();
         if (!job) return;
         if (performance.now() - job.lastUsed > 5000) {
+          for (const owner of job.owners || [])
+            if (this.ownerKeys.get(owner) === job.key)
+              this.ownerKeys.delete(owner);
           this.pending.delete(job.key);
           this.activeJob = null;
           continue;
@@ -533,6 +656,9 @@
           );
         }
         this.pending.delete(job.key);
+        for (const owner of job.owners || [])
+          if (this.ownerKeys.get(owner) === job.key)
+            this.ownerKeys.delete(owner);
         this.activeJob = null;
       }
     }
@@ -598,9 +724,13 @@
         parent = this.parent,
         closed = this.closed,
         stamp = this.costStamp,
+        blocked = this.blocked,
+        cols = this.cols,
+        rows = this.rows,
+        chunkCols = this.chunkCols,
         heap = new Heap(),
-        si = s.y * this.cols + s.x,
-        ei = end.y * this.cols + end.x;
+        si = s.y * cols + s.x,
+        ei = end.y * cols + end.x;
       const heuristic = (x, y) => {
         const dx = Math.abs(x - end.x),
           dy = Math.abs(y - end.y);
@@ -609,11 +739,21 @@
       cost[si] = 0;
       stamp[si] = epoch;
       parent[si] = -1;
-      heap.push({ id: si, f: heuristic(s.x, s.y) });
+      heap.pushItem(si, heuristic(s.x, s.y));
       let found = false,
         expansions = 0;
-      while (heap.items.length) {
-        const current = heap.pop().id;
+      const DIRS = [
+        [-1, -1, 1, 1.4142135623730951],
+        [0, -1, 0, 1],
+        [1, -1, 1, 1.4142135623730951],
+        [-1, 0, 0, 1],
+        [1, 0, 0, 1],
+        [-1, 1, 1, 1.4142135623730951],
+        [0, 1, 0, 1],
+        [1, 1, 1, 1.4142135623730951],
+      ];
+      while (heap.length) {
+        const current = heap.popId();
         if (closed[current] === epoch) continue;
         if (current === ei) {
           found = true;
@@ -621,36 +761,28 @@
         }
         if ((++expansions & 31) === 0) yield;
         closed[current] = epoch;
-        const x = current % this.cols,
-          y = Math.floor(current / this.cols);
-        for (let dy = -1; dy <= 1; dy++)
-          for (let dx = -1; dx <= 1; dx++) {
-            if (
-              (!dx && !dy) ||
-              !this.free(x + dx, y + dy) ||
-              (dx && dy && (!this.free(x + dx, y) || !this.free(x, y + dy)))
-            )
-              continue;
-            const id = (y + dy) * this.cols + x + dx,
-              next = cost[current] + (dx && dy ? Math.SQRT2 : 1);
-            if (corridor && !corridor.has(this.chunkId(x + dx, y + dy)))
-              continue;
-            if (
-              closed[id] === epoch ||
-              (stamp[id] === epoch && next >= cost[id])
-            )
-              continue;
-            if (!this.edgeOpen(current, id)) continue;
-            if (
-              closed[id] !== epoch &&
-              (stamp[id] !== epoch || next < cost[id])
-            ) {
-              cost[id] = next;
-              stamp[id] = epoch;
-              parent[id] = current;
-              heap.push({ id, f: next + heuristic(x + dx, y + dy) });
-            }
-          }
+        const x = current % cols,
+          y = (current / cols) | 0;
+        for (let di = 0; di < 8; di++) {
+          const d = DIRS[di],
+            nx = x + d[0],
+            ny = y + d[1];
+          if (nx < 0 || nx >= cols || ny < 0 || ny >= rows) continue;
+          const id = ny * cols + nx;
+          if (blocked[id]) continue;
+          if (d[2] && (blocked[y * cols + nx] || blocked[ny * cols + x]))
+            continue;
+          const next = cost[current] + d[3];
+          if (corridor && !corridor.has((ny >> 5) * chunkCols + (nx >> 5)))
+            continue;
+          if (closed[id] === epoch || (stamp[id] === epoch && next >= cost[id]))
+            continue;
+          if (!this.edgeOpen(current, id)) continue;
+          cost[id] = next;
+          stamp[id] = epoch;
+          parent[id] = current;
+          heap.pushItem(id, next + heuristic(nx, ny));
+        }
       }
       if (!found) {
         if (corridor)
