@@ -2064,7 +2064,11 @@
     }
   }
   function structure(g, b, time) {
-    if (b.kind === "greatengine" && b.progress >= 1 && b.hp > 0) {
+    if (
+      (b.kind === "greatengine" || b.kind === "colossus") &&
+      b.progress >= 1 &&
+      b.hp > 0
+    ) {
       greatEngine(g, b, time);
       return;
     }

@@ -33,7 +33,7 @@
     }
     // Siege projectiles in flight see like an ordinary soldier, so a trebuchet
     // shot lights up the ground it is about to land on.
-    update(units, buildings, projectiles = []) {
+    update(units, buildings, projectiles = [], reveals = []) {
       this.visible.fill(0);
       const sources = units
         .filter((u) => u.team === this.team && u.hp > 0)
@@ -52,6 +52,8 @@
       for (const shot of projectiles)
         if (shot.team === this.team && !shot.hit)
           sources.push({ x: shot.x, y: shot.y, vision: 440 });
+      // Sites the rules reveal to this side (the enemy's Colossus).
+      for (const r of reveals) sources.push(r);
       for (const b of buildings)
         if (b.team === this.team && b.hp > 0 && b.progress >= 1)
           sources.push({

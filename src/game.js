@@ -315,6 +315,21 @@
     description:
       "Massive permanent counterweight engine. Villagers build it on site. Range 320-2200; huge blasts also hit nearby friendly troops.",
   };
+  // The Colossus: an enormous permanent engine that reaches anywhere on the
+  // map. Only one per side; it fires only where ordered and needs a crew.
+  BUILDINGS.colossus = {
+    name: "Colossal siege engine",
+    cost: { wood: 6000, stone: 3500, gold: 2500 },
+    w: 400,
+    h: 345,
+    hp: 16000,
+    time: 2400,
+    damage: 650,
+    reload: 18,
+    crew: 5,
+    description:
+      "Only one per side. Unlimited range: shots scatter further the farther they fly. Never fires on its own and needs 5 villagers working its winches. The enemy is told the moment it is begun.",
+  };
   for (const [key, b] of Object.entries(BUILDINGS)) {
     if (!["wall", "gate", "bastionwall"].includes(key)) {
       b.w = Math.round(b.w * 0.8);
@@ -2060,7 +2075,12 @@
         u.home = null;
       }
       state.navDirty = true;
-      fog.update(state.units, state.buildings, siegeShots());
+      fog.update(
+        state.units,
+        state.buildings,
+        siegeShots(),
+        colossusReveals(0),
+      );
       toast(
         city.name +
           " captured! +1,800 food, +2,400 wood, +1,800 stone, +2,200 gold. Surviving defenders and buildings join your host.",
@@ -3203,8 +3223,13 @@
     fog = new window.CruciataFog(W, H);
     enemyFog = new window.CruciataFog(W, H, null, 1);
     militiaFog = new window.CruciataFog(W, H, null, 3);
-    fog.update(state.units, state.buildings, siegeShots());
-    enemyFog.update(state.units, state.buildings, siegeShots());
+    fog.update(state.units, state.buildings, siegeShots(), colossusReveals(0));
+    enemyFog.update(
+      state.units,
+      state.buildings,
+      siegeShots(),
+      colossusReveals(1),
+    );
     militiaFog ||= new window.CruciataFog(W, H, null, 3);
     militiaFog.update(state.units, state.buildings, siegeShots());
     for (const team of [0, 1])
@@ -3402,9 +3427,9 @@
     state = saved.state;
     for (const b of state.buildings) {
       if (b.team === 1) b.architecture ||= "islamic";
-      if (b.kind === "greatengine") {
-        b.w = BUILDINGS.greatengine.w;
-        b.h = BUILDINGS.greatengine.h;
+      if (b.kind === "greatengine" || b.kind === "colossus") {
+        b.w = BUILDINGS[b.kind].w;
+        b.h = BUILDINGS[b.kind].h;
         b.r = Math.max(b.w, b.h) / 2;
       }
       if (!["wall", "gate"].includes(b.kind) && !b.gate) continue;
@@ -3442,10 +3467,15 @@
     fog = new window.CruciataFog(W, H, state.fog);
     enemyFog = new window.CruciataFog(W, H, state.enemyFog, 1);
     militiaFog = new window.CruciataFog(W, H, state.militiaFog, 3);
-    enemyFog.update(state.units, state.buildings, siegeShots());
+    enemyFog.update(
+      state.units,
+      state.buildings,
+      siegeShots(),
+      colossusReveals(1),
+    );
     militiaFog ||= new window.CruciataFog(W, H, null, 3);
     militiaFog.update(state.units, state.buildings, siegeShots());
-    fog.update(state.units, state.buildings, siegeShots());
+    fog.update(state.units, state.buildings, siegeShots(), colossusReveals(0));
     rebuildNavigation();
     state.roads = planRoads();
     ensureGroundCover();
@@ -4883,6 +4913,12 @@
     if (!playable() || kind === "gate") return;
     const builders = workers().filter((u) => selected.has(u.id));
 
+    if (kind === "colossus" && colossusOf(0)) {
+      toast(
+        "You may only have one Colossal siege engine at a time (even one under construction).",
+      );
+      return;
+    }
     if (!afford(BUILDINGS[kind].cost)) {
       toast("Not enough resources for this structure.");
       return;
@@ -4914,6 +4950,7 @@
     footprint = null,
   ) {
     if (team === 0 ? !playerRemembers(p) : !enemyFog.remembers(p)) return false;
+    if (kind === "colossus" && colossusOf(team)) return false;
     const t = footprint || placementSpec(kind, team, rotation);
     if (
       state.units.some(
@@ -5336,6 +5373,10 @@
     if (!playable() || !placement) return false;
     const kind = placement,
       builders = workers().filter((u) => selected.has(u.id));
+    if (kind === "colossus" && colossusOf(0)) {
+      toast("You already have a Colossal siege engine.");
+      return false;
+    }
     if (!afford(BUILDINGS[kind].cost) || !validSite(kind, p)) {
       toast(
         "Choose clear ground away from structures, trees, deposits, and water.",
@@ -5349,6 +5390,10 @@
     state.buildings.push(b);
     rebuildNavigation();
     queueConstruction(builders, [b.id], append);
+    if (kind === "colossus") {
+      announceColossus(b);
+      append = false;
+    }
     placement = append ? kind : null;
     mode = append ? "build" : "move";
     selectedBuilding = null;
@@ -5357,6 +5402,164 @@
     );
     updateUI();
     return true;
+  }
+  // ---- The Colossus ----------------------------------------------------
+  function colossusOf(team) {
+    return state?.buildings.find(
+      (b) => b.kind === "colossus" && b.team === team && b.hp > 0,
+    );
+  }
+  // Each side sees the other's Colossus from the moment it is begun.
+  function colossusReveals(team) {
+    const out = [];
+    if (state)
+      for (const b of state.buildings)
+        if (
+          b.kind === "colossus" &&
+          b.hp > 0 &&
+          (b.team === 0 || b.team === 1) &&
+          b.team !== team
+        )
+          out.push({ x: b.x, y: b.y, vision: 360 });
+    return out;
+  }
+  // Radius of the disc a shot may land in: accuracy falls with distance.
+  function colossusScatter(d) {
+    return 40 + d * 0.09;
+  }
+  function colossusImpact(b, target) {
+    const d = distance(b, target),
+      radius = colossusScatter(d),
+      shot = (b.shots = (b.shots || 0) + 1),
+      h1 = Math.sin(b.id * 12.9898 + shot * 78.233) * 43758.5453,
+      h2 = Math.sin(b.id * 93.9898 + shot * 67.345) * 24634.6345,
+      angle = (h1 - Math.floor(h1)) * Math.PI * 2,
+      reach = radius * Math.sqrt(h2 - Math.floor(h2));
+    return {
+      x: clamp(target.x + Math.cos(angle) * reach, 10, W - 10),
+      y: clamp(target.y + Math.sin(angle) * reach, 10, H - 10),
+    };
+  }
+  function announceColossus(b) {
+    b.announced = true;
+    if (b.team === 1) {
+      toast(
+        "WARNING: the enemy has begun a Colossal siege engine! Its site is marked on your map. Press Z to look.",
+      );
+      sound("horn");
+      (state.alerts ||= []).push({ x: b.x, y: b.y, t: 0 });
+    } else if (b.team === 0)
+      toast(
+        "Colossus begun. The enemy has been told where it stands and will try to destroy it.",
+      );
+  }
+  function colossusTick(b, dt) {
+    const need = BUILDINGS.colossus.crew;
+    let crew = 0;
+    for (const u of state.units)
+      if (
+        u.hp > 0 &&
+        u.team === b.team &&
+        u.working &&
+        u.job?.kind === "crew" &&
+        u.job.target === b.id
+      )
+        crew++;
+    b.crew = crew;
+    // Without a full crew the winches stand idle and the reload stops.
+    if (crew < need) return;
+    b.guardCooldown = Math.max(0, (b.guardCooldown ?? 0) - dt);
+    let target = b.fireTarget;
+    if (b.attackTarget) {
+      const locked = getObject(b.attackTarget);
+      if (
+        !locked ||
+        locked.hp <= 0 ||
+        locked.team === b.team ||
+        locked.team === 2
+      )
+        b.attackTarget = null;
+      else target = locked;
+    }
+    if (!target) return;
+    const aim = Math.atan2(target.y - b.y, target.x - b.x);
+    b.aimAngle ??= -Math.PI / 2;
+    const delta = Math.atan2(
+      Math.sin(aim - b.aimAngle),
+      Math.cos(aim - b.aimAngle),
+    );
+    b.aimAngle += clamp(delta, -0.85 * dt, 0.85 * dt);
+    if (b.guardCooldown > 0 || Math.abs(delta) > 0.06) return;
+    const hit = colossusImpact(b, target);
+    b.guardCooldown = BUILDINGS.colossus.reload;
+    b.lastShot = state.time;
+    sound("great-launch", { x: b.x, y: b.y, team: b.team });
+    launchEffect(b.x, b.y, aim, true);
+    state.boulders.push({
+      x: b.x,
+      y: b.y,
+      tx: hit.x,
+      ty: hit.y,
+      sx: b.x,
+      sy: b.y,
+      t: 0,
+      duration: 3.6 + distance(b, hit) / 1500,
+      heavy: true,
+      team: b.team,
+      source: b.id,
+      damage: BUILDINGS.colossus.damage,
+      r: 230,
+    });
+  }
+  // Sends the nearest villagers to the winches of the selected Colossus.
+  function manColossus() {
+    if (!playable()) return;
+    const engine = selectedStructures(
+      (b) => b.kind === "colossus" && b.progress >= 1,
+    )[0];
+    if (!engine) return;
+    const need = BUILDINGS.colossus.crew,
+      crewing = (u) => u.job?.kind === "crew" && u.job.target === engine.id,
+      have = workers().filter(crewing).length;
+    if (have >= need) {
+      toast(`The Colossus already has its crew of ${need}.`);
+      return;
+    }
+    const pool = workers()
+      .filter((u) => !crewing(u) && !u.autoScout)
+      .sort(
+        (a, c) =>
+          (a.job ? 1 : 0) * 600 +
+          distance(a, engine) -
+          ((c.job ? 1 : 0) * 600 + distance(c, engine)),
+      )
+      .slice(0, need - have);
+    for (const u of pool) {
+      u.job = { kind: "crew", target: engine.id };
+      u.order = null;
+      u.pathTimer = 0;
+      u.hold = false;
+    }
+    toast(
+      pool.length + have >= need
+        ? `${pool.length} villagers sent to man the Colossus.`
+        : `Only ${pool.length + have} villagers are available; the Colossus needs ${need}.`,
+    );
+    updateUI();
+  }
+  function releaseColossusCrew() {
+    if (!playable()) return;
+    const ids = new Set(
+      selectedStructures((b) => b.kind === "colossus").map((b) => b.id),
+    );
+    let n = 0;
+    for (const u of workers())
+      if (u.job?.kind === "crew" && ids.has(u.job.target)) {
+        u.job = null;
+        n++;
+      }
+    toast(n ? "Colossus crew released to other work." : "No crew to release.");
+    updateUI();
   }
   function cancelSiegeTargeting() {
     if (!playable()) return;
@@ -5368,13 +5571,16 @@
       u.manualTarget = false;
     }
     for (const b of selectedStructures(
-      (b) => b.kind === "greatengine" && b.progress >= 1,
+      (b) =>
+        (b.kind === "greatengine" || b.kind === "colossus") && b.progress >= 1,
     )) {
       b.fireTarget = null;
       b.attackTarget = null;
     }
     updateUI();
-    toast("Siege targeting cancelled. Engines resume watching for enemies.");
+    toast(
+      "Siege targeting cancelled. Colossi cease fire; other engines resume watching for enemies.",
+    );
   }
   function cancel() {
     wallDrag = null;
@@ -5557,6 +5763,21 @@
         "Great siege engine target set. The platform will turn and fire when ready.",
       );
     }
+    const colossi = selectedStructures(
+      (b) => b.kind === "colossus" && b.progress >= 1,
+    );
+    for (const engine of colossi) {
+      const hit = enemy || p,
+        scatter = Math.round(colossusScatter(distance(engine, hit)));
+      engine.attackTarget = enemy?.id || null;
+      engine.fireTarget = enemy ? null : { x: p.x, y: p.y };
+      sound("attack", engine);
+      toast(
+        (engine.crew || 0) >= BUILDINGS.colossus.crew
+          ? `Colossus ordered to bombard this target. Shots land within ${scatter} units and repeat every ${BUILDINGS.colossus.reload}s until cancelled.`
+          : `Colossus target set (scatter ${scatter}), but only ${engine.crew || 0} of ${BUILDINGS.colossus.crew} crew are at the winches. Right-click the engine with villagers to man it.`,
+      );
+    }
     if (!units.length) {
       const producers = state.buildings.filter(
         (b) =>
@@ -5570,9 +5791,11 @@
       toast(
         producers.length
           ? "New troops from selected training buildings will rally here."
-          : greatEngines.length
-            ? "Right-click a target within great engine range (320-2200)."
-            : "This building cannot train troops and has no rally point.",
+          : colossi.length
+            ? "Right-click anywhere to order a Colossus bombardment."
+            : greatEngines.length
+              ? "Right-click a target within great engine range (320-2200)."
+              : "This building cannot train troops and has no rally point.",
       );
       return;
     }
@@ -5787,6 +6010,14 @@
             surfaceDistance(p, work))
       ) {
         assignGather(u, node.kind === "farm" ? "food" : node.kind, node);
+      } else if (
+        building?.team === 0 &&
+        building.kind === "colossus" &&
+        building.progress >= 1
+      ) {
+        u.job = { kind: "crew", target: building.id };
+        u.order = null;
+        u.pathTimer = 0;
       } else if (
         building?.team === 0 &&
         building.progress >= 1 &&
@@ -6063,11 +6294,11 @@
     }
     if (!u.job || u.hold) return;
     const job = u.job;
-    if (job.kind === "build" || job.kind === "repair") {
+    if (job.kind === "build" || job.kind === "repair" || job.kind === "crew") {
       const b = state.buildings.find(
         (b) => b.id === job.target && b.hp > 0 && b.team === u.team,
       );
-      if (!b) {
+      if (!b || (job.kind === "crew" && b.progress < 1)) {
         u.job = null;
         return;
       }
@@ -6130,7 +6361,19 @@
               if (groundFree(p.x, p.y, 6)) candidates.push(p);
             }
           }
-          candidates.sort((a, b) => distance(u, a) - distance(u, b));
+          // Crew members take their own stations around the engine.
+          const station =
+              job.kind === "crew" ? (u.id * 2.399) % (Math.PI * 2) : null,
+            spread = (c) => {
+              const d = Math.abs(Math.atan2(c.y - b.y, c.x - b.x) - station),
+                m = d % (Math.PI * 2);
+              return Math.min(m, Math.PI * 2 - m);
+            };
+          candidates.sort((a, c) =>
+            station === null
+              ? distance(u, a) - distance(u, c)
+              : spread(a) - spread(c),
+          );
           const point = candidates.find((p) => routePossible(u, p));
           contact = u.buildContact = point
             ? {
@@ -6176,6 +6419,15 @@
           });
       }
       u.angle = Math.atan2(b.y - u.y, b.x - u.x);
+      if (job.kind === "crew") {
+        // Winding the winches also keeps the timbers in repair.
+        const repair = Math.min(6 * dt, b.maxHp - b.hp);
+        if (repair > 0 && stock(u.team).wood >= repair * 0.08) {
+          pay({ wood: repair * 0.08 }, 1, u.team);
+          b.hp += repair;
+        }
+        return;
+      }
       if (job.kind === "build") {
         if (b.progress >= 1) {
           constructionFinished(u, b);
@@ -6190,7 +6442,20 @@
         if (b.progress >= 1) {
           b.hp = Math.min(b.maxHp, Math.round(b.hp * 1000) / 1000);
           state.stats.built++;
-          if (u.team === 0) toast(BUILDINGS[b.kind].name + " is complete.");
+          if (u.team === 0)
+            toast(
+              BUILDINGS[b.kind].name +
+                " is complete." +
+                (b.kind === "colossus"
+                  ? " Right-click it with 5 villagers to crew it, then right-click anywhere to fire."
+                  : ""),
+            );
+          else if (b.kind === "colossus") {
+            toast(
+              "The enemy Colossus is complete. It can now bombard anywhere on the map!",
+            );
+            sound("horn");
+          }
           sound("bell");
           constructionFinished(u, b);
         }
@@ -7550,6 +7815,92 @@
         }
       }
     }
+    // A rich enemy late in the game raises its own Colossus, crews it with five
+    // villagers and bombards the most valuable structure it knows.
+    function colossusAI() {
+      const mine = colossusOf(1),
+        need = BUILDINGS.colossus.crew,
+        idle = () =>
+          ws.filter(
+            (u) =>
+              u.job?.kind !== "crew" &&
+              u.job?.kind !== "build" &&
+              !u.order &&
+              u.stance !== "stand-down",
+          );
+      if (!mine) {
+        if (
+          state.time < 840 ||
+          ws.length < 12 ||
+          !afford(BUILDINGS.colossus.cost, 1)
+        )
+          return;
+        for (let i = 0; i < 80; i++) {
+          const a = i * 2.399,
+            r = 380 + Math.floor(i / 10) * 70,
+            p = { x: base.x + Math.cos(a) * r, y: base.y + Math.sin(a) * r };
+          if (!validSite("colossus", p, 1)) continue;
+          pay(BUILDINGS.colossus.cost, 1, 1);
+          const b = makeBuilding("colossus", 1, p.x, p.y, 0);
+          state.buildings.push(b);
+          state.navDirty = true;
+          queueConstruction(idle().slice(0, 8), [b.id], false);
+          announceColossus(b);
+          return;
+        }
+        return;
+      }
+      if (mine.progress < 1) {
+        const crew = ws.filter(
+          (u) => u.job?.kind === "build" && u.job.target === mine.id,
+        ).length;
+        if (crew < 6)
+          queueConstruction(idle().slice(0, 8 - crew), [mine.id], false);
+        return;
+      }
+      const crewing = ws.filter(
+        (u) => u.job?.kind === "crew" && u.job.target === mine.id,
+      ).length;
+      if (crewing < need)
+        for (const u of ws
+          .filter((u) => u.job?.kind !== "crew")
+          .sort((a, c) => distance(a, mine) - distance(c, mine))
+          .slice(0, need - crewing)) {
+          u.job = { kind: "crew", target: mine.id };
+          u.order = null;
+          u.pathTimer = 0;
+          u.hold = false;
+        }
+      const current = getObject(mine.attackTarget);
+      if (current && current.hp > 0) return;
+      const value = (b) =>
+        ({
+          colossus: 100,
+          greatengine: 70,
+          towncenter: 60,
+          barracks: 45,
+          stable: 45,
+          siegeworkshop: 45,
+          fort: 40,
+          house: 15,
+          tower: 8,
+          watchtower: 8,
+          wall: 0,
+          gate: 0,
+        })[b.kind] ?? 20;
+      const pick = known
+        .map((k) => getObject(k.id))
+        .filter((b) => b && b.hp > 0 && b.team === 0)
+        .sort(
+          (a, c) =>
+            value(c) - value(a) || distance(a, mine) - distance(c, mine),
+        )[0];
+      if (pick) {
+        mine.attackTarget = pick.id;
+        mine.fireTarget = null;
+      }
+    }
+    colossusAI();
     const surplus =
       state.enemy.resources.food > 400 &&
       state.enemy.resources.wood > 500 &&
@@ -7842,7 +8193,9 @@
         (b.kind === "tower" ? 500 : 0) +
         (wallish ? 1800 : 0) +
         (["barracks", "stable", "siegeworkshop"].includes(b.kind) ? -150 : 0) +
-        (b.kind === "towncenter" ? -100 : 0)
+        (b.kind === "towncenter" ? -100 : 0) +
+        // An enemy Colossus is worth any march.
+        (b.kind === "colossus" ? -6000 : 0)
       );
     }
     function launchAssault(group, target, center) {
@@ -8466,8 +8819,18 @@
     state.time += dt;
     visionTimer -= dt;
     if (visionTimer <= 0) {
-      fog.update(state.units, state.buildings, siegeShots());
-      enemyFog.update(state.units, state.buildings, siegeShots());
+      fog.update(
+        state.units,
+        state.buildings,
+        siegeShots(),
+        colossusReveals(0),
+      );
+      enemyFog.update(
+        state.units,
+        state.buildings,
+        siegeShots(),
+        colossusReveals(1),
+      );
       militiaFog ||= new window.CruciataFog(W, H, null, 3);
       militiaFog.update(state.units, state.buildings, siegeShots());
       visionTimer = 0.2;
@@ -8672,6 +9035,8 @@
           }
         }
       }
+      if (b.kind === "colossus" && b.progress >= 1 && b.team !== 2)
+        colossusTick(b, dt);
       const spec = BUILDINGS[b.kind];
       if (spec.range && b.team !== 2) {
         b.guardCooldown -= dt;
@@ -9269,6 +9634,12 @@
       b.append(role);
       b.title += " " + ROLES[art.type].description;
     }
+    if (art.kind === "colossus") {
+      const role = document.createElement("span");
+      role.className = "role";
+      role.textContent = "One per side \u00b7 5 crew \u00b7 enemy is warned";
+      b.append(role);
+    }
     return b;
   }
   ROLES.ram = {
@@ -9311,7 +9682,14 @@
       ["Military", ["barracks", "stable", "siegeworkshop"]],
       [
         "Fortification",
-        ["watchtower", "tower", "wall", "bastionwall", "greatengine"],
+        [
+          "watchtower",
+          "tower",
+          "wall",
+          "bastionwall",
+          "greatengine",
+          "colossus",
+        ],
       ],
     ]) {
       const group = document.createElement("section");
@@ -9364,6 +9742,20 @@
         !!stanced.length &&
           stanced.every((u) => (u.stance || "fight") === stance),
       );
+    }
+    const foeColossus = colossusOf(1),
+      banner = $("colossus-banner");
+    banner.hidden = !foeColossus;
+    if (foeColossus) {
+      banner.textContent =
+        foeColossus.progress < 1
+          ? `\u26a0 ENEMY COLOSSUS UNDER CONSTRUCTION \u2014 ${Math.floor(foeColossus.progress * 100)}%. Click to look. Destroy it before it is finished.`
+          : "\u26a0 ENEMY COLOSSUS OPERATIONAL \u2014 it can bombard anywhere. Click to look.";
+      banner.onclick = () => {
+        camera.x = foeColossus.x;
+        camera.y = foeColossus.y;
+        updateView();
+      };
     }
     $("destroy-button").hidden = !selectedStructures((b) => !b.cityCenter)
       .length;
@@ -9728,6 +10120,18 @@
         city.name +
         ": fortified city. Reach the capital with a combat troop to capture it immediately. Claim 1,800 food, 2,400 wood, 1,800 stone, 2,200 gold, and all surviving buildings and defenders.";
     }
+    if (b?.kind === "colossus") {
+      const need = BUILDINGS.colossus.crew,
+        crew = b.crew || 0;
+      $("selection-role").textContent =
+        b.progress < 1
+          ? `${Math.floor(b.progress * 100)}% built. One per side; the enemy knows where it stands. Needs ${need} villagers to operate.`
+          : crew >= need
+            ? `Crew ${crew}/${need}. Reload ${Math.ceil(Math.max(0, b.guardCooldown || 0))}s. Right-click to bombard; the circle shows where shots may land.`
+            : `Needs ${need} villagers at its winches (${crew}/${need}). Press Man engine, then right-click to bombard.`;
+      $("selection-role").title =
+        `Unlimited range, but shots scatter farther the farther they fly. The engine never fires on its own: right-click a point or an enemy and it repeats every ${BUILDINGS.colossus.reload}s until Cancel target. It reloads and fires only while ${need} villagers work its winches. Blasts also hit friendly troops.`;
+    } else $("selection-role").removeAttribute("title");
     if (b?.kind === "greatengine")
       $("selection-role").textContent =
         "Permanent siege engine. Range 320-2200. Right-click ground to bombard it, or an enemy to lock bombardment. Hold fires only at ordered targets; Stand down ceases fire. Reload: " +
@@ -9744,11 +10148,27 @@
       selectedGreat = selectedStructures(
         (b) => b.kind === "greatengine" && b.progress >= 1,
       );
+    const selectedColossi = selectedStructures(
+      (b) => b.kind === "colossus" && b.progress >= 1,
+    );
+    $("crew-button").hidden = !selectedColossi.length;
+    $("release-crew-button").hidden = !selectedColossi.length;
+    if (selectedColossi.length) {
+      const engine = selectedColossi[0],
+        assigned = workers().filter(
+          (u) => u.job?.kind === "crew" && u.job.target === engine.id,
+        ).length;
+      $("crew-button").textContent =
+        `Man engine (${Math.min(assigned, BUILDINGS.colossus.crew)}/${BUILDINGS.colossus.crew})`;
+      $("crew-button").disabled = assigned >= BUILDINGS.colossus.crew;
+      $("release-crew-button").disabled = !assigned;
+    }
     $("cancel-targeting-button").hidden =
-      !selectedSiege.length && !selectedGreat.length;
+      !selectedSiege.length && !selectedGreat.length && !selectedColossi.length;
     $("cancel-targeting-button").disabled =
       !selectedSiege.some((u) => u.fireTarget || u.manualTarget) &&
-      !selectedGreat.some((b) => b.fireTarget || b.attackTarget);
+      !selectedGreat.some((b) => b.fireTarget || b.attackTarget) &&
+      !selectedColossi.some((b) => b.fireTarget || b.attackTarget);
     $("bless-button").hidden = !stanceUnits.length;
     $("scout-button").disabled = !units.some((u) => u.type !== "worker");
     $("scout-button").classList.toggle(
@@ -9801,7 +10221,10 @@
     }
     for (const [k, t] of Object.entries(BUILDINGS))
       if (t.cost && $("build-" + k)) {
-        $("build-" + k).disabled = !afford(t.cost) || !!state.result;
+        $("build-" + k).disabled =
+          !afford(t.cost) ||
+          !!state.result ||
+          (k === "colossus" && !!colossusOf(0));
         $("build-" + k).classList.toggle("active", placement === k);
       }
     for (const [k, t] of Object.entries(TECHS)) {
@@ -10407,6 +10830,87 @@
       }
       ctx.restore();
     }
+    // A Colossus has no range ring: a scatter disc shows where a shot at the
+    // pointer (and at the current order) may land, widening with distance.
+    for (const b of selectedStructures(
+      (b) => b.kind === "colossus" && b.progress >= 1,
+    )) {
+      const need = BUILDINGS.colossus.crew,
+        manned = (b.crew || 0) >= need,
+        aims = [];
+      if (pointerOnMap && mouse && !placement) aims.push([mouse, true]);
+      const ordered = b.attackTarget ? getObject(b.attackTarget) : b.fireTarget;
+      if (ordered) aims.push([ordered, false]);
+      for (const [p, hover] of aims) {
+        const d = distance(b, p),
+          r = colossusScatter(d);
+        ctx.save();
+        ctx.lineWidth = 2 / Math.max(0.4, view.scale);
+        ctx.fillStyle = hover ? "#e8b64b18" : "#d9573b24";
+        ctx.strokeStyle = hover ? "#f2c669" : "#e2674a";
+        ctx.setLineDash([16, 10]);
+        ctx.beginPath();
+        ctx.arc(p.x, p.y, r, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.stroke();
+        ctx.setLineDash([]);
+        ctx.globalAlpha = 0.7;
+        ctx.beginPath();
+        ctx.arc(p.x, p.y, 8, 0, Math.PI * 2);
+        ctx.stroke();
+        ctx.globalAlpha = 1;
+        ctx.fillStyle = "#fff1c9";
+        ctx.font = `bold ${Math.round(13 / Math.max(0.5, view.scale))}px Georgia`;
+        ctx.fillText(
+          `Shot lands within ${Math.round(r)} units`,
+          p.x + 14,
+          p.y - r - 8,
+        );
+        ctx.restore();
+      }
+      ctx.save();
+      ctx.fillStyle = manned ? "#f5d497" : "#ff9b80";
+      ctx.font = "bold 14px Georgia";
+      ctx.textAlign = "center";
+      ctx.fillText(
+        manned
+          ? `COLOSSUS | CREW ${b.crew}/${need} | RELOAD ${Math.ceil(Math.max(0, b.guardCooldown || 0))}s`
+          : `COLOSSUS | CREW ${b.crew || 0}/${need} | NEEDS ${need} VILLAGERS`,
+        b.x,
+        b.y - 250,
+      );
+      ctx.restore();
+    }
+    // Every Colossus is marked on the world map, even from the other side.
+    for (const b of state.buildings)
+      if (
+        b.kind === "colossus" &&
+        b.hp > 0 &&
+        b.team !== 0 &&
+        onScreen(b, 400)
+      ) {
+        ctx.save();
+        const pulse = 0.5 + Math.sin(state.time * 4) * 0.5;
+        ctx.strokeStyle = "#ff5a3c";
+        ctx.lineWidth = 3;
+        ctx.globalAlpha = 0.5 + pulse * 0.4;
+        ctx.setLineDash([22, 12]);
+        ctx.beginPath();
+        ctx.arc(b.x, b.y, b.r + 40 + pulse * 18, 0, Math.PI * 2);
+        ctx.stroke();
+        ctx.globalAlpha = 1;
+        ctx.fillStyle = "#ffd7c9";
+        ctx.font = "bold 15px Georgia";
+        ctx.textAlign = "center";
+        ctx.fillText(
+          b.progress < 1
+            ? `ENEMY COLOSSUS | ${Math.floor(b.progress * 100)}% BUILT`
+            : "ENEMY COLOSSUS | OPERATIONAL",
+          b.x,
+          b.y - 270,
+        );
+        ctx.restore();
+      }
     // Selected engines link to their targets even when the engine is off-screen.
     const siegeLink = (from, to) => {
       if (!to || !segmentVisible(from, to, 80)) return;
@@ -10425,7 +10929,8 @@
     };
     for (const u of engines) siegeLink(u, u.fireTarget || getObject(u.target));
     for (const b of selectedStructures(
-      (b) => b.kind === "greatengine" && b.progress >= 1,
+      (b) =>
+        (b.kind === "greatengine" || b.kind === "colossus") && b.progress >= 1,
     ))
       siegeLink(b, b.fireTarget || getObject(b.attackTarget));
     for (const u of engines) {
@@ -10978,6 +11483,23 @@
     }
     if (!state.cheats?.reveal || !DEBUG_MODE)
       fog.paint(mc, mini.width, mini.height);
+    for (const b of state.buildings)
+      if (b.kind === "colossus" && b.hp > 0 && (b.team === 0 || b.team === 1)) {
+        const pulse = 0.5 + Math.sin(state.time * 4) * 0.5;
+        mc.strokeStyle = b.team === 1 ? "#ff5a3c" : "#f4d27a";
+        mc.fillStyle = mc.strokeStyle;
+        mc.lineWidth = 2;
+        mc.beginPath();
+        mc.arc(b.x * sx, b.y * sy, 7 + pulse * 4, 0, Math.PI * 2);
+        mc.stroke();
+        mc.beginPath();
+        mc.moveTo(b.x * sx, b.y * sy - 5);
+        mc.lineTo(b.x * sx + 5, b.y * sy);
+        mc.lineTo(b.x * sx, b.y * sy + 5);
+        mc.lineTo(b.x * sx - 5, b.y * sy);
+        mc.closePath();
+        mc.fill();
+      }
     for (const a of state.alerts || []) {
       mc.strokeStyle = "#ff6a4a";
       mc.lineWidth = 2;
@@ -11364,6 +11886,8 @@
     ["deploy-button", toggleDeployment],
     ["cancel-button", cancel],
     ["cancel-targeting-button", cancelSiegeTargeting],
+    ["crew-button", manColossus],
+    ["release-crew-button", releaseColossusCrew],
     ["pause-button", togglePause],
     ["save-button", () => saveGame(true)],
     ["restart-button", () => startLevel(state.level)],
@@ -11741,8 +12265,18 @@
         }
         rebuildNavigation();
         rebuildSpatial();
-        fog.update(state.units, state.buildings, siegeShots());
-        enemyFog.update(state.units, state.buildings, siegeShots());
+        fog.update(
+          state.units,
+          state.buildings,
+          siegeShots(),
+          colossusReveals(0),
+        );
+        enemyFog.update(
+          state.units,
+          state.buildings,
+          siegeShots(),
+          colossusReveals(1),
+        );
         militiaFog ||= new window.CruciataFog(W, H, null, 3);
         militiaFog.update(state.units, state.buildings, siegeShots());
         updateUI();

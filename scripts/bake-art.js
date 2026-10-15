@@ -58,7 +58,7 @@ const fs = require("node:fs"),
             curtains[JSON.stringify(c)] = c;
             continue;
           }
-          if (b.kind === "greatengine") continue;
+          if (b.kind === "greatengine" || b.kind === "colossus") continue;
           result[[b.kind, b.w, b.h].join(":")] = [b.kind, b.w, b.h];
         }
       }

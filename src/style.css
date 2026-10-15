@@ -508,6 +508,31 @@ kbd {
   margin: 5px 0 2px;
   color: #c0a579;
 }
+#colossus-banner {
+  position: absolute;
+  top: 13px;
+  left: 50%;
+  transform: translateX(-50%);
+  max-width: 46%;
+  padding: 9px 16px;
+  font-size: 10px;
+  text-align: center;
+  background: #4a1c14ee;
+  color: #ffd7c9;
+  border: 1px solid #ff7a5c;
+  box-shadow: 0 0 14px #ff5a3c66;
+  cursor: pointer;
+  z-index: 4;
+  animation: colossus-pulse 1.6s ease-in-out infinite;
+}
+#colossus-banner[hidden] {
+  display: none;
+}
+@keyframes colossus-pulse {
+  50% {
+    box-shadow: 0 0 24px #ff5a3caa;
+  }
+}
 #toast {
   position: absolute;
   left: 50%;

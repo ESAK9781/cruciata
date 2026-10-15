@@ -896,38 +896,39 @@
     if (b.kind === "bastionwall") b = { ...b, kind: "wall", fortified: true };
     if (b.wallAttachment?.fortified && !b.fortified)
       b = { ...b, fortified: true };
-    if (b.kind === "greatengine" && b.hp > 0) {
+    if ((b.kind === "greatengine" || b.kind === "colossus") && b.hp > 0) {
+      const k = b.kind === "colossus" ? 2 : 1;
       if (b.progress >= 1) A.greatEngine(g, b, time);
       else {
         g.save();
         g.translate(b.x, b.y);
         g.save();
         g.beginPath();
-        g.rect(-150, -25 - 150 * b.progress, 300, 200);
+        g.rect(-150 * k, (-25 - 150 * b.progress) * k, 300 * k, 200 * k);
         g.clip();
         A.greatEngine(g, { ...b, x: 0, y: 0 }, time);
         g.restore();
         sprite(
           g,
-          `engineScaffold:${Math.floor(b.progress * 20)}`,
-          320,
-          330,
-          160,
-          230,
+          `engineScaffold:${k}:${Math.floor(b.progress * 20)}`,
+          320 * k,
+          330 * k,
+          160 * k,
+          230 * k,
           (g) => {
             const m = model(g);
             for (let i = 0; i < 8; i++) {
               const a = (i * Math.PI) / 4,
                 x = Math.cos(a) * b.w * 0.42,
                 y = (Math.sin(a) * b.h * 0.42) / 0.72;
-              m.beam([x, y, 0], [x, y, 55 + b.progress * 40], 3);
+              m.beam([x, y, 0], [x, y, (55 + b.progress * 40) * k], 3);
               const next = ((i + 1) * Math.PI) / 4;
               m.beam(
-                [x, y, 40],
+                [x, y, 40 * k],
                 [
                   Math.cos(next) * b.w * 0.42,
                   (Math.sin(next) * b.h * 0.42) / 0.72,
-                  40,
+                  40 * k,
                 ],
                 3,
               );
@@ -1077,25 +1078,27 @@
     g.restore();
   }
   function visualHeight(b) {
-    return b.kind === "greatengine"
-      ? 160
-      : b.kind === "chapel"
-        ? 105
-        : b.kind === "fort"
-          ? 108
-          : b.kind === "towncenter"
-            ? 95
-            : b.kind === "tower"
-              ? 80
-              : b.kind === "watchtower"
-                ? 78
-                : b.kind === "gate"
-                  ? 75
-                  : b.kind === "wall"
-                    ? b.fortified
-                      ? 46
-                      : 35
-                    : 65;
+    return b.kind === "colossus"
+      ? 330
+      : b.kind === "greatengine"
+        ? 160
+        : b.kind === "chapel"
+          ? 105
+          : b.kind === "fort"
+            ? 108
+            : b.kind === "towncenter"
+              ? 95
+              : b.kind === "tower"
+                ? 80
+                : b.kind === "watchtower"
+                  ? 78
+                  : b.kind === "gate"
+                    ? 75
+                    : b.kind === "wall"
+                      ? b.fortified
+                        ? 46
+                        : 35
+                      : 65;
   }
   function tree(g, x, y, scale = 1, palm = false, snow = false) {
     g.save();
@@ -2065,6 +2068,7 @@
     mill: [-36, 43, -60, 34],
     miningcamp: [-42, 42, -56, 38],
     lumbercamp: [-42, 42, -56, 38],
+    colossus: [-175, 175, -420, 150],
   };
   // Soldiers and villagers are drawn as small clusters, so their pick area
   // grows by the cluster's spread.

@@ -174,10 +174,13 @@
       : 18;
     const launch = elapsed < 0.7 ? Math.sin((elapsed / 0.7) * Math.PI) : 0;
     const reload = elapsed > 1 && elapsed < 16 ? (elapsed - 1) / 15 : 1;
-    const turn = (b.aimAngle ?? -Math.PI / 2) + Math.PI / 2;
+    const turn = (b.aimAngle ?? -Math.PI / 2) + Math.PI / 2,
+      big = b.kind === "colossus";
     g.save();
     g.translate(b.x, b.y);
-    g.scale(0.7, 0.7);
+    // The Colossus is the same machine at twice the size, ringed with gilded
+    // buttresses and a second hoop; its crew are real villagers beside it.
+    g.scale(big ? 1.4 : 0.7, big ? 1.4 : 0.7);
     // A stationary circular stone drum and toothed bearing support the turret.
     for (let y = 17; y >= -4; y -= 7) {
       A.ellipse(g, 0, y, 116, 84, y === -4 ? "#a7a180" : "#6f715a", "#414d3f");
@@ -313,8 +316,33 @@
         "#454d43",
         "#c0b99b",
       ]);
-    m.person(-96, 33, 1, b.team);
-    m.person(96, 38, 1, b.team);
+    if (big) {
+      ring(40, 104, 7, steel);
+      const gold = ["#d7b24a", "#8f7424", "#f5df8a"],
+        cloth = b.team === 1 ? "#8d2a1f" : "#b0322a";
+      for (let i = 0; i < 12; i++) {
+        const a = (i * Math.PI) / 6 + Math.PI / 12,
+          x = Math.cos(a) * 103,
+          y = Math.sin(a) * 103;
+        m.box(x, y, 0, 15, 15, 36, ["#8b8a72", "#565f50", "#c0b995"]);
+        m.box(x, y, 36, 10, 10, 6, gold);
+        if (i % 3 === 0) {
+          m.bar([x, y, 42], [x, y, 84], 3, steel);
+          m.face(
+            [
+              [x, y, 84],
+              [x + 3, y + 22, 78],
+              [x, y, 70],
+            ],
+            cloth,
+            "#3b1d18",
+          );
+        }
+      }
+    } else {
+      m.person(-96, 33, 1, b.team);
+      m.person(96, 38, 1, b.team);
+    }
     m.paint();
     g.restore();
   }
@@ -587,6 +615,9 @@
     g.drawImage(entry.canvas, -origin[0], -origin[1], width, height);
   }
   function greatEngine(g, b, time) {
+    // The Colossus bakes fewer reload poses: its sprites are four times larger.
+    const big = b.kind === "colossus",
+      step = big ? 1 : 2;
     let elapsed = Number.isFinite(b.lastShot)
       ? Math.max(0, time - b.lastShot)
       : 18;
@@ -594,7 +625,7 @@
       elapsed < 1
         ? Math.floor(elapsed * 12) / 12
         : elapsed < 16
-          ? Math.floor(elapsed * 2) / 2
+          ? Math.floor(elapsed * step) / step
           : 18;
     const angle =
       (Math.round(((b.aimAngle ?? -Math.PI / 2) * 8) / Math.PI) * Math.PI) / 8;
@@ -607,17 +638,17 @@
       elapsed < 1
         ? "fire-" + Math.floor(elapsed * 12)
         : elapsed < 16
-          ? "reload-" + Math.floor(elapsed * 2)
+          ? "reload-" + Math.floor(elapsed * step)
           : "ready";
     g.save();
     g.translate(b.x, b.y);
     sprite(
       g,
       b,
-      `${b.team}:${Math.round(((b.aimAngle ?? -Math.PI / 2) * 180) / Math.PI)}:${pose}`,
-      300,
-      340,
-      [150, 240],
+      `${big ? "colossus:" : ""}${b.team}:${Math.round(((b.aimAngle ?? -Math.PI / 2) * 180) / Math.PI)}:${pose}`,
+      big ? 420 : 300,
+      big ? 660 : 340,
+      big ? [210, 500] : [150, 240],
       (cg) => drawGreatEngine(cg, { ...b, x: 0, y: 0 }, time),
     );
     g.restore();

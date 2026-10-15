@@ -87,3 +87,11 @@ Verification: all 20 campaign-scale checks passed in Chromium and Firefox. Twelv
 - [x] Repaint build previews after atlas pages finish decoding.
 - [x] Replace attached stone guard tower bodies with circular platforms layered over continuous wall curtains, with a readable archer figure.
 - [x] Version and rebake the attached tower atlas artwork; verify preview pixels, wall joins, syntax, and static packaging.
+
+# Colossal siege engine
+
+- [x] Commit everything before starting (3fd8f8f).
+- [x] New `colossus` building: huge cost/build time, one per side, 5-villager crew, order-only fire with distance scatter, same reload/damage/flight as the great engine.
+- [x] Both sides are warned and shown the site (toast, horn, banner, minimap marker, world beacon, fog reveal) from the moment it is begun.
+- [x] Crew UI (Man engine / Release crew, crew counter, build-card rules), scatter circle while targeting, AI build/crew/bombard.
+- [x] `tests/colossus.spec.js`; full Chromium suite and docs.
