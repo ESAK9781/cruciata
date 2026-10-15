@@ -18,15 +18,18 @@ const { chromium } = require("@playwright/test");
       }
     });
   });
+  await page.evaluate(() => {
+    const snap = cruciata.snapshot();
+    window.__ids = snap.units.filter((u) => u.id >= 900000).map((u) => u.id);
+    const e = snap.buildings.find((b) => b.team === 1);
+    window.__target = { x: e.x, y: e.y };
+  });
   await cdp.send("Profiler.enable");
   await cdp.send("Profiler.setSamplingInterval", { interval: 100 });
   await cdp.send("Profiler.start");
   const ms = await page.evaluate(() => {
-    const snap = cruciata.snapshot();
-    const ids = snap.units.filter((u) => u.id >= 900000).map((u) => u.id);
-    const enemy = snap.buildings.find((b) => b.team === 1);
     const t = performance.now();
-    cruciata.order(ids, { x: enemy.x, y: enemy.y }, false);
+    cruciata.order(window.__ids, window.__target, false);
     return performance.now() - t;
   });
   const { profile } = await cdp.send("Profiler.stop");

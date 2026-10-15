@@ -2244,6 +2244,29 @@
       posts: [],
     };
   }
+  // Nudge a building to the nearest clear ground when its footprint overlaps others.
+  function placeClear(b, margin = 8) {
+    const clear = (x, y) =>
+      !state.buildings.some(
+        (o) =>
+          o !== b &&
+          o.hp > 0 &&
+          Math.abs(x - o.x) < (b.w + o.w) / 2 + margin &&
+          Math.abs(y - o.y) < (b.h + o.h) / 2 + margin,
+      ) && landFree(x, y, Math.max(b.w, b.h) / 2);
+    if (clear(b.x, b.y)) return;
+    for (let r = 24; r <= 480; r += 24)
+      for (let i = 0; i < 16; i++) {
+        const angle = (i * Math.PI) / 8 + r * 0.01,
+          x = b.x + Math.cos(angle) * r,
+          y = b.y + Math.sin(angle) * r;
+        if (clear(x, y)) {
+          b.x = x;
+          b.y = y;
+          return;
+        }
+      }
+  }
   function prepareCampaign() {
     const rules = state.campaignRules,
       l = LEVELS[state.level],
@@ -2258,6 +2281,8 @@
         maxHp: 6500,
         castle: true,
       });
+      for (const b of state.buildings)
+        if (b !== camp && b.team === 0) placeClear(b);
       for (const plot of defensivePlots(camp, 720))
         state.buildings.push(
           makeBuilding(plot.kind, 0, plot.x, plot.y, 1, {
@@ -2270,22 +2295,22 @@
       for (let i = 0; i < 12; i++) {
         const angle = i * 2.399,
           r = 230 + Math.floor(i / 6) * 100;
-        state.buildings.push(
-          makeBuilding(
-            i < 8
-              ? "house"
-              : i === 8
-                ? "watchtower"
-                : i === 9
-                  ? "stable"
-                  : i === 10
-                    ? "siegeworkshop"
-                    : "barracks",
-            0,
-            camp.x + Math.cos(angle) * r,
-            camp.y + Math.sin(angle) * r,
-          ),
+        const district = makeBuilding(
+          i < 8
+            ? "house"
+            : i === 8
+              ? "watchtower"
+              : i === 9
+                ? "stable"
+                : i === 10
+                  ? "siegeworkshop"
+                  : "barracks",
+          0,
+          camp.x + Math.cos(angle) * r,
+          camp.y + Math.sin(angle) * r,
         );
+        state.buildings.push(district);
+        placeClear(district);
       }
       for (let i = 0; i < 36; i++) {
         const angle = i * 2.399,
@@ -3140,6 +3165,14 @@
         const p = findFree(u);
         u.x = p.x;
         u.y = p.y;
+      } else if (u.team === 0 && !groundFree(u.x, u.y, 8)) {
+        // Never begin wedged against a tree, wall or building.
+        const p = roomyGround(u);
+        if (p) {
+          u.x = p.x;
+          u.y = p.y;
+          if (u.home) u.home = { x: p.x, y: p.y };
+        }
       }
     fog = new window.CruciataFog(W, H);
     enemyFog = new window.CruciataFog(W, H, null, 1);
@@ -3950,18 +3983,29 @@
     }
   }
   function reserveSlot(p, slots, anchor = null) {
-    const available = (q) =>
-      !slots.some((s) => distance(s, q) < 24) &&
-      (!anchor || nav.clearLine(anchor, q));
+    // Slots live in a 24-unit hash so large armies do not scan one another.
+    const grid = (slots.grid ||= new Map()),
+      taken = (q) => {
+        const cx = Math.floor(q.x / 24),
+          cy = Math.floor(q.y / 24);
+        for (let y = cy - 1; y <= cy + 1; y++)
+          for (let x = cx - 1; x <= cx + 1; x++) {
+            const cell = grid.get(x + "," + y);
+            if (cell && cell.some((s) => distance(s, q) < 24)) return true;
+          }
+        return false;
+      },
+      available = (q) => !taken(q) && (!anchor || nav.clearLine(anchor, q)),
+      candidate = (x, y) => (groundFree(x, y, 6) ? { x, y } : null);
     if (!available(p)) {
       let found = null;
       for (let radius = 32; radius <= 192 && !found; radius += 32)
         for (let i = 0; i < 16; i++) {
-          const q = marchPoint({
-            x: p.x + Math.cos((i * Math.PI) / 8) * radius,
-            y: p.y + Math.sin((i * Math.PI) / 8) * radius,
-          });
-          if (available(q)) {
+          const q = candidate(
+            p.x + Math.cos((i * Math.PI) / 8) * radius,
+            p.y + Math.sin((i * Math.PI) / 8) * radius,
+          );
+          if (q && available(q)) {
             found = q;
             break;
           }
@@ -3969,11 +4013,11 @@
       if (!found && anchor)
         for (let radius = 0; radius <= 960 && !found; radius += 32)
           for (let i = 0; i < 32; i++) {
-            const q = marchPoint({
-              x: anchor.x + Math.cos((i * Math.PI) / 16) * radius,
-              y: anchor.y + Math.sin((i * Math.PI) / 16) * radius,
-            });
-            if (available(q)) {
+            const q = candidate(
+              anchor.x + Math.cos((i * Math.PI) / 16) * radius,
+              anchor.y + Math.sin((i * Math.PI) / 16) * radius,
+            );
+            if (q && available(q)) {
               found = q;
               break;
             }
@@ -3981,6 +4025,9 @@
       if (found) p = found;
     }
     slots.push(p);
+    const key = Math.floor(p.x / 24) + "," + Math.floor(p.y / 24);
+    if (!grid.has(key)) grid.set(key, []);
+    grid.get(key).push(p);
     return p;
   }
   function marchPoint(p) {
@@ -4053,6 +4100,20 @@
     u.pathRevision = -1;
     return true;
   }
+  // Nearest point with comfortable clearance, used to free wedged units.
+  function roomyGround(u) {
+    for (const margin of [14, 10, 8])
+      for (let radius = 10; radius <= 160; radius += 10)
+        for (let i = 0; i < 16; i++) {
+          const angle = (i * Math.PI) / 8 + (u.id % 8) * 0.1,
+            q = {
+              x: u.x + Math.cos(angle) * radius,
+              y: u.y + Math.sin(angle) * radius,
+            };
+          if (groundFree(q.x, q.y, margin) && nav.clearLine(u, q)) return q;
+        }
+    return null;
+  }
   function moveUnit(u, destination, dt, stop = 6) {
     if (!groundFree(u.x, u.y, 6)) {
       const exit = findFree(u);
@@ -4072,6 +4133,43 @@
       u.vx = 0;
       u.vy = 0;
       return true;
+    }
+    // Stall watchdog: a unit that is commanded to move but makes no headway
+    // re-plans, and gives up gracefully when it is already near its slot.
+    const progress = u.progress;
+    if (!progress || state.time - progress.last > 0.5) {
+      u.progress = { x: u.x, y: u.y, t: state.time, last: state.time };
+    } else {
+      progress.last = state.time;
+      if (distance(progress, u) > 14) {
+        progress.x = u.x;
+        progress.y = u.y;
+        progress.t = state.time;
+      } else if (state.time - progress.t > 2.5) {
+        progress.t = state.time;
+        if (distToGoal < 150) {
+          u.moving = false;
+          u.vx = 0;
+          u.vy = 0;
+          u.progress = null;
+          return true;
+        }
+        u.path = [];
+        u.pathGoal = null;
+        u.pathRequest = null;
+        u.sharedRouteRevision = null;
+        u.arrivalAvoidSide = null;
+        u.stuck = 0;
+        // Wedged between footprints: step out to the nearest roomier ground.
+        if (u.moving === false || (u.stalls = (u.stalls || 0) + 1) >= 2) {
+          const out = roomyGround(u);
+          if (out) {
+            u.x = out.x;
+            u.y = out.y;
+            u.stalls = 0;
+          }
+        }
+      }
     }
 
     const unitR = ["knight", "trebuchet", "ram", "ballista"].includes(u.type)
@@ -4412,7 +4510,8 @@
     let fTactX = 0,
       fTactY = 0;
     const stance = u.stance || (u.hold ? "hold" : "fight");
-    if (stance === "fight" && !u.hold && !u.manualTarget) {
+    const committedMove = u.team === 0 && !!u.order && !u.order.attack;
+    if (stance === "fight" && !u.hold && !u.manualTarget && !committedMove) {
       if (u.type === "archer") {
         const threats = nearby(u, 170).filter(
           (e) =>
@@ -4528,6 +4627,12 @@
     if (groundFree(nx, ny, 6)) {
       if (nx !== u.x || ny !== u.y) {
         u.angle = Math.atan2(ny - u.y, nx - u.x);
+        if (u.type === "knight") {
+          u.runUp =
+            (state.time - (u.runAt ?? -9) < 0.25 ? u.runUp || 0 : 0) +
+            Math.hypot(nx - u.x, ny - u.y);
+          u.runAt = state.time;
+        }
         u.x = nx;
         u.y = ny;
       }
@@ -6417,6 +6522,7 @@
         u.angle = Math.atan2(target.y - u.y, target.x - u.x);
         u.cooldown = 8;
         u.strike = 1;
+        launchEffect(u.x, u.y, u.angle, false);
         state.boulders.push({
           x: u.x,
           y: u.y,
@@ -6532,9 +6638,15 @@
       } else if (u.order) marchUnit(u, dt);
       return;
     }
-    const arriving = u.order && distance(u, u.order) < 200;
+    // A player's plain move order is committed: troops march (even a retreat
+    // under fire) and only fight once they have arrived.
+    const committed = u.team === 0 && !!u.order && !u.order.attack,
+      arriving = u.order && distance(u, u.order) < (committed ? 48 : 200);
     const engage =
-      !u.order || u.order.attack || arriving || u.lastHit > state.time - 2;
+      !u.order ||
+      u.order.attack ||
+      arriving ||
+      (!committed && u.lastHit > state.time - 2);
     if (!target && engage) {
       const formation = state.formations.find(
         (f) => f.id === u.order?.formation && !f.arrived,
@@ -6636,6 +6748,92 @@
     )
       moveUnit(u, u.home, dt);
   }
+  // Cosmetic combat feedback; bounded so crowded battles stay smooth.
+  function strikeEffect(u, target, charge = false) {
+    if (!visualParticle(target) || state.particles.length > 560) return;
+    const a = Math.atan2(target.y - u.y, target.x - u.x),
+      x = target.x - Math.cos(a) * 7,
+      y = target.y - Math.sin(a) * 7,
+      count = u.type === "ram" ? 10 : charge ? 10 : 4;
+    for (let i = 0; i < count; i++) {
+      const s = a + Math.PI + (Math.random() - 0.5) * 2.4,
+        v = 55 + Math.random() * 120;
+      emitParticle({
+        x,
+        y,
+        vx: Math.cos(s) * v,
+        vy: Math.sin(s) * v - 18,
+        t: 0,
+        life: 0.16 + Math.random() * 0.24,
+        sprite: "spark_01",
+        glow: true,
+        color: i % 2 ? "#ffe6a8" : "#ffb85a",
+        r: 2.5 + Math.random() * 3,
+      });
+    }
+    if (charge || target.kind || u.type === "ram") {
+      emitParticle({
+        x,
+        y,
+        vx: Math.cos(a) * 10,
+        vy: Math.sin(a) * 10 - 8,
+        t: 0,
+        life: 0.7,
+        sprite: "dirt_01",
+        growth: 1.5,
+        color: "#b9a784aa",
+        r: charge ? 14 : 9,
+      });
+    }
+    if (charge)
+      state.rings.push({
+        x: target.x,
+        y: target.y,
+        t: 0,
+        color: "#f6dca0",
+        r: 40,
+      });
+  }
+  // Thrown masonry: cosmetic arcs with a ground shadow and one bounce.
+  function spawnDebris(x, y, count, speed = 1) {
+    if (!visualParticle({ x, y, r: 200 })) return;
+    const debris = (state.debris ||= []);
+    for (let i = 0; i < count && debris.length < 220; i++) {
+      const a = Math.random() * Math.PI * 2,
+        v = (40 + Math.random() * 170) * speed;
+      debris.push({
+        x,
+        y,
+        z: 4,
+        vx: Math.cos(a) * v,
+        vy: Math.sin(a) * v * 0.7,
+        vz: 140 + Math.random() * 260 * speed,
+        r: 1.5 + Math.random() * 2.8,
+        shade: Math.random(),
+        bounced: false,
+      });
+    }
+  }
+  function launchEffect(x, y, angle, heavy) {
+    if (!visualParticle({ x, y, r: 60 })) return;
+    const count = heavy ? 18 : 8;
+    for (let i = 0; i < count; i++) {
+      const spread = angle + (Math.random() - 0.5) * 1.3;
+      emitParticle({
+        x: x + Math.cos(angle) * 10,
+        y: y + Math.sin(angle) * 10 - 6,
+        vx: Math.cos(spread) * (30 + Math.random() * (heavy ? 120 : 60)),
+        vy: Math.sin(spread) * (30 + Math.random() * 60) - 20,
+        t: 0,
+        life: heavy ? 1.6 : 0.9,
+        sprite: i % 4 ? "smoke_01" : "flame_01",
+        growth: 1.7,
+        color: i % 4 ? "#a8998088" : "#f2b458",
+        r: (heavy ? 12 : 7) + Math.random() * (heavy ? 12 : 6),
+      });
+    }
+    if (heavy) state.screenShake = Math.max(state.screenShake || 0, 3);
+  }
   function fire(u, target) {
     if (u.stance === "stand-down") return;
     u.aimAngle = Math.atan2(target.y - u.y, target.x - u.x);
@@ -6644,12 +6842,25 @@
     u.strike = 0.35;
     let n = TYPES[u.type].damage * (1 + (u.rank || 0) * 0.25);
 
+    // A cavalry charge: a full run-up into the enemy hits much harder, once.
+    const charge =
+      u.type === "knight" &&
+      !target.kind &&
+      (u.runUp || 0) > 170 &&
+      state.time - (u.runAt ?? -9) < 0.5;
+    if (charge) {
+      n *= 1.6;
+      u.runUp = 0;
+    }
     if (u.blessed > 0) n *= 1.25;
     if (stock(u.team).food < 1) n *= 0.75;
     if (nearby(u, 180).some((a) => a.team === u.team && a.type === "standard"))
       n *= 1.12;
     if (u.type === "archer" || u.type === "ballista") projectile(u, target, n);
-    else damage(target, n, u, u.type === "ram" || u.type === "ballista");
+    else {
+      damage(target, n, u, u.type === "ram" || u.type === "ballista");
+      strikeEffect(u, target, charge);
+    }
     sound(u.type === "archer" ? "arrow" : "hit", u);
   }
   const DIFFICULTIES = {
@@ -7842,6 +8053,44 @@
           delete b.upgradeOwner;
       }
       if (b.hp <= 0 || b.progress < 1) continue;
+      if (
+        b.team !== 2 &&
+        b.maxHp &&
+        b.hp < b.maxHp * 0.45 &&
+        state.time >= (b.fireAt || 0) &&
+        visualParticle(b) &&
+        state.particles.length < 600
+      ) {
+        b.fireAt = state.time + 0.16 + (b.id % 4) * 0.03;
+        const top = Math.min(Art.visualHeight(b) * 0.7, 60),
+          fx = b.x + (Math.random() - 0.5) * b.w * 0.5,
+          fy = b.y - top * (0.3 + Math.random() * 0.5);
+        emitParticle({
+          x: fx,
+          y: fy,
+          vx: (Math.random() - 0.5) * 12,
+          vy: -24 - Math.random() * 22,
+          t: 0,
+          life: 1.3,
+          sprite: "smoke_01",
+          growth: 2,
+          color: "#3a353088",
+          r: 9 + Math.random() * 6,
+        });
+        if (b.hp < b.maxHp * 0.3)
+          emitParticle({
+            x: fx,
+            y: fy + 4,
+            vx: 0,
+            vy: -16,
+            t: 0,
+            life: 0.5,
+            sprite: "flame_01",
+            glow: true,
+            color: "#f2994a",
+            r: 8 + Math.random() * 4,
+          });
+      }
       const item = b.queue[0];
       if (item?.kind === "building-upgrade" && item.targetKind === "gate") {
         const partner = getObject(item.partnerId);
@@ -7949,6 +8198,7 @@
               b.guardCooldown = 18;
               b.lastShot = state.time;
               sound("great-launch", { x: b.x, y: b.y, team: b.team });
+              launchEffect(b.x, b.y, aim, true);
               state.boulders.push({
                 x: b.x,
                 y: b.y,
@@ -8004,8 +8254,15 @@
       else combatAI(u, dt);
     }
     // Local crowd separation prevents overlapping and preserves spacing without pushing units through walls.
+    // Fighters hold their ground but still make room for one another.
+    const crowding = (u) =>
+      u.moving ||
+      (u.target &&
+        u.type !== "trebuchet" &&
+        u.type !== "archer" &&
+        u.type !== "chaplain");
     for (const u of state.units) {
-      if (u.hp <= 0 || !u.moving) continue;
+      if (u.hp <= 0 || !crowding(u)) continue;
       const myR = ["knight", "trebuchet", "ram", "ballista"].includes(u.type)
         ? 26
         : 14;
@@ -8026,7 +8283,7 @@
             u.x += dx;
             u.y += dy;
           }
-          if (other.moving && groundFree(other.x - dx, other.y - dy, 6)) {
+          if (crowding(other) && groundFree(other.x - dx, other.y - dy, 6)) {
             other.x -= dx;
             other.y -= dy;
           }
@@ -8067,6 +8324,25 @@
       }
       const d = Math.hypot(a.tx - a.x, a.ty - a.y);
       if (d < 480 * dt) {
+        if (
+          target?.hp > 0 &&
+          visualParticle(target) &&
+          state.particles.length < 600
+        )
+          for (let i = 0; i < (target.kind ? 3 : 2); i++)
+            emitParticle({
+              x: a.tx,
+              y: a.ty,
+              vx: (Math.random() - 0.5) * 50,
+              vy: -10 - Math.random() * 30,
+              t: 0,
+              life: 0.3 + Math.random() * 0.25,
+              sprite: target.kind ? "dirt_01" : "spark_01",
+              growth: target.kind ? 1.2 : 0,
+              glow: !target.kind,
+              color: target.kind ? "#b9a784aa" : "#ffe6a8",
+              r: target.kind ? 5 : 2.2,
+            });
         if (target?.hp > 0)
           damage(
             target,
@@ -8126,6 +8402,19 @@
           t: 0,
           color: "#efaa4e",
           r: stone.r,
+        });
+        spawnDebris(
+          stone.tx,
+          stone.ty,
+          stone.heavy ? 34 : 16,
+          stone.heavy ? 1.3 : 1,
+        );
+        state.marks.push({
+          x: stone.tx,
+          y: stone.ty,
+          r: stone.r * (stone.heavy ? 0.5 : 0.4),
+          t: 0,
+          kind: "scorch",
         });
         for (let i = 0; i < 68; i++)
           emitParticle({
@@ -8281,6 +8570,25 @@
       p.vy *= 0.9;
     }
     state.particles = state.particles.filter((p) => p.t < p.life).slice(-800);
+    if (state.debris?.length) {
+      for (const d of state.debris) {
+        d.vz -= 620 * dt;
+        d.z += d.vz * dt;
+        d.x += d.vx * dt;
+        d.y += d.vy * dt;
+        if (d.z <= 0) {
+          d.z = 0;
+          if (d.bounced) d.done = true;
+          else {
+            d.bounced = true;
+            d.vz *= -0.32;
+            d.vx *= 0.5;
+            d.vy *= 0.5;
+          }
+        }
+      }
+      state.debris = state.debris.filter((d) => !d.done);
+    }
     for (const r of state.rings) r.t += dt;
     state.rings = state.rings.filter((r) => r.t < 1).slice(-80);
     for (const c of state.corpses) c.t += dt;
@@ -9196,9 +9504,25 @@
       }
     for (const n of state.nodes)
       if (n.remaining > 0 && onScreen(n)) Art.resource(ctx, n, time);
+    for (const m of state.marks)
+      if (m.kind === "scorch" && onScreen(m)) {
+        const grow = 0.5 + Math.min(1, m.t * 3) * 0.5;
+        ctx.globalAlpha = 0.34;
+        Art.ellipse(ctx, m.x, m.y, m.r * grow, m.r * 0.72 * grow, "#2c2722");
+        ctx.globalAlpha = 0.28;
+        Art.ellipse(
+          ctx,
+          m.x,
+          m.y,
+          m.r * 0.55 * grow,
+          m.r * 0.4 * grow,
+          "#14110f",
+        );
+        ctx.globalAlpha = 1;
+      }
     if (settings.gore) {
       for (const m of state.marks)
-        if (onScreen(m)) {
+        if (m.kind !== "scorch" && onScreen(m)) {
           ctx.globalAlpha = 0.7;
           const grow = 0.4 + Math.min(1, m.t) * 0.6;
           Art.ellipse(ctx, m.x, m.y, m.r * grow, m.r * 0.7 * grow, "#68151c");
@@ -9508,6 +9832,18 @@
         Art.particle(ctx, p);
       }
     ctx.globalAlpha = 1;
+    for (const d of state.debris || [])
+      if (onScreen(d, 60)) {
+        Art.ellipse(ctx, d.x, d.y, d.r * 0.9, d.r * 0.45, "#25332355");
+        Art.ellipse(
+          ctx,
+          d.x,
+          d.y - d.z,
+          d.r,
+          d.r * 0.85,
+          d.shade < 0.5 ? "#6e6454" : "#9b8e75",
+        );
+      }
     for (const a of state.arrows)
       if (onScreen(a)) {
         const angle = Math.atan2(a.ty - a.y, a.tx - a.x),
@@ -9517,14 +9853,52 @@
             : 0,
           arc = Math.sin(progress * Math.PI) * Math.min(65, total * 0.22);
         // Projectiles travel above walls; ground navigation only governs troops.
+        const cos = Math.cos(angle),
+          sin = Math.sin(angle),
+          lift = arc,
+          tilt = Math.cos(progress * Math.PI) * 0.45,
+          len = a.siege ? 22 : 15,
+          hx = a.x,
+          hy = a.y - lift,
+          tx = hx - cos * len,
+          ty = hy - sin * len + tilt * len * 0.4;
+        Art.ellipse(ctx, a.x, a.y, 2.4, 1.2, "#25332340");
         Art.line(
           ctx,
           [
-            [a.x - Math.cos(angle) * 12, a.y - arc - Math.sin(angle) * 12],
-            [a.x, a.y - arc],
+            [tx - cos * 14, ty - sin * 14],
+            [tx, ty],
           ],
-          1.5,
-          "#594a30",
+          1,
+          "#f0e4c433",
+        );
+        Art.line(
+          ctx,
+          [
+            [tx, ty],
+            [hx, hy],
+          ],
+          a.siege ? 2.4 : 1.3,
+          "#6b5636",
+        );
+        Art.line(
+          ctx,
+          [
+            [hx - cos * 3, hy - sin * 3],
+            [hx + cos * 2, hy + sin * 2],
+          ],
+          a.siege ? 3 : 2,
+          "#cfd3cf",
+        );
+        Art.line(
+          ctx,
+          [
+            [tx + cos * 2 - sin * 2, ty + sin * 2 + cos * 2],
+            [tx - cos * 2, ty - sin * 2],
+            [tx + cos * 2 + sin * 2, ty + sin * 2 - cos * 2],
+          ],
+          0.9,
+          a.team === 1 ? "#cfe3d2" : "#e4cfc9",
         );
       }
     for (const b of state.boulders) {
@@ -9678,6 +10052,51 @@
         ctx.lineTo(target.x + sign * (r - 5), target.y);
         ctx.moveTo(target.x, target.y + sign * (r + 10));
         ctx.lineTo(target.x, target.y + sign * (r - 5));
+        ctx.stroke();
+      }
+      ctx.restore();
+    }
+    // Show where selected troops are marching so every command is visibly accepted.
+    if (selected.size && selected.size <= 400) {
+      ctx.save();
+      ctx.lineWidth = 1.4;
+      ctx.setLineDash([5, 7]);
+      const lanes = new Map();
+      for (const u of state.units)
+        if (
+          u.team === 0 &&
+          u.hp > 0 &&
+          u.order &&
+          selected.has(u.id) &&
+          u.type !== "worker" &&
+          onScreen(u, 400)
+        ) {
+          const key = u.order.formation || u.id,
+            lane = lanes.get(key) || {
+              n: 0,
+              x: 0,
+              y: 0,
+              goal: u.order,
+              attack: false,
+            };
+          lane.n++;
+          lane.x += u.x;
+          lane.y += u.y;
+          lane.attack ||= !!u.order.attack;
+          lanes.set(key, lane);
+          ctx.fillStyle = u.order.attack ? "#d9604a" : "#efe2b0";
+          ctx.globalAlpha = 0.75;
+          ctx.fillRect(u.order.x - 1.5, u.order.y - 1.5, 3, 3);
+        }
+      ctx.globalAlpha = 0.5;
+      for (const lane of lanes.values()) {
+        const x = lane.x / lane.n,
+          y = lane.y / lane.n;
+        ctx.strokeStyle = lane.attack ? "#d9604a" : "#efe2b0";
+        ctx.lineDashOffset = -state.time * 18;
+        ctx.beginPath();
+        ctx.moveTo(x, y);
+        ctx.lineTo(lane.goal.x, lane.goal.y);
         ctx.stroke();
       }
       ctx.restore();
@@ -10549,5 +10968,18 @@
       }
     },
     save: () => saveGame(true),
+    internals: () =>
+      TEST
+        ? {
+            groundFree,
+            nav,
+            findFree,
+            nearby,
+            state,
+            moveUnit,
+            formationRoutes,
+            combatAI,
+          }
+        : null,
   };
 })();

@@ -193,7 +193,7 @@ test("new canvas machines, caravan motion and wind animate with detailed materia
   page,
 }) => {
   await start(page);
-  const result = await page.evaluate(() => {
+  const result = await page.evaluate(async () => {
     const paint = (kind, time) => {
       const c = document.createElement("canvas");
       c.width = 400;
@@ -226,6 +226,10 @@ test("new canvas machines, caravan motion and wind animate with detailed materia
       }
       return c.toDataURL();
     };
+    // Atlas pages decode on demand; warm them before comparing animation frames.
+    paint("engine", 0);
+    paint("engine", 0.3);
+    await CruciataAtlas.ready;
     return {
       engine: paint("engine", 0) !== paint("engine", 0.3),
       wagon: paint("wagon", 0) !== paint("wagon", 0.2),
