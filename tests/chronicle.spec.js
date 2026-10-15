@@ -284,18 +284,27 @@ test("grain fields permit movement inside and cap assigned workers at five", asy
   await page.evaluate(() => cruciata.step(50));
   await page.keyboard.press("e");
   await clickWorld(page, b.x, b.y, { button: "right" });
-  await page.evaluate(() => cruciata.step(25));
+  // Workers walk in and out to deliver, so watch the field over a window.
+  let inside = false;
+  for (let i = 0; i < 10 && !inside; i++) {
+    await page.evaluate(() => cruciata.step(5));
+    const s = await snapshot(page),
+      f = s.buildings.find((x) => x.id === b.id);
+    inside = s.units.some(
+      (u) =>
+        u.team === 0 &&
+        u.job?.target === b.id &&
+        Math.abs(u.x - f.x) < f.w / 2 &&
+        Math.abs(u.y - f.y) < f.h / 2,
+    );
+  }
   const s = await snapshot(page),
     f = s.buildings.find((x) => x.id === b.id),
     ws = s.units.filter((u) => u.team === 0 && u.job?.target === b.id);
   expect(ws.length).toBeLessThanOrEqual(5);
   expect(ws.length).toBeGreaterThan(0);
   expect(f.remaining).toBeLessThan(f.max);
-  expect(
-    ws.some(
-      (u) => Math.abs(u.x - f.x) < f.w / 2 && Math.abs(u.y - f.y) < f.h / 2,
-    ),
-  ).toBe(true);
+  expect(inside).toBe(true);
 });
 test("selected structures filter training and upgrade actions", async ({
   page,

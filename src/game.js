@@ -5410,6 +5410,31 @@
     }
     updateUI();
   }
+  // The structure under a ground point. Walls are tested against their true
+  // capsule (diagonals included) and unfinished work wins ties, so right-clicking
+  // a wall section always finds the section the player meant.
+  function structureAt(p, margin = 6, own = false) {
+    let best = null,
+      score = Infinity;
+    for (const b of state.buildings) {
+      if (b.hp <= 0 || (own ? b.team !== 0 : b.team !== 0 && !playerSees(b)))
+        continue;
+      const wallish = b.kind === "wall" && Number.isFinite(b.wallAngle);
+      if (
+        !(wallish && surfaceDistance(p, b) <= margin + 5) &&
+        !Art.hitStructure(b, p, margin)
+      )
+        continue;
+      const value =
+        (wallish ? surfaceDistance(p, b) : distance(b, p) * 0.5) +
+        (b.progress < 1 ? -40 : 0);
+      if (value < score) {
+        score = value;
+        best = b;
+      }
+    }
+    return best;
+  }
   function issueOrder(x, y, attack = false, append = false) {
     if (!playable()) return;
     if (mode === "build") {
@@ -5418,12 +5443,7 @@
     }
     const p = { x: clamp(x, 25, W - 25), y: clamp(y, 25, H - 25) },
       node = playerRemembers(p) ? resourceAt(p) : null,
-      building = state.buildings.find(
-        (b) =>
-          b.hp > 0 &&
-          (b.team === 0 || playerSees(b)) &&
-          Art.hitStructure(b, p, 6),
-      ),
+      building = structureAt(p, 6),
       enemy =
         state.units
           .filter(
@@ -5642,7 +5662,19 @@
     )) {
       if (!append) u.buildQueue = [];
       u.hold = false;
-      if (node && (!building || building.progress >= 1)) {
+      const work =
+        building?.team === 0 &&
+        (building.progress < 1 || building.hp < building.maxHp)
+          ? building
+          : null;
+      // An unfinished or damaged structure and a resource may overlap on
+      // screen; the one nearer the click wins.
+      if (
+        node &&
+        (!work ||
+          Math.max(0, distance(node, p) - (node.r || 0)) <=
+            surfaceDistance(p, work))
+      ) {
         assignGather(u, node.kind === "farm" ? "food" : node.kind, node);
       } else if (
         building?.team === 0 &&
@@ -5934,25 +5966,47 @@
             b.kind === "wall" && Number.isFinite(b.wallAngle)
               ? wallArms(b)
               : null;
-          const halfW = arms
-            ? Math.max(...arms.map((a) => Math.abs(a.x))) +
-              (b.fortified ? 24 : 15)
-            : b.w / 2;
-          const halfH = arms
-            ? Math.max(...arms.map((a) => Math.abs(a.y))) +
-              (b.fortified ? 24 : 15)
-            : b.h / 2;
-          for (let i = 0; i < 24; i++) {
-            const angle = (i * Math.PI) / 12,
-              cx = Math.cos(angle),
-              cy = Math.sin(angle);
-            const radius =
-              Math.min(
-                halfW / Math.max(0.01, Math.abs(cx)),
-                halfH / Math.max(0.01, Math.abs(cy)),
-              ) + 10;
-            const p = { x: b.x + cx * radius, y: b.y + cy * radius };
-            if (groundFree(p.x, p.y, 6)) candidates.push(p);
+          if (arms) {
+            // Stand beside the real masonry (both faces of every arm and around
+            // the seam), never at a distant bounding-box corner.
+            const reach = (b.fortified ? 24 : 15) + 7;
+            for (const arm of arms) {
+              const length = Math.hypot(arm.x, arm.y) || 1,
+                ux = arm.x / length,
+                uy = arm.y / length;
+              for (const t of [0.3, 0.65, 1])
+                for (const side of [-1, 1])
+                  candidates.push({
+                    x: b.x + arm.x * t - uy * side * reach,
+                    y: b.y + arm.y * t + ux * side * reach,
+                  });
+            }
+            for (let i = 0; i < 12; i++)
+              candidates.push({
+                x: b.x + Math.cos((i * Math.PI) / 6) * reach,
+                y: b.y + Math.sin((i * Math.PI) / 6) * reach,
+              });
+            for (let i = candidates.length - 1; i >= 0; i--)
+              if (
+                !groundFree(candidates[i].x, candidates[i].y, 6) ||
+                surfaceDistance(candidates[i], b) > 12
+              )
+                candidates.splice(i, 1);
+          } else {
+            const halfW = b.w / 2,
+              halfH = b.h / 2;
+            for (let i = 0; i < 24; i++) {
+              const angle = (i * Math.PI) / 12,
+                cx = Math.cos(angle),
+                cy = Math.sin(angle);
+              const radius =
+                Math.min(
+                  halfW / Math.max(0.01, Math.abs(cx)),
+                  halfH / Math.max(0.01, Math.abs(cy)),
+                ) + 10;
+              const p = { x: b.x + cx * radius, y: b.y + cy * radius };
+              if (groundFree(p.x, p.y, 6)) candidates.push(p);
+            }
           }
           candidates.sort((a, b) => distance(u, a) - distance(u, b));
           const point = candidates.find((p) => routePossible(u, p));
@@ -5965,8 +6019,20 @@
               }
             : null;
         }
-        if (contact) moveUnit(u, contact, dt, 3);
-        else u.moving = false;
+        if (contact) {
+          u.buildBlockedAt = null;
+          moveUnit(u, contact, dt, 3);
+        } else {
+          u.moving = false;
+          // An unreachable section is set aside so the crew carries on.
+          u.buildBlockedAt ??= state.time;
+          if (state.time - u.buildBlockedAt > 2.5 && u.buildQueue?.length) {
+            u.buildQueue.push(job.target);
+            u.job = { kind: "build", target: u.buildQueue.shift() };
+            u.buildBlockedAt = null;
+            u.buildContact = null;
+          }
+        }
         return;
       }
       u.working = true;
@@ -7259,8 +7325,73 @@
       }
       return false;
     }
+    // Camps go where the resources are: any remembered cluster without a
+    // nearby drop-off earns one, as long as it lies inside the enemy's reach.
+    function buildAt(kind, point) {
+      if (
+        !afford(BUILDINGS[kind].cost, 1) ||
+        state.buildings.some(
+          (b) => b.team === 1 && b.kind === kind && b.progress < 1 && b.hp > 0,
+        )
+      )
+        return false;
+      const builders = ws.filter((u) => u.job?.kind !== "build").slice(0, 2);
+      if (!builders.length) return false;
+      for (let i = 0; i < 40; i++) {
+        const a = i * 2.399,
+          r = 70 + Math.floor(i / 8) * 26,
+          p = { x: point.x + Math.cos(a) * r, y: point.y + Math.sin(a) * r };
+        if (!validSite(kind, p, 1)) continue;
+        pay(BUILDINGS[kind].cost, 1, 1);
+        const b = makeBuilding(kind, 1, p.x, p.y, 0);
+        state.buildings.push(b);
+        state.navDirty = true;
+        builders.forEach((u) => {
+          u.job = { kind: "build", target: b.id };
+          u.order = null;
+          u.target = null;
+        });
+        return true;
+      }
+      return false;
+    }
+    const centres = completeBuildings("towncenter", 1);
+    function expandDepots() {
+      for (const [kind, types] of [
+        ["lumbercamp", ["wood"]],
+        ["miningcamp", ["gold", "stone"]],
+        ["mill", ["food"]],
+      ]) {
+        if (
+          state.buildings.filter(
+            (b) => b.team === 1 && b.kind === kind && b.hp > 0,
+          ).length >=
+          3 + centres.length * 2
+        )
+          continue;
+        const dropOffs = state.buildings.filter(
+          (b) =>
+            b.team === 1 &&
+            b.hp > 0 &&
+            BUILDINGS[b.kind].drop?.some((t) => types.includes(t)),
+        );
+        const node = state.nodes
+          .filter(
+            (n) =>
+              types.includes(n.kind) &&
+              n.remaining > 0 &&
+              enemyFog.remembers(n) &&
+              dropOffs.every((d) => distance(d, n) > 380) &&
+              centres.some((c) => distance(c, n) < 1500) &&
+              known.every((b) => distance(b, n) > 800),
+          )
+          .sort((a, b) => distance(a, base) - distance(b, base))[0];
+        if (node && buildAt(kind, node)) return;
+      }
+    }
+    const exhausted = ws.filter((u) => !u.job && !u.order).length;
     if (
-      state.time > 180 &&
+      (state.time > 180 || (state.time > 100 && exhausted >= 3)) &&
       completeBuildings("towncenter", 1).length < 4 &&
       !state.buildings.some(
         (b) => b.team === 1 && b.kind === "towncenter" && b.progress < 1,
@@ -7297,12 +7428,30 @@
         }
       }
     }
-    if (pop.cap - pop.used - pop.queued < 5) build("house");
-    if (ws.length < plan.workers) train("worker");
+    const surplus =
+      state.enemy.resources.food > 400 &&
+      state.enemy.resources.wood > 500 &&
+      state.enemy.resources.stone > 200 &&
+      state.enemy.resources.gold > 300;
+    if (pop.cap - pop.used - pop.queued < (surplus ? 10 : 5)) build("house");
+    // Every settlement supports its own labour force.
+    const workerGoal = Math.min(
+      60,
+      plan.workers + 8 * (completeBuildings("towncenter", 1).length - 1),
+    );
+    if (ws.length < workerGoal) {
+      train("worker");
+      if (ws.length < workerGoal - 4) train("worker");
+    }
     for (const kind of ["lumbercamp", "miningcamp", "mill"])
       if (!completeBuildings(kind, 1).length) build(kind);
+    if (state.time > 60) expandDepots();
     const farms = completeBuildings("farm", 1).filter((b) => b.remaining > 0);
-    if (farms.length < Math.ceil(ws.length / 7)) build("farm");
+    if (
+      farms.length <
+      Math.ceil(ws.length / (state.enemy.resources.food < 300 ? 4.5 : 7))
+    )
+      build("farm");
     if (state.time > 45 && ws.length >= 6)
       for (const settlement of completeBuildings("towncenter", 1))
         enemyFortifications(settlement, ws);
@@ -7312,6 +7461,15 @@
         (kind !== "siegeworkshop" || state.time > 150)
       )
         build(kind);
+    // A fat treasury becomes more production rather than a dead stockpile.
+    if (surplus && state.time > 240 && ws.length >= workerGoal * 0.7)
+      for (const kind of ["barracks", "stable", "siegeworkshop"])
+        if (
+          completeBuildings(kind, 1).length <
+            (kind === "siegeworkshop" ? 2 : 3) &&
+          build(kind)
+        )
+          break;
     for (const settlement of completeBuildings("towncenter", 1).slice(1)) {
       if (
         !completeBuildings("barracks", 1).some(
@@ -7347,14 +7505,36 @@
         worker.order = null;
       }
     }
-    const desired = { food: 0.3, wood: 0.3, gold: 0.2, stone: 0.2 },
+    // Labour follows scarcity: the thinner a stockpile, the larger its share.
+    const stockpile = state.enemy.resources,
+      need = {};
+    for (const r of ["food", "wood", "gold", "stone"])
+      need[r] = clamp(1 - (stockpile[r] || 0) / 900, 0.05, 1);
+    const needTotal = Object.values(need).reduce((a, b) => a + b, 0),
+      desired = {},
       assignments = { food: 0, wood: 0, gold: 0, stone: 0 };
+    for (const r of Object.keys(need))
+      desired[r] = 0.06 + (0.76 * need[r]) / needTotal;
     for (const u of ws) if (u.job?.resource) assignments[u.job.resource]++;
+    const scarce = Object.keys(need).sort((a, b) => need[b] - need[a])[0],
+      glut = Object.keys(need).sort((a, b) => need[a] - need[b])[0];
+    if (need[scarce] > 0.7 && need[glut] < 0.3) {
+      const mover = ws.find(
+        (u) =>
+          u.job?.kind === "gather" &&
+          u.job.resource === glut &&
+          !(u.carry > 0) &&
+          u.fleeUntil <= state.time,
+      );
+      if (mover && assignGather(mover, scarce)) {
+        assignments[glut]--;
+        assignments[scarce]++;
+      }
+    }
     for (const u of ws) {
       if (u.job?.kind === "build" && getObject(u.job.target)?.progress >= 1)
         u.job = null;
-      if (u.job || u.order || u.exhaustedCluster || u.fleeUntil > state.time)
-        continue;
+      if (u.job || u.order || u.fleeUntil > state.time) continue;
       const resource = Object.keys(desired).sort(
         (a, b) =>
           assignments[a] / Math.max(1, ws.length) -
@@ -10521,7 +10701,10 @@
   });
   canvas.addEventListener("pointerup", (e) => {
     if (wallDrag && e.button === 0) {
-      placeWallLine(wallDrag.start, wallDrag.end, e.shiftKey);
+      // Release the drag first so a failed placement can never trap input.
+      const line = wallDrag;
+      wallDrag = null;
+      placeWallLine(line.start, line.end, e.shiftKey);
       return;
     }
     if (middleDrag && e.button === middleDrag.button) {
@@ -10531,17 +10714,21 @@
     if (!drag || e.button !== 0) return;
     const d = drag;
     drag = null;
+    // A click is judged in screen pixels so a slightly shaky press still
+    // selects when the view is zoomed out.
+    const clicked =
+      distance(d.start, d.end) * view.scale <
+      (e.pointerType === "touch" ? 14 : 7);
+    if (clicked) d.end = d.start;
     const clickedNode =
-      distance(d.start, d.end) < 8 && playerRemembers(d.end)
-        ? resourceAt(d.end)
-        : null;
+      clicked && playerRemembers(d.end) ? resourceAt(d.end) : null;
     selectedNode = clickedNode?.id || null;
     if (!d.shift && !clickedNode) {
       selected.clear();
       selectedBuilding = null;
       selectedBuildings.clear();
     }
-    if (distance(d.start, d.end) < 8) {
+    if (clicked) {
       const u = friendUnits()
         .filter((u) => Art.hitUnit(u, d.end, state.time))
         .sort((a, b) => distance(a, d.end) - distance(b, d.end))[0];
@@ -10550,12 +10737,7 @@
         else selected.add(u.id);
         if (u.type === "worker") setTab("settlement");
       } else {
-        const b = state.buildings.find(
-          (b) =>
-            b.hp > 0 &&
-            (b.team === 0 || playerSees(b)) &&
-            Art.hitStructure(b, d.end),
-        );
+        const b = structureAt(d.end, 0);
         if (!b && playerRemembers(d.end))
           selectedNode = resourceAt(d.end)?.id || null;
         if (b) {

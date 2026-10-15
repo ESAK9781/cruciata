@@ -16,7 +16,7 @@ const { chromium } = require("@playwright/test");
       const out = [];
       for (let i = 0; i < seconds * 30; i++) {
         cruciata.liveFrame(1);
-        if (i % 900 === 0) {
+        if (i % 1800 === 0) {
           const ai = state.enemy,
             army = state.units.filter(
               (u) => u.team === 1 && u.hp > 0 && u.type !== "civilian",
@@ -34,6 +34,39 @@ const { chromium } = require("@playwright/test");
                 .map((v) => v.toFixed(0))
                 .join("/"),
             mine: mine.length,
+            workers: state.units.filter(
+              (u) => u.team === 1 && u.type === "worker" && u.hp > 0,
+            ).length,
+            idle: state.units.filter(
+              (u) =>
+                u.team === 1 &&
+                u.type === "worker" &&
+                u.hp > 0 &&
+                !u.job &&
+                !u.order,
+            ).length,
+            bases: state.buildings.filter(
+              (b) =>
+                b.team === 1 &&
+                b.kind === "towncenter" &&
+                b.hp > 0 &&
+                b.progress >= 1,
+            ).length,
+            camps: state.buildings.filter(
+              (b) =>
+                b.team === 1 &&
+                ["lumbercamp", "miningcamp", "mill"].includes(b.kind) &&
+                b.hp > 0,
+            ).length,
+            prod: state.buildings.filter(
+              (b) =>
+                b.team === 1 &&
+                ["barracks", "stable", "siegeworkshop"].includes(b.kind) &&
+                b.hp > 0,
+            ).length,
+            res: Object.values(ai.resources)
+              .map((v) => Math.round(v))
+              .join("/"),
             result: state.result || "",
           });
         }
