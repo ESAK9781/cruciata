@@ -30,4 +30,8 @@ PLIST
 chmod +x "$app/Contents/MacOS/cruciata"
 # Ad-hoc signature so Apple Silicon will run the unsigned bundle.
 codesign --force --deep --sign - "$app" || true
-hdiutil create -volname "Cruciata" -srcfolder dist -ov -format UDZO "Cruciata-macOS-$arch.dmg"
+for attempt in 1 2 3 4 5 6; do
+  if hdiutil create -volname "Cruciata" -srcfolder dist -ov -format UDZO "Cruciata-macOS-$arch.dmg"; then break; fi
+  [ "$attempt" = 6 ] && exit 1
+  sleep 10
+done
