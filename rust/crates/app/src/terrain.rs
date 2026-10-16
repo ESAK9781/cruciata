@@ -160,3 +160,61 @@ pub fn bake(state: &State, w: f64, h: f64, level: i32, coast: bool) -> ColorImag
     }).collect();
     ColorImage { size: [pw as usize, ph as usize], pixels: px }
 }
+
+fn rock_path(contours: &[Vec<cruciata_core::nav::Pt>]) -> Option<tiny_skia::Path> {
+    let mut pb = PathBuilder::new();
+    for c in contours {
+        let n = c.len();
+        if n < 3 {
+            continue;
+        }
+        for i in 0..n {
+            let (prev, p, next) = (c[(i + n - 1) % n], c[i], c[(i + 1) % n]);
+            let incoming = ((p.x - prev.x).powi(2) + (p.y - prev.y).powi(2)).sqrt();
+            let outgoing = ((next.x - p.x).powi(2) + (next.y - p.y).powi(2)).sqrt();
+            let round = 12.0;
+            let ka = (round / incoming.max(1e-9)).min(0.3);
+            let kb = (round / outgoing.max(1e-9)).min(0.3);
+            let a = (p.x + (prev.x - p.x) * ka, p.y + (prev.y - p.y) * ka);
+            let b = (p.x + (next.x - p.x) * kb, p.y + (next.y - p.y) * kb);
+            if i == 0 {
+                pb.move_to(a.0 as f32, a.1 as f32);
+            } else {
+                pb.line_to(a.0 as f32, a.1 as f32);
+            }
+            pb.quad_to(p.x as f32, p.y as f32, b.0 as f32, b.1 as f32);
+        }
+        pb.close();
+    }
+    pb.finish()
+}
+
+/// Rock masses (blocking cliffs and boulder fields) painted onto a transparent overlay.
+pub fn bake_rocks(state: &State, w: f64, h: f64) -> ColorImage {
+    let scale = 0.5f64.min(2560.0 / w).min(1800.0 / h);
+    let (pw, ph) = ((w * scale).ceil() as u32, (h * scale).ceil() as u32);
+    let mut cv = Cv { pm: Pixmap::new(pw.max(1), ph.max(1)).unwrap(), s: scale as f32 };
+    let sk = Transform::from_scale(scale as f32, scale as f32);
+    for f in state.terrain_features.iter().filter(|f| f.kind == "rockmass" && f.forest != Some(true)) {
+        let Some(path) = rock_path(&f.contours) else { continue };
+        let rim = match f.biome as i32 {
+            1 => ["#627465", "#93a48e", "#b7c4a9"],
+            2 => ["#644321", "#c3a06b", "#f0d7a3"],
+            3 => ["#718184", "#a8b9b8", "#d5dfd6"],
+            _ => ["#6d7162", "#a2a38d", "#c1bea5"],
+        };
+        let round = |w: f32| Stroke { width: w, line_join: tiny_skia::LineJoin::Round, line_cap: tiny_skia::LineCap::Round, ..Default::default() };
+        let shadow = sk.pre_translate(4.0, 6.0);
+        cv.pm.fill_path(&path, &Cv::paint("#19201955"), FillRule::EvenOdd, shadow, None);
+        cv.pm.stroke_path(&path, &Cv::paint("#19201940"), &round(34.0), shadow, None);
+        cv.pm.fill_path(&path, &Cv::paint("#080b0a"), FillRule::EvenOdd, sk, None);
+        cv.pm.stroke_path(&path, &Cv::paint(rim[0]), &round(28.0), sk, None);
+        cv.pm.stroke_path(&path, &Cv::paint(rim[1]), &round(18.0), sk, None);
+        cv.pm.stroke_path(&path, &Cv::paint(rim[2]), &round(1.0), sk, None);
+    }
+    let px: Vec<eframe::egui::Color32> = cv.pm.pixels().iter().map(|p| {
+        let c = p.demultiply();
+        eframe::egui::Color32::from_rgba_unmultiplied(c.red(), c.green(), c.blue(), c.alpha())
+    }).collect();
+    ColorImage { size: [pw as usize, ph as usize], pixels: px }
+}

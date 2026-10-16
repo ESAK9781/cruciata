@@ -51,6 +51,7 @@ pub struct App {
     save_clock: f64,
     result_handled: bool,
     terrain: Option<(u64, TextureHandle)>,
+    rocks: Option<TextureHandle>,
     walls: crate::wall3d::WallCache,
     audio: Option<crate::audio::Audio>,
     gates: crate::gate3d::GateCache,
@@ -188,6 +189,7 @@ impl App {
             save_clock: 0.0,
             result_handled: false,
             terrain: None,
+            rocks: None,
             walls: Default::default(),
             audio: None,
             gates: Default::default(),
@@ -376,6 +378,8 @@ impl App {
             }
         }
         self.terrain = Some((key, ctx.load_texture("terrain", img, egui::TextureOptions::LINEAR)));
+        let rocks = crate::terrain::bake_rocks(s, self.game.sim.geo.w, self.game.sim.geo.h);
+        self.rocks = Some(ctx.load_texture("rocks", rocks, egui::TextureOptions::LINEAR));
     }
 
     fn biome(&self) -> i32 {
@@ -483,6 +487,9 @@ impl App {
             let tl = view.to_screen(0.0, 0.0);
             let br = view.to_screen(self.game.sim.geo.w, self.game.sim.geo.h);
             painter.image(t.id(), Rect::from_min_max(tl, br), Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)), Color32::WHITE);
+            if let Some(rk) = &self.rocks {
+                painter.image(rk.id(), Rect::from_min_max(tl, br), Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)), Color32::WHITE);
+            }
         }
         let cv = Canvas { painter: &painter, view: &view };
         let g = &self.game;
