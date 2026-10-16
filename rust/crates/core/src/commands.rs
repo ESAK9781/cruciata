@@ -11,7 +11,7 @@ use crate::model::*;
 use crate::nav::Pt;
 use crate::sim::{Obj, Sim};
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 pub enum Command {
     Recruit { ty: UType, producers: Vec<u32> },
     Research { key: String, producer: u32 },
@@ -155,7 +155,7 @@ impl Sim {
 
     pub fn available_wall(&self, bi: usize) -> bool {
         let b = &self.state.buildings[bi];
-        b.kind == BKind::Wall && b.team == 0 && b.hp > 0.0 && b.progress >= 1.0 && b.queue.is_empty() && b.upgrade_owner.is_none()
+        b.kind == BKind::Wall && b.hp > 0.0 && b.progress >= 1.0 && b.queue.is_empty() && b.upgrade_owner.is_none()
     }
 
     pub fn gate_partner(&self, bi: usize, upgrading: bool) -> Option<usize> {
@@ -199,7 +199,7 @@ impl Sim {
 
     fn cmd_wall_upgrade(&mut self, team: i32, kind: BKind, first_id: u32) -> bool {
         let Some(fi) = self.bidx(first_id) else { return false };
-        if team != 0 || !matches!(kind, BKind::Gate | BKind::Tower) || !self.available_wall(fi) || (kind == BKind::Gate && self.gate_partner(fi, false).is_none()) {
+        if self.state.buildings[fi].team != team || !matches!(kind, BKind::Gate | BKind::Tower) || !self.available_wall(fi) || (kind == BKind::Gate && self.gate_partner(fi, false).is_none()) {
             return false;
         }
         let cost = self.wall_upgrade_cost(kind, fi);

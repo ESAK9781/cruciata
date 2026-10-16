@@ -877,7 +877,9 @@ impl Sim {
         }
         self.update_scouting(dt);
         self.update_formations();
-        self.strategic_ai(dt);
+        if !self.settings.pvp {
+            self.strategic_ai(dt);
+        }
         self.update_buildings(dt);
         // Units.
         let n = self.state.units.len();
@@ -1087,7 +1089,8 @@ impl Sim {
                         self.state.buildings[bi].queue.remove(0);
                         self.release_wall_upgrade(bi, &item);
                         if let Some(c) = &item.cost {
-                            self.pay_json(c, -1.0, 0);
+                            let t = self.state.buildings[bi].team;
+                            self.pay_json(c, -1.0, t);
                         }
                         continue;
                     }
@@ -1441,7 +1444,7 @@ impl Sim {
 
     pub fn straight_wall(&self, bi: usize) -> bool {
         let b = &self.state.buildings[bi];
-        if b.kind != BKind::Wall || b.progress < 1.0 || b.hp <= 0.0 || b.team != 0 {
+        if b.kind != BKind::Wall || b.progress < 1.0 || b.hp <= 0.0 || (b.team != 0 && !self.settings.pvp) {
             return false;
         }
         let links: Vec<&Link> = b.links.as_ref().map(|l| l.values().collect()).unwrap_or_default();
@@ -1512,7 +1515,8 @@ impl Sim {
             _ => {
                 self.release_wall_upgrade(fi, item);
                 if let Some(c) = &item.cost {
-                    self.pay_json(c, -1.0, 0);
+                    let t = self.state.buildings[fi].team;
+                    self.pay_json(c, -1.0, t);
                 }
                 return;
             }
@@ -1522,7 +1526,7 @@ impl Sim {
             .iter()
             .map(|b| GateSegment { x: b.x, y: b.y, w: b.w, h: b.h, wall_angle: b.wall_angle, fortified: Some(b.fortified), links: Some(b.links.clone().unwrap_or_default()), extra: Default::default() })
             .collect();
-        let mut gate = self.make_building(BKind::Gate, 0, (first.x + secondb.x) / 2.0, (first.y + secondb.y) / 2.0, 1.0);
+        let mut gate = self.make_building(BKind::Gate, first.team, (first.x + secondb.x) / 2.0, (first.y + secondb.y) / 2.0, 1.0);
         gate.gate_segments = Some(segments.clone());
         gate.gate_angle = Some(atan2(secondb.y - first.y, secondb.x - first.x));
         gate.closed = Some(true);

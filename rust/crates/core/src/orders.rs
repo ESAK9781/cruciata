@@ -14,7 +14,7 @@ use crate::sim::{Obj, Sim};
 use crate::workers::Gt;
 
 /// A right-click / attack-move order.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct OrderCmd {
     /// Selected units (any order), selected structures.
     pub units: Vec<u32>,
@@ -46,7 +46,11 @@ impl Sim {
         let d = data();
         let (w, h) = (self.geo.w, self.geo.h);
         let p = Pt::new(c.x.clamp(25.0, w - 25.0), c.y.clamp(25.0, h - 25.0));
-        let enemy_obj = c.enemy.and_then(|id| self.get_object(id)).filter(|o| matches!(o, Obj::Unit(_) | Obj::Building(_)));
+        let enemy_obj = c.enemy.and_then(|id| self.get_object(id)).filter(|o| match o {
+            Obj::Unit(i) => self.state.units[*i].team != team && self.state.units[*i].team != 2,
+            Obj::Building(i) => self.state.buildings[*i].team != team && self.state.buildings[*i].team != 2,
+            Obj::Node(_) => false,
+        });
         let enemy_pos = enemy_obj.map(|o| self.obj_pos(o));
         let enemy_id = enemy_obj.map(|o| match o {
             Obj::Unit(i) => self.state.units[i].id,
@@ -447,8 +451,8 @@ impl Sim {
         }
     }
 
-    pub fn hold_units(&mut self, units: &[u32]) {
-        for u in self.state.units.iter_mut().filter(|u| units.contains(&u.id)) {
+    pub fn hold_units(&mut self, team: i32, units: &[u32]) {
+        for u in self.state.units.iter_mut().filter(|u| u.team == team && u.hp > 0.0 && units.contains(&u.id)) {
             u.auto_scout = None;
             u.fire_target = None;
             u.order = None;
@@ -464,13 +468,18 @@ impl Sim {
         }
     }
 
-    pub fn bless(&mut self, units: &[u32]) -> bool {
-        let ids: Vec<usize> = self.fighters(0).into_iter().filter(|&i| units.contains(&self.state.units[i].id)).collect();
-        if ids.is_empty() || self.state.faith < 30.0 {
+    pub fn bless(&mut self, team: i32, units: &[u32]) -> bool {
+        let ids: Vec<usize> = self.fighters(team).into_iter().filter(|&i| units.contains(&self.state.units[i].id)).collect();
+        let faith = if team == 0 { self.state.faith } else { self.state.enemy.faith };
+        if ids.is_empty() || faith < 30.0 {
             self.toast("Select soldiers and gather 30 faith for a benediction.");
             return false;
         }
-        self.state.faith -= 30.0;
+        if team == 0 {
+            self.state.faith -= 30.0;
+        } else {
+            self.state.enemy.faith -= 30.0;
+        }
         for i in ids {
             let u = &mut self.state.units[i];
             u.hp = u.max_hp.min(u.hp + 30.0);
@@ -481,8 +490,8 @@ impl Sim {
         true
     }
 
-    pub fn toggle_deployment(&mut self, units: &[u32]) {
-        let engines: Vec<usize> = self.fighters(0).into_iter().filter(|&i| units.contains(&self.state.units[i].id) && self.state.units[i].ty == UType::Trebuchet).collect();
+    pub fn toggle_deployment(&mut self, team: i32, units: &[u32]) {
+        let engines: Vec<usize> = self.fighters(team).into_iter().filter(|&i| units.contains(&self.state.units[i].id) && self.state.units[i].ty == UType::Trebuchet).collect();
         if engines.is_empty() {
             self.toast("Select a trebuchet to set up or pack.");
             return;
@@ -505,13 +514,13 @@ impl Sim {
         }
     }
 
-    pub fn cancel_siege_targeting(&mut self, units: &[u32], structures: &[u32]) {
-        for u in self.state.units.iter_mut().filter(|u| u.team == 0 && u.hp > 0.0 && units.contains(&u.id) && u.ty == UType::Trebuchet) {
+    pub fn cancel_siege_targeting(&mut self, team: i32, units: &[u32], structures: &[u32]) {
+        for u in self.state.units.iter_mut().filter(|u| u.team == team && u.hp > 0.0 && units.contains(&u.id) && u.ty == UType::Trebuchet) {
             u.fire_target = None;
             u.target = None;
             u.manual_target = false;
         }
-        for b in self.state.buildings.iter_mut().filter(|b| b.team == 0 && b.hp > 0.0 && structures.contains(&b.id) && matches!(b.kind, BKind::Greatengine | BKind::Colossus) && b.progress >= 1.0) {
+        for b in self.state.buildings.iter_mut().filter(|b| b.team == team && b.hp > 0.0 && structures.contains(&b.id) && matches!(b.kind, BKind::Greatengine | BKind::Colossus) && b.progress >= 1.0) {
             b.fire_target = None;
             b.attack_target = None;
         }
@@ -519,8 +528,8 @@ impl Sim {
     }
 
     /// Cancel one unfinished structure or the front queue item of a structure.
-    pub fn cancel_structure(&mut self, id: u32) -> bool {
-        let Some(bi) = self.state.buildings.iter().position(|b| b.id == id && b.team == 0) else { return false };
+    pub fn cancel_structure(&mut self, team: i32, id: u32) -> bool {
+        let Some(bi) = self.state.buildings.iter().position(|b| b.id == id && b.team == team) else { return false };
         let target = match self.state.buildings[bi].upgrade_owner.and_then(|o| self.get_object(o)) {
             Some(Obj::Building(oi)) => oi,
             _ => bi,
@@ -535,11 +544,11 @@ impl Sim {
                         "gold" => Res::Gold,
                         _ => Res::Stone,
                     };
-                    *self.state.resources.get_mut(r) += v.as_f64().unwrap_or(0.0) * (1.0 - progress) * 0.75;
+                    *self.stock_mut(team).get_mut(r) += v.as_f64().unwrap_or(0.0) * (1.0 - progress) * 0.75;
                 }
             }
             self.state.buildings.retain(|b| b.id != tid);
-            for u in self.state.units.iter_mut().filter(|u| u.team == 0 && u.ty == UType::Worker && u.hp > 0.0) {
+            for u in self.state.units.iter_mut().filter(|u| u.team == team && u.ty == UType::Worker && u.hp > 0.0) {
                 if let Some(q) = u.build_queue.as_mut() {
                     q.retain(|&x| x != tid);
                 }
@@ -556,7 +565,7 @@ impl Sim {
             let item = self.state.buildings[target].queue.remove(0);
             self.release_wall_upgrade(target, &item);
             if let Some(cost) = &item.cost {
-                self.pay_json(cost, -1.0, 0);
+                self.pay_json(cost, -1.0, team);
             }
             self.toast("1 selected construction or training orders cancelled. Unused materials returned.");
             true

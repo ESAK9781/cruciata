@@ -33,6 +33,8 @@ pub enum Event {
 #[derive(Clone, Debug)]
 pub struct Settings {
     pub gore: bool,
+    /// Both sides are human players: the enemy AI never runs.
+    pub pvp: bool,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -110,7 +112,7 @@ impl Sim {
             nav_decor_gen: u64::MAX,
             decor_gen: 0,
             clear_memos: HashMap::new(),
-            settings: Settings { gore: true },
+            settings: Settings { gore: true, pvp: false },
             combat_ready: false,
             nav_jobs_per_step: 4,
             fortifications: HashMap::new(),
