@@ -129,8 +129,8 @@ test("curtain footprints match their projected world geometry at every heading",
   page,
 }) => {
   await page.goto("/?test");
-  const result = await page.evaluate(() => {
-    const out = [];
+  const result = await page.evaluate(async () => {
+    let out = [];
     const dirs = {
       e: [1, 0],
       w: [-1, 0],
@@ -146,65 +146,73 @@ test("curtain footprints match their projected world geometry at every heading",
         .split("")
         .map((ch) => ({ e: "w", w: "e", n: "s", s: "n" })[ch])
         .join("");
-    for (const fortified of [false, true])
-      for (const [key, [dx, dy]] of Object.entries(dirs)) {
-        const c = document.createElement("canvas");
-        c.width = c.height = 260;
-        const g = c.getContext("2d");
-        g.translate(130, 150);
-        CruciataArt.structure(
-          g,
-          {
-            kind: "wall",
-            x: 0,
-            y: 0,
-            w: 32,
-            h: 32,
-            hp: 1000,
-            maxHp: 1000,
-            progress: 1,
-            team: 0,
-            fortified,
-            // Arms are half-vectors in world units to the shared seam.
-            links: {
-              [key]: { x: dx * 16, y: dy * 16 },
-              [opposite(key)]: { x: -dx * 16, y: -dy * 16 },
-            },
-          },
-          0,
-        );
-        const data = g.getImageData(0, 0, 260, 260).data;
-        let left = 999,
-          right = -999,
-          bottom = -999;
-        for (let y = 0; y < 260; y++)
-          for (let x = 0; x < 260; x++)
-            if (data[(y * 260 + x) * 4 + 3] > 20) {
-              left = Math.min(left, x - 130);
-              right = Math.max(right, x - 130);
-              bottom = Math.max(bottom, y - 150);
-            }
-        // Expected ground footprint: the plinth rectangle swept between the seams.
-        const hw = (fortified ? 24 : 15) + 1.5,
-          length = Math.hypot(dx, dy),
-          ux = dx / length,
-          uy = dy / length;
-        const half = (dx && dy ? Math.SQRT2 : 1) * 16;
-        let xs = [],
-          ys = [];
-        for (const sign of [-1, 1])
-          for (const side of [-1, 1]) {
-            xs.push(ux * half * sign - uy * hw * side);
-            ys.push((uy * half * sign + ux * hw * side) * 0.72);
-          }
-        out.push({
-          key,
-          fortified,
-          dl: left - Math.min(...xs),
-          dr: right - Math.max(...xs),
-          db: bottom - Math.max(...ys),
-        });
+    // The first pass warms cached curtain sprites and atlas pages; the second measures.
+    for (let pass = 0; pass < 2; pass++) {
+      if (pass) {
+        await window.CruciataAtlas?.ready;
+        await new Promise((r) => setTimeout(r, 400));
+        out = [];
       }
+      for (const fortified of [false, true])
+        for (const [key, [dx, dy]] of Object.entries(dirs)) {
+          const c = document.createElement("canvas");
+          c.width = c.height = 260;
+          const g = c.getContext("2d");
+          g.translate(130, 150);
+          CruciataArt.structure(
+            g,
+            {
+              kind: "wall",
+              x: 0,
+              y: 0,
+              w: 32,
+              h: 32,
+              hp: 1000,
+              maxHp: 1000,
+              progress: 1,
+              team: 0,
+              fortified,
+              // Arms are half-vectors in world units to the shared seam.
+              links: {
+                [key]: { x: dx * 16, y: dy * 16 },
+                [opposite(key)]: { x: -dx * 16, y: -dy * 16 },
+              },
+            },
+            0,
+          );
+          const data = g.getImageData(0, 0, 260, 260).data;
+          let left = 999,
+            right = -999,
+            bottom = -999;
+          for (let y = 0; y < 260; y++)
+            for (let x = 0; x < 260; x++)
+              if (data[(y * 260 + x) * 4 + 3] > 20) {
+                left = Math.min(left, x - 130);
+                right = Math.max(right, x - 130);
+                bottom = Math.max(bottom, y - 150);
+              }
+          // Expected ground footprint: the plinth rectangle swept between the seams.
+          const hw = (fortified ? 24 : 15) + 1.5,
+            length = Math.hypot(dx, dy),
+            ux = dx / length,
+            uy = dy / length;
+          const half = (dx && dy ? Math.SQRT2 : 1) * 16;
+          let xs = [],
+            ys = [];
+          for (const sign of [-1, 1])
+            for (const side of [-1, 1]) {
+              xs.push(ux * half * sign - uy * hw * side);
+              ys.push((uy * half * sign + ux * hw * side) * 0.72);
+            }
+          out.push({
+            key,
+            fortified,
+            dl: left - Math.min(...xs),
+            dr: right - Math.max(...xs),
+            db: bottom - Math.max(...ys),
+          });
+        }
+    }
     return out;
   });
   for (const r of result) {

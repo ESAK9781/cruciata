@@ -26,11 +26,11 @@ pub fn install_fonts(ctx: &egui::Context) {
     let mut add = |name: &str, bytes: &'static [u8]| {
         fonts.font_data.insert(name.to_string(), FontData::from_static(bytes));
     };
-    add("dm", include_bytes!("../../../../assets/fonts/DMSans-Variable.ttf"));
-    add("fell", include_bytes!("../../../../assets/fonts/IMFellEnglish-Regular.ttf"));
-    add("fell-italic", include_bytes!("../../../../assets/fonts/IMFellEnglish-Italic.ttf"));
-    add("gelasio", include_bytes!("../../../../assets/fonts/Gelasio-Variable.ttf"));
-    add("gelasio-italic", include_bytes!("../../../../assets/fonts/Gelasio-Italic-Variable.ttf"));
+    add("dm", include_bytes!("../fonts/DMSans-Variable.ttf"));
+    add("fell", include_bytes!("../fonts/IMFellEnglish-Regular.ttf"));
+    add("fell-italic", include_bytes!("../fonts/IMFellEnglish-Italic.ttf"));
+    add("gelasio", include_bytes!("../fonts/Gelasio-Variable.ttf"));
+    add("gelasio-italic", include_bytes!("../fonts/Gelasio-Italic-Variable.ttf"));
     let fallback: Vec<String> = fonts.families.get(&FontFamily::Proportional).cloned().unwrap_or_default();
     let with_fallback = |first: &str| -> Vec<String> {
         let mut v = vec![first.to_string()];

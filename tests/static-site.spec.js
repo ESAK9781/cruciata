@@ -5,7 +5,7 @@ const http = require("node:http");
 
 const root = path.resolve(__dirname, "..");
 const output = path.join(root, "dist");
-const assets = [".nojekyll", "index.html", "README.md"];
+const assets = [".nojekyll", "index.html", "install.html", "README.md"];
 function walk(folder, prefix = "") {
   return fs
     .readdirSync(folder, { withFileTypes: true })
