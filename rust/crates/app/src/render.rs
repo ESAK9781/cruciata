@@ -477,6 +477,7 @@ impl App {
         let motion = view.zoom >= ANIM_SCALE;
         let draw_time = if motion { time } else { 0.0 };
         let mut batch = Batch::new();
+        let mut batch2: Vec<(f64, egui::Shape)> = Vec::new();
         let shadow_id = self.soft_shadow.id();
         let atlas = &mut self.atlas;
         let walls = &mut self.walls;
@@ -596,7 +597,16 @@ impl App {
                     batch.frame(atlas, &view, &great_engine_key(b, time), 150.0, 240.0, b.x, b.y, 1.0, depth, white);
                 }
                 BKind::Colossus => {
-                    cv.ellipse(b.x, b.y, b.w / 2.0, b.h / 2.0, col("#4a3b2a"));
+                    // Stand-in: the great engine's baked frames at twice the size, darkened.
+                    let mut g2 = (*b).clone();
+                    g2.kind = BKind::Greatengine;
+                    let key = great_engine_key(&g2, time);
+                    let tint = Color32::from_rgb(190, 175, 160);
+                    if b.progress < 1.0 {
+                        batch.frame_partial(atlas, &view, &key, 150.0, 240.0, b.x, b.y, 2.0, depth, b.progress.max(0.08), Color32::from_white_alpha(220));
+                    } else {
+                        batch.frame(atlas, &view, &key, 150.0, 240.0, b.x, b.y, 2.0, depth, tint);
+                    }
                 }
                 _ => {
                     if let (Some(att), true) = (&b.wall_attachment, b.hp > 0.0) {
@@ -628,6 +638,37 @@ impl App {
                     }
                 }
             }
+        }
+        // ---- scaffolds on unfinished structures ----
+        for b in &known {
+            if b.hp > 0.0 && b.progress < 1.0 && !matches!(b.kind, BKind::Wall | BKind::Bastionwall) && view.on_screen(b.x, b.y, 200.0) {
+                let h = visual_height(b) * 0.8 + 10.0;
+                let top = h * b.progress.clamp(0.05, 1.0);
+                let (hx, hy) = (b.w / 2.0 + 4.0, b.h / 2.0 + 4.0);
+                let depth = b.y + b.h * 0.3 + 0.5;
+                let mut shapes: Vec<egui::Shape> = Vec::new();
+                let wood = col("#8a6a3c");
+                let dirt = Color32::from_rgba_unmultiplied(120, 100, 70, 90);
+                shapes.push(crate::paint::ellipse_shape(&view, b.x, b.y, hx + 6.0, (hy + 6.0) * 0.72, dirt, Stroke::NONE));
+                for (cx, cy) in [(-hx, -hy), (hx, -hy), (-hx, hy), (hx, hy)] {
+                    let base = view.to_screen(b.x + cx, b.y + cy * 0.72);
+                    let tip = view.to_screen(b.x + cx, b.y + cy * 0.72 - top);
+                    shapes.push(egui::Shape::line_segment([base, tip], Stroke::new((2.2 * view.zoom) as f32, wood)));
+                }
+                let mut z = 12.0;
+                while z < top {
+                    for (a, c) in [((-hx, hy), (hx, hy)), ((-hx, -hy), (hx, -hy)), ((-hx, -hy), (-hx, hy)), ((hx, -hy), (hx, hy))] {
+                        let p = view.to_screen(b.x + a.0, b.y + a.1 * 0.72 - z);
+                        let q = view.to_screen(b.x + c.0, b.y + c.1 * 0.72 - z);
+                        shapes.push(egui::Shape::line_segment([p, q], Stroke::new((1.2 * view.zoom) as f32, wood.gamma_multiply(0.85))));
+                    }
+                    z += 14.0;
+                }
+                batch2.push((depth, egui::Shape::Vec(shapes)));
+            }
+        }
+        for (d, s) in batch2.drain(..) {
+            batch.shape(d, s);
         }
         // ---- units ----
         let mut visible: Vec<usize> = (0..sim.state.units.len())
