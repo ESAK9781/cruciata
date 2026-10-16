@@ -149,6 +149,13 @@ pub struct Menu {
     pub lan_form: QuickForm,
     pub lan: LanState,
     pub campaign_difficulty: usize,
+    pub atlas: crate::mapatlas::CampaignMap,
+    /// Chapter being played right now (the army stands there), if any.
+    pub active_level: Option<usize>,
+    pub last_victory: Option<(usize, String)>,
+    /// Chapter the army walks from when the atlas opens after a victory.
+    pub transit: Option<usize>,
+    was_campaign: bool,
 }
 
 pub enum Out {
@@ -173,6 +180,11 @@ impl Menu {
             lan_form: QuickForm::new(),
             lan: LanState { browser: None, hosts: vec![], host: None, error: None, connecting: None },
             campaign_difficulty: 1,
+            atlas: crate::mapatlas::CampaignMap::new(),
+            active_level: None,
+            last_victory: None,
+            transit: None,
+            was_campaign: false,
         }
     }
 
@@ -215,7 +227,7 @@ impl Menu {
             icons.draw(&p, "cross-gold", Rect::from_min_size(Pos2::new(x0, r.min.y + 40.0), Vec2::splat(65.0)));
             p.text(Pos2::new(x0 + 87.0, r.min.y + 38.0), Align2::LEFT_TOP, "cruciāta", serif(46.0), col("#ddbd77"));
             spaced(&p, Pos2::new(x0 + 88.0, r.min.y + 92.0), "CHRONICA \u{b7} FIDES \u{b7} IMPERIUM", sans(10.0), col("#ddbd77"), 4.0);
-            if let Some(t) = banner {
+            if let Some(t) = banner.filter(|_| matches!(self.screen, Screen::Main)) {
                 let h = (r.height() * 0.58).min(560.0);
                 let w = h * 260.0 / 620.0;
                 let bx = (r.max.x - 100.0 - w).max(x0 + 800.0);
@@ -235,7 +247,13 @@ impl Menu {
             spaced(&p, Pos2::new(x0, r.min.y + 132.0), &eyebrow_txt, sans(8.0), col("#bba279"), 1.4);
             let main = matches!(self.screen, Screen::Main);
             p.text(Pos2::new(x0, r.min.y + if main { 150.0 } else { 148.0 }), Align2::LEFT_TOP, &title, serif(if main { 52.0 } else { 40.0 }), col("#f7e8c5"));
-            let content_top = r.min.y + if main { 235.0 } else { 205.0 };
+            let campaign_screen = matches!(self.screen, Screen::Campaign);
+            if campaign_screen && !self.was_campaign {
+                let t = self.transit.take();
+                self.atlas.enter(t);
+            }
+            self.was_campaign = campaign_screen;
+            let content_top = r.min.y + if main || campaign_screen { 235.0 } else { 205.0 };
             if main {
                 let galley = p.layout("Raise a settlement. Sustain a host. Carry your standard through a land shaped by faith, siege, and the cost of war.".to_string(), serif(18.0), col("#c5c4ae"), 670.0);
                 p.galley(Pos2::new(x0, content_top), galley, col("#c5c4ae"));
@@ -280,7 +298,8 @@ impl Menu {
                 let mut child = ui.child_ui(Rect::from_min_size(Pos2::new(x0, content_top + 50.0), Vec2::new(200.0, 60.0)), egui::Layout::left_to_right(egui::Align::Min), None);
                 child.add(egui::Spinner::new().size(34.0));
             } else {
-                let area = Rect::from_min_max(Pos2::new(x0, content_top), Pos2::new((x0 + 820.0).min(r.max.x - 20.0), r.max.y - 60.0));
+                let wide = if campaign_screen { 1150.0 } else { 820.0 };
+                let area = Rect::from_min_max(Pos2::new(x0, content_top), Pos2::new((x0 + wide).min(r.max.x - 20.0), r.max.y - 60.0));
                 let mut child = ui.child_ui(area, egui::Layout::top_down(egui::Align::Min), None);
                 child.set_clip_rect(area);
                 egui::ScrollArea::vertical().auto_shrink([false, false]).show(&mut child, |ui| {
@@ -312,28 +331,76 @@ impl Menu {
 
     fn campaign(&mut self, ui: &mut egui::Ui, p: &Progress) -> Out {
         let mut out = Out::None;
-        ui.horizontal(|ui| {
-            ui.label("Enemy command");
-            egui::ComboBox::from_id_salt("campdiff").selected_text(["Easy \u{b7} patient opponent", "Normal \u{b7} balanced opponent", "Hard \u{b7} coordinated opponent"][self.campaign_difficulty]).show_ui(ui, |ui| {
-                for (i, t) in ["Easy \u{b7} patient opponent", "Normal \u{b7} balanced opponent", "Hard \u{b7} coordinated opponent"].iter().enumerate() {
-                    ui.selectable_value(&mut self.campaign_difficulty, i, *t);
-                }
-            });
+        let ctx = ui.ctx().clone();
+        let origin = ui.cursor().min;
+        let total = (ui.available_width()).min(1140.0);
+        let left = (total - 38.0) * 0.4;
+        let right = total - 38.0 - left;
+        let vh = ctx.screen_rect().height();
+        let mw = left.min(vh * 0.61 * 440.0 / 710.0);
+        let mh = mw * 710.0 / 440.0;
+        let map = Rect::from_min_size(Pos2::new(origin.x + (left - mw) / 2.0, origin.y), Vec2::new(mw, mh));
+        let next = self.active_level.unwrap_or_else(|| (p.completed.iter().copied().max().map(|m| m + 1).unwrap_or(0)).min(5));
+        let painter = ui.painter().clone();
+        self.atlas.paint(&ctx, &painter, map, &p.completed, p.unlocked, next);
+        // Chapter column.
+        let x = origin.x + left + 38.0;
+        let mut y = origin.y;
+        if let Some((lvl, text)) = &self.last_victory {
+            let galley = painter.layout(text.clone(), sans(12.0), col("#efd390"), right - 24.0);
+            let h = 10.0 + 15.0 + 5.0 + galley.size().y + 12.0;
+            let r = Rect::from_min_size(Pos2::new(x, y), Vec2::new(right, h));
+            painter.rect_filled(r, 0.0, col("#403421"));
+            painter.rect_stroke(r, 0.0, Stroke::new(1.0, col("#967a43")));
+            painter.text(Pos2::new(x + 12.0, y + 10.0), Align2::LEFT_TOP, format!("Chapter {} secured", lvl + 1), sans(12.0), col("#efd390"));
+            painter.galley(Pos2::new(x + 12.0, y + 30.0), galley, col("#efd390"));
+            y += h + 12.0;
+        }
+        painter.text(Pos2::new(x, y), Align2::LEFT_TOP, "Enemy command", sans(12.0), col("#d9d4c0"));
+        y += 15.0;
+        let combo = Rect::from_min_size(Pos2::new(x, y), Vec2::new(right, 42.0));
+        painter.rect_filled(combo, 0.0, col("#121e23"));
+        painter.rect_stroke(combo, 0.0, Stroke::new(1.0, col("#7c6e4a")));
+        let names = ["Easy \u{b7} patient opponent", "Normal \u{b7} balanced opponent", "Hard \u{b7} coordinated opponent"];
+        let mut child = ui.child_ui(combo.shrink2(Vec2::new(8.0, 6.0)), egui::Layout::left_to_right(egui::Align::Center), None);
+        child.visuals_mut().widgets.inactive.weak_bg_fill = Color32::TRANSPARENT;
+        child.visuals_mut().widgets.inactive.bg_stroke = Stroke::NONE;
+        egui::ComboBox::from_id_salt("campdiff").width(right - 40.0).selected_text(RichText::new(names[self.campaign_difficulty]).size(14.0).color(col("#eadab7"))).show_ui(&mut child, |ui| {
+            for (i, t) in names.iter().enumerate() {
+                ui.selectable_value(&mut self.campaign_difficulty, i, *t);
+            }
         });
-        ui.add_space(8.0);
+        y += 42.0 + 8.0;
         for (i, l) in data().levels.iter().enumerate() {
             let open = i <= p.unlocked;
+            let r = Rect::from_min_size(Pos2::new(x, y), Vec2::new(right, 68.0));
+            let resp = ui.interact(r, Id::new(("chapter", i)), if open { Sense::click() } else { Sense::hover() });
+            let hovered = resp.hovered() && open;
+            let (a, b) = if hovered { (col("#4d4836"), col("#2a3631")) } else { (col("#3c382b"), col("#202927")) };
+            let fade = if open { 1.0 } else { 0.45 };
+            gradient_h(&painter, r, a.gamma_multiply(fade), b.gamma_multiply(fade));
+            painter.rect_stroke(r, 0.0, Stroke::new(1.0, if hovered { col("#f0c978") } else { col("#887042").gamma_multiply(fade) }));
+            painter.text(Pos2::new(r.min.x + 15.0, r.center().y), Align2::LEFT_CENTER, l.roman, serif(25.0), col("#dab366").gamma_multiply(fade));
+            painter.text(Pos2::new(r.min.x + 65.0, r.min.y + 13.0), Align2::LEFT_TOP, l.name, serif(17.0), col("#f3e1b8").gamma_multiply(fade));
+            painter.text(Pos2::new(r.min.x + 65.0, r.min.y + 40.0), Align2::LEFT_TOP, l.sub.to_uppercase(), sans(12.0), col("#b6bbaa").gamma_multiply(fade));
             let state = if p.completed.contains(&i) { "Completed" } else if !open { "Locked" } else { "Available" };
-            let txt = RichText::new(format!("{}   {}   \u{2014} {}      {}", l.roman, l.name, l.sub, state)).size(14.0);
-            if ui.add_enabled(open, egui::Button::new(txt).min_size(Vec2::new(560.0, 40.0))).clicked() {
+            painter.text(Pos2::new(r.max.x - 15.0, r.center().y), Align2::RIGHT_CENTER, state, sans(10.0), col("#cdb779").gamma_multiply(fade));
+            if open && resp.clicked() {
                 out = Out::Campaign(i, ["easy", "normal", "hard"][self.campaign_difficulty].to_string());
             }
+            y += 78.0;
         }
-        ui.label(RichText::new(format!("{} / 6 chapters completed. Difficulty changes decisions and coordination; resources and unit rules stay equal.", p.completed.len())).size(10.0).color(col(MUTED)));
-        ui.add_space(8.0);
-        if ui.button("Back to main menu").clicked() {
+        y += 6.0;
+        painter.line_segment([Pos2::new(x, y), Pos2::new(x + right, y)], Stroke::new(1.0, col("#4d4a38")));
+        y += 14.0;
+        painter.text(Pos2::new(x, y), Align2::LEFT_TOP, format!("{} / 6 chapters completed. Difficulty changes decisions and coordination; resources and unit rules stay equal.", p.completed.len()), sans(9.0), col("#b6bbaa"));
+        y += 24.0;
+        let back = Rect::from_min_size(Pos2::new(x, y), Vec2::new(right, 46.0));
+        if menu_button_plain(ui, back, "Back to main menu") {
             self.screen = Screen::Main;
         }
+        y += 46.0;
+        let _ = ui.allocate_space(Vec2::new(total, (y - origin.y).max(mh) + 10.0));
         out
     }
 
@@ -481,4 +548,14 @@ fn menu_button(ui: &mut egui::Ui, rect: Rect, title: &str, sub: &str, enabled: b
     p.text(Pos2::new(rect.min.x + 20.0, rect.min.y + 17.0), Align2::LEFT_TOP, title, serif(20.0), col("#f3e1b8").gamma_multiply(fade));
     p.text(Pos2::new(rect.min.x + 20.0, rect.min.y + 48.0), Align2::LEFT_TOP, sub, sans(12.0), col("#b6bbaa").gamma_multiply(fade));
     enabled && resp.clicked()
+}
+
+fn menu_button_plain(ui: &mut egui::Ui, rect: Rect, title: &str) -> bool {
+    let resp = ui.interact(rect, Id::new(("menu-plain", title)), Sense::click());
+    let p = ui.painter();
+    let (l, r) = if resp.hovered() { (col("#4d4836"), col("#2a3631")) } else { (col("#3c382b"), col("#202927")) };
+    gradient_h(p, rect, l, r);
+    p.rect_stroke(rect, 0.0, Stroke::new(1.0, if resp.hovered() { col("#f0c978") } else { col("#887042") }));
+    p.text(Pos2::new(rect.min.x + 15.0, rect.center().y), Align2::LEFT_CENTER, title, serif(17.0), col("#f3e1b8"));
+    resp.clicked()
 }

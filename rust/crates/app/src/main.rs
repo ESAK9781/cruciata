@@ -17,6 +17,7 @@ mod audio;
 mod wall3d;
 mod site;
 mod terrain;
+mod mapatlas;
 mod menu;
 mod store;
 mod game;

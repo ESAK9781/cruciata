@@ -53,6 +53,7 @@ pub struct App {
     loader: Option<Receiver<Result<Game, String>>>,
     save_clock: f64,
     result_handled: bool,
+    pending_intro: bool,
     terrain: Option<(u64, TextureHandle)>,
     /// Rock layer tiles keyed by (tile x, tile y, resolution level); None marks an empty tile.
     rock_tiles: HashMap<(i32, i32, u8), Option<TextureHandle>>,
@@ -214,6 +215,11 @@ impl App {
                 "debug" => app_ui.show_debug = true,
                 "help" => app_ui.show_help = true,
                 "menu" => app_ui.show_menu = true,
+                "intro" => {
+                    app_ui.intro = true;
+                    game.sim.state.paused = true;
+                }
+                "pause" => game.sim.state.paused = true,
                 "screen" => screen_req = Some(v.to_string()),
                 "reveal" => {
                     for v in game.sim.fog.explored.iter_mut() {
@@ -292,6 +298,7 @@ impl App {
             loader: None,
             save_clock: 0.0,
             result_handled: false,
+            pending_intro: false,
             terrain: None,
             rock_tiles: HashMap::new(),
             rock_boxes: Vec::new(),
@@ -341,6 +348,10 @@ impl App {
         self.game = g;
         self.ui = UiState::new();
         self.ui.orders_collapsed = self.progress.orders_collapsed;
+        if std::mem::take(&mut self.pending_intro) && !self.game.is_lan() {
+            self.ui.intro = true;
+            self.game.sim.state.paused = true;
+        }
         self.clusters = Clusters::default();
         self.visual_angle.clear();
         self.fog_tex = FogTex::new();
@@ -360,8 +371,35 @@ impl App {
         self.ui.toast("Your settlement and company have been recorded.");
     }
 
+    /// The web's chapter intro ("Begin the march") and pause ("Make camp.") cards.
+    fn intro_and_pause(&mut self, ctx: &egui::Context, map: Rect) {
+        let st = &self.game.sim.state;
+        if self.ui.show_menu || st.result.is_some() || self.game.is_lan() || self.ui.show_debug {
+            return;
+        }
+        if self.ui.intro {
+            let quick = st.mode == "quickmatch";
+            let l = &data().levels[st.level.min(data().levels.len() - 1)];
+            let (label, title, body) = if quick {
+                ("QUICKMATCH".to_string(), "Standards over the frontier".to_string(), format!("A {} by {} battlefield. {} enemy command. Both armies must build, gather and explore. Destroy the opposing town center to win.", self.game.sim.geo.w, self.game.sim.geo.h, st.difficulty))
+            } else {
+                (format!("CHAPTER {}", l.roman), l.name.to_string(), l.story.to_string())
+            };
+            if overlay::card(ctx, map, &label, &title, &body, "Begin the march", None).is_some() {
+                self.ui.intro = false;
+                self.game.sim.state.paused = false;
+                self.ui.toast("Right-click resources with villagers to gather. Build farms and storehouses to sustain the host.");
+            }
+        } else if st.paused {
+            if overlay::card(ctx, map, "A MOMENT OF RESPITE", "Make camp.", "The battle and the settlement are paused.", "Resume the march", None).is_some() {
+                self.game.sim.state.paused = false;
+            }
+        }
+    }
+
     fn start_campaign(&mut self, level: usize, diff: String) {
         self.slot = None;
+        self.pending_intro = true;
         self.begin_load("Raising the standards...", move || {
             let mut sim = Sim::start_level(level, None, &diff, false);
             sim.state.paused = false;
@@ -376,6 +414,7 @@ impl App {
             Out::ResumeCampaign => self.resume(None),
             Out::Quick(cfg, slot) => {
                 self.slot = Some(slot);
+                self.pending_intro = true;
                 self.begin_load("Raising the standards...", move || {
                     let diff = cfg["difficulty"].as_str().unwrap_or("normal").to_string();
                     let mut sim = Sim::start_level(0, Some(cfg), &diff, false);
@@ -1595,6 +1634,7 @@ impl eframe::App for App {
             self.menu.poll_lan();
             let in_game = !matches!(self.menu.screen, Screen::Loading(_)) && self.game.sim.state.result.is_none() && self.game.sim.state.time > 0.0 && !self.game.left;
             let can_resume = store::read_save(None).is_some();
+            self.menu.active_level = if self.game.sim.state.mode != "quickmatch" && self.game.sim.state.result.is_none() && in_game { Some(self.game.sim.state.level) } else { None };
             let out = self.menu.show(ctx, &self.progress, in_game, self.game.is_lan(), can_resume, &self.icons, self.icons.map.get("banner").map(|t| t.id()));
             self.handle_menu(out);
             let np = self.audio.as_ref().and_then(|a| a.current).map(|t| format!("Now playing: {t} (shuffled playlist)")).unwrap_or_else(|| "Background music: shuffled playlist".to_string());
@@ -1630,7 +1670,10 @@ impl eframe::App for App {
                 if !self.game.is_lan() {
                     store::delete_save(self.slot);
                     if won && self.game.sim.state.mode != "quickmatch" {
-                        self.progress.complete(self.game.sim.state.level);
+                        let lvl = self.game.sim.state.level;
+                        self.progress.complete(lvl);
+                        self.menu.transit = Some(lvl);
+                        self.menu.last_victory = Some((lvl, data().levels[lvl.min(5)].win.to_string()));
                     }
                 }
             }
@@ -1746,7 +1789,8 @@ impl eframe::App for App {
             let (cx, cy) = (self.view.cx, self.view.cy);
             self.view.center_tight(cx, cy);
         }
-        match overlay::result_dialog(ctx, &self.game) {
+        self.intro_and_pause(ctx, map_rect);
+        match overlay::result_dialog(ctx, map_rect, &self.game) {
             Some(overlay::ResultChoice::Menu) => {
                 self.ui.show_menu = true;
                 self.menu.screen = Screen::Main;

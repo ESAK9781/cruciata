@@ -328,7 +328,18 @@ const fs = require("node:fs"),
               window.CruciataBakeSprite = undefined;
               A.structure(
                 q,
-                { kind: "wall", w: 32, h: 32, x: 0, y: 0, hp: 100, maxHp: 100, progress: 1, team: 0, fortified },
+                {
+                  kind: "wall",
+                  w: 32,
+                  h: 32,
+                  x: 0,
+                  y: 0,
+                  hp: 100,
+                  maxHp: 100,
+                  progress: 1,
+                  team: 0,
+                  fortified,
+                },
                 0,
               );
               window.CruciataBakeSprite = hook;

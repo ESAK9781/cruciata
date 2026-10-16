@@ -6,6 +6,7 @@ use crate::hud::*;
 use crate::paint::col;
 use crate::text::HELP;
 use crate::ui_state::*;
+use crate::style::{fell, gradient_v, sans};
 use crate::view::View;
 use cruciata_core::data::data;
 use cruciata_core::model::*;
@@ -342,7 +343,7 @@ pub enum ResultChoice {
 }
 
 /// The end-of-battle card (`finish` in game.js). Returns the player's choice.
-pub fn result_dialog(ctx: &egui::Context, g: &Game) -> Option<ResultChoice> {
+pub fn result_dialog(ctx: &egui::Context, map: Rect, g: &Game) -> Option<ResultChoice> {
     let won = g.outcome()?;
     let st = &g.sim.state;
     let l = &data().levels[st.level.min(data().levels.len() - 1)];
@@ -362,24 +363,14 @@ pub fn result_dialog(ctx: &egui::Context, g: &Game) -> Option<ResultChoice> {
             if won && st.level < 5 { format!("Continue to {}", data().levels[st.level + 1].name) } else { "March again".to_string() },
         )
     };
+    let body = format!("{} Your people who fell: {}.", body, st.losses);
     let mut choice = None;
-    egui::Area::new("result".into()).anchor(Align2::CENTER_CENTER, Vec2::ZERO).order(egui::Order::Foreground).show(ctx, |ui| {
-        egui::Frame::none().fill(col("#1b1e18f2")).stroke(Stroke::new(2.0, col("#c8a467"))).inner_margin(egui::Margin::same(26.0)).show(ui, |ui| {
-            ui.set_width(460.0);
-            ui.vertical_centered(|ui| {
-                eyebrow(ui, label);
-                ui.label(RichText::new(title).size(26.0).color(col("#e4cda2")));
-                ui.label(RichText::new(format!("{} Your people who fell: {}.", body, st.losses)).size(12.0).color(col(INK)));
-                ui.add_space(12.0);
-                if ui.button(RichText::new(button).size(14.0)).clicked() {
-                    choice = Some(if quick || g.is_lan() { ResultChoice::Menu } else if won && st.level < 5 { ResultChoice::Next } else { ResultChoice::Again });
-                }
-                if !quick && !g.is_lan() && ui.button("Return to the menu").clicked() {
-                    choice = Some(ResultChoice::Menu);
-                }
-            });
-        });
-    });
+    let second = !quick && !g.is_lan();
+    match card(ctx, map, label, title, &body, &button, if second { Some("Return to the menu") } else { None }) {
+        Some(0) => choice = Some(if quick || g.is_lan() { ResultChoice::Menu } else if won && st.level < 5 { ResultChoice::Next } else { ResultChoice::Again }),
+        Some(_) => choice = Some(ResultChoice::Menu),
+        None => {}
+    }
     choice
 }
 
@@ -412,4 +403,58 @@ pub fn debug_dialog(ctx: &egui::Context, open: &mut bool, g: &Game) -> Option<&'
         }
     });
     chosen
+}
+
+/// The web's `#overlay`: a dimmed card over the battlefield with a cross, eyebrow, title,
+/// text and a bronze button (intro, pause and result screens). Returns the clicked button.
+pub fn card(ctx: &egui::Context, map: Rect, label: &str, title: &str, body: &str, button: &str, second: Option<&str>) -> Option<usize> {
+    let mut clicked = None;
+    egui::Area::new("overlay-card".into()).order(egui::Order::Foreground).fixed_pos(map.min).interactable(true).show(ctx, |ui| {
+        ui.allocate_rect(map, Sense::click());
+        let p = ui.painter().clone();
+        p.rect_filled(map, 0.0, col("#252b21df"));
+        let galley = p.layout(body.to_string(), sans(12.0), col("#b6ae92"), 540.0_f32.min(map.width() - 60.0));
+        let body_h = galley.size().y.max(12.0 * 1.9) * 1.0 + 12.0;
+        let total = 50.0 + 15.0 + 12.0 + 16.0 + 44.0 + 16.0 + body_h + 20.0 + 46.0 + if second.is_some() { 54.0 } else { 0.0 };
+        let cx = map.center().x;
+        let mut y = map.center().y - total / 2.0;
+        // Maltese cross.
+        let c = Pos2::new(cx, y + 25.0);
+        let gold = col("#b88c57");
+        for k in 0..4 {
+            let a = k as f32 * std::f32::consts::FRAC_PI_2;
+            let (cs, sn) = (a.cos(), a.sin());
+            let rot = |x: f32, yy: f32| Pos2::new(c.x + x * cs - yy * sn, c.y + x * sn + yy * cs);
+            p.add(egui::Shape::convex_polygon(vec![rot(0.0, 0.0), rot(21.0, -8.0), rot(23.0, 0.0), rot(21.0, 8.0)], gold, Stroke::NONE));
+        }
+        y += 50.0 + 15.0;
+        spaced_center(&p, cx, y, label, sans(9.0), col("#b49968"), 1.6);
+        y += 12.0 + 16.0;
+        p.text(Pos2::new(cx, y), Align2::CENTER_TOP, title, fell(44.0), col("#e4d2aa"));
+        y += 44.0 + 22.0;
+        p.galley(Pos2::new(cx - galley.size().x / 2.0, y), galley.clone(), col("#b6ae92"));
+        y += body_h + 8.0;
+        let mut btn = |ui: &mut egui::Ui, y: f32, text: &str, i: usize| {
+            let w = (text.chars().count() as f32 * 8.0 + 56.0).max(120.0);
+            let r = Rect::from_center_size(Pos2::new(cx, y + 21.0), Vec2::new(w, 42.0));
+            let resp = ui.interact(r, egui::Id::new(("overlay-btn", i)), Sense::click());
+            let (a, b) = if resp.hovered() { (col("#ad8450"), col("#85603b")) } else { (col("#9a7545"), col("#745131")) };
+            gradient_v(&p, r, a, b);
+            p.rect_stroke(r, 0.0, Stroke::new(1.0, col("#b59861")));
+            p.text(r.center(), Align2::CENTER_CENTER, text, fell(16.0), col("#f0dfb7"));
+            if resp.clicked() {
+                clicked = Some(i);
+            }
+        };
+        btn(ui, y, button, 0);
+        if let Some(t) = second {
+            btn(ui, y + 54.0, t, 1);
+        }
+    });
+    clicked
+}
+
+fn spaced_center(p: &egui::Painter, cx: f32, y: f32, text: &str, font: egui::FontId, color: Color32, spacing: f32) {
+    let w = text.chars().count() as f32 * (font.size * 0.62 + spacing);
+    crate::style::spaced(p, Pos2::new(cx - w / 2.0, y), text, font, color, spacing);
 }
