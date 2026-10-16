@@ -69,27 +69,60 @@ impl QuickForm {
         format!("{} \u{b7} seed {}", BIOME[self.biome], self.seed)
     }
 
+    /// The two-column form of the web (`#quick-form`): a label above each dark field.
     fn ui(&mut self, ui: &mut egui::Ui) {
-        ui.spacing_mut().item_spacing = Vec2::new(10.0, 6.0);
-        form_combo(ui, "Map size", &mut self.size, &SIZES.iter().map(|s| s.0).collect::<Vec<_>>());
-        form_combo(ui, "Resource frequency", &mut self.frequency, &FREQ.iter().map(|s| s.0).collect::<Vec<_>>());
-        form_row(ui, "Starting resources per type", |ui| {
-            ui.add(egui::DragValue::new(&mut self.resources).range(100.0..=5000.0).speed(10.0));
-        });
-        form_row(ui, "Starting soldiers per army", |ui| {
-            ui.add(egui::DragValue::new(&mut self.units).range(0.0..=80.0));
-        });
-        form_combo(ui, "Army composition", &mut self.composition, &COMP.iter().map(|s| s.0).collect::<Vec<_>>());
-        form_row(ui, "Starting villagers per settlement", |ui| {
-            ui.add(egui::DragValue::new(&mut self.workers).range(4.0..=24.0));
-        });
-        form_combo(ui, "Starting structures", &mut self.structures, &STRUCT.iter().map(|s| s.0).collect::<Vec<_>>());
-        form_combo(ui, "AI difficulty", &mut self.difficulty, &DIFF.iter().map(|s| s.0).collect::<Vec<_>>());
-        form_combo(ui, "Biome", &mut self.biome, &BIOME);
-        form_row(ui, "Generation seed", |ui| {
-            ui.add(egui::DragValue::new(&mut self.seed).range(1..=2147483647u64));
-        });
+        let origin = ui.cursor().min;
+        let width = ui.available_width().min(740.0);
+        let col_w = (width - 16.0) / 2.0;
+        let size_names: Vec<&str> = SIZES.iter().map(|s| s.0).collect();
+        let freq_names: Vec<&str> = FREQ.iter().map(|s| s.0).collect();
+        let comp_names: Vec<&str> = COMP.iter().map(|s| s.0).collect();
+        let struct_names: Vec<&str> = STRUCT.iter().map(|s| s.0).collect();
+        let diff_names: Vec<&str> = DIFF.iter().map(|s| s.0).collect();
+        let at = |c: usize, r: usize| Rect::from_min_size(Pos2::new(origin.x + c as f32 * (col_w + 16.0), origin.y + r as f32 * 82.0), Vec2::new(col_w, 58.0));
+        field_combo(ui, at(0, 0), "Map size", &mut self.size, &size_names);
+        field_combo(ui, at(1, 0), "Resource frequency", &mut self.frequency, &freq_names);
+        field_number(ui, at(0, 1), "Starting resources per type", &mut self.resources, 100.0..=5000.0, 10.0);
+        field_number(ui, at(1, 1), "Starting soldiers per army", &mut self.units, 0.0..=80.0, 1.0);
+        field_combo(ui, at(0, 2), "Army composition", &mut self.composition, &comp_names);
+        field_number(ui, at(1, 2), "Starting villagers per settlement", &mut self.workers, 4.0..=24.0, 1.0);
+        field_combo(ui, at(0, 3), "Starting structures", &mut self.structures, &struct_names);
+        field_combo(ui, at(1, 3), "AI difficulty", &mut self.difficulty, &diff_names);
+        field_combo(ui, at(0, 4), "Biome", &mut self.biome, &BIOME);
+        let mut seed = self.seed as f64;
+        field_number(ui, at(1, 4), "Generation seed", &mut seed, 1.0..=2147483647.0, 1.0);
+        self.seed = seed.max(1.0) as u64;
+        ui.allocate_space(Vec2::new(width, 5.0 * 82.0 - 10.0));
     }
+}
+
+fn field_label(ui: &egui::Ui, rect: Rect, label: &str) -> Rect {
+    ui.painter().text(rect.min, Align2::LEFT_TOP, label, sans(12.0), col("#d9d4c0"));
+    let field = Rect::from_min_size(rect.min + Vec2::new(0.0, 15.0), Vec2::new(rect.width(), 42.0));
+    ui.painter().rect_filled(field, 0.0, col("#121e23"));
+    ui.painter().rect_stroke(field, 0.0, Stroke::new(1.0, col("#7c6e4a")));
+    field
+}
+
+fn field_combo(ui: &mut egui::Ui, rect: Rect, label: &str, value: &mut usize, items: &[&str]) {
+    let field = field_label(ui, rect, label);
+    let mut child = ui.child_ui(field.shrink2(Vec2::new(8.0, 6.0)), egui::Layout::left_to_right(egui::Align::Center), None);
+    child.visuals_mut().widgets.inactive.weak_bg_fill = Color32::TRANSPARENT;
+    child.visuals_mut().widgets.inactive.bg_stroke = Stroke::NONE;
+    egui::ComboBox::from_id_salt(label).width(field.width() - 40.0).selected_text(RichText::new(items[*value]).size(14.0).color(col("#eadab7"))).show_ui(&mut child, |ui| {
+        for (i, it) in items.iter().enumerate() {
+            ui.selectable_value(value, i, *it);
+        }
+    });
+}
+
+fn field_number(ui: &mut egui::Ui, rect: Rect, label: &str, value: &mut f64, range: std::ops::RangeInclusive<f64>, speed: f64) {
+    let field = field_label(ui, rect, label);
+    let mut child = ui.child_ui(field.shrink2(Vec2::new(8.0, 6.0)), egui::Layout::left_to_right(egui::Align::Center), None);
+    child.visuals_mut().widgets.inactive.weak_bg_fill = Color32::TRANSPARENT;
+    child.visuals_mut().widgets.inactive.bg_stroke = Stroke::NONE;
+    child.visuals_mut().widgets.hovered.weak_bg_fill = Color32::TRANSPARENT;
+    child.add_sized(Vec2::new(field.width() - 16.0, 28.0), egui::DragValue::new(value).range(range).speed(speed));
 }
 
 /// One labelled row: the label sits on a fixed column and everything is vertically centred.
@@ -253,7 +286,7 @@ impl Menu {
                 self.atlas.enter(t);
             }
             self.was_campaign = campaign_screen;
-            let content_top = r.min.y + if main || campaign_screen { 235.0 } else { 205.0 };
+            let content_top = r.min.y + if main || campaign_screen || matches!(self.screen, Screen::Slots | Screen::Creation(_)) { 235.0 } else { 205.0 };
             if main {
                 let galley = p.layout("Raise a settlement. Sustain a host. Carry your standard through a land shaped by faith, siege, and the cost of war.".to_string(), serif(18.0), col("#c5c4ae"), 670.0);
                 p.galley(Pos2::new(x0, content_top), galley, col("#c5c4ae"));
@@ -298,7 +331,7 @@ impl Menu {
                 let mut child = ui.child_ui(Rect::from_min_size(Pos2::new(x0, content_top + 50.0), Vec2::new(200.0, 60.0)), egui::Layout::left_to_right(egui::Align::Min), None);
                 child.add(egui::Spinner::new().size(34.0));
             } else {
-                let wide = if campaign_screen { 1150.0 } else { 820.0 };
+                let wide = if campaign_screen || matches!(self.screen, Screen::Slots | Screen::Creation(_)) { 1150.0 } else { 820.0 };
                 let area = Rect::from_min_max(Pos2::new(x0, content_top), Pos2::new((x0 + wide).min(r.max.x - 20.0), r.max.y - 60.0));
                 let mut child = ui.child_ui(area, egui::Layout::top_down(egui::Align::Min), None);
                 child.set_clip_rect(area);
@@ -406,58 +439,74 @@ impl Menu {
 
     fn slots(&mut self, ui: &mut egui::Ui) -> Out {
         let mut out = Out::None;
-        ui.add_space(8.0);
+        let origin = ui.cursor().min;
+        let total = ui.available_width().min(1140.0);
+        let cw = (total - 40.0) / 3.0;
+        let painter = ui.painter().clone();
+        let mut bottom = origin.y;
         for i in 0..3 {
             let saved = store::read_save(Some(i));
-            egui::Frame::none().fill(col("#2a2d24")).stroke(Stroke::new(1.0, col("#655039"))).inner_margin(egui::Margin::same(12.0)).show(ui, |ui| {
-                ui.set_width(520.0);
-                eyebrow(ui, &format!("SESSION {}", i + 1));
-                ui.label(RichText::new(if saved.is_some() { "Standards over the frontier" } else { "An unwritten chronicle" }).size(16.0).color(col("#e4cda2")));
-                ui.label(RichText::new(saved.as_ref().map(store::describe_save).unwrap_or_else(|| "Choose a preset or shape your own battlefield.".into())).size(10.5).color(col(MUTED)));
-                ui.horizontal(|ui| {
-                    if ui.button(if saved.is_some() { "Resume session" } else { "Create session" }).clicked() {
-                        if saved.is_some() {
-                            out = Out::ResumeQuick(i);
-                        } else {
-                            self.screen = Screen::Creation(i);
-                        }
-                    }
-                    if saved.is_some() && ui.button("Delete this session").clicked() {
-                        store::delete_save(Some(i));
-                    }
-                });
-            });
+            let r = Rect::from_min_size(Pos2::new(origin.x + i as f32 * (cw + 20.0), origin.y), Vec2::new(cw, 238.0));
+            painter.rect_filled(r, 0.0, col("#162127"));
+            painter.rect_stroke(r, 0.0, Stroke::new(1.0, col("#726442")));
+            spaced(&painter, Pos2::new(r.min.x + 25.0, r.min.y + 24.0), &format!("SESSION {}", i + 1), sans(8.0), col("#bba279"), 1.4);
+            painter.text(Pos2::new(r.min.x + 25.0, r.min.y + 48.0), Align2::LEFT_TOP, if saved.is_some() { "Standards over the frontier" } else { "An unwritten chronicle" }, serif(26.0), col("#f3e1b8"));
+            painter.text(Pos2::new(r.min.x + 25.0, r.min.y + 108.0), Align2::LEFT_TOP, saved.as_ref().map(store::describe_save).unwrap_or_else(|| "Choose a preset or shape your own battlefield.".into()), sans(12.0), col("#c5c4ae"));
+            let btn = Rect::from_min_size(Pos2::new(r.min.x + 25.0, r.max.y - 25.0 - 56.0), Vec2::new(cw - 50.0, 56.0));
+            if big_button(ui, btn, if saved.is_some() { "Resume session" } else { "Create session" }, ("slot", i)) {
+                if saved.is_some() {
+                    out = Out::ResumeQuick(i);
+                } else {
+                    self.screen = Screen::Creation(i);
+                }
+            }
+            if saved.is_some() {
+                let del = Rect::from_min_size(Pos2::new(r.min.x + 25.0, btn.min.y - 34.0), Vec2::new(cw - 50.0, 28.0));
+                if ui.interact(del, Id::new(("slot-del", i)), Sense::click()).clicked() {
+                    store::delete_save(Some(i));
+                }
+                painter.text(del.left_center(), Align2::LEFT_CENTER, "Delete this session", sans(12.0), col("#d9a56a"));
+            }
+            bottom = r.max.y;
         }
-        ui.add_space(8.0);
-        if ui.button("Back to main menu").clicked() {
+        let back = Rect::from_min_size(Pos2::new(origin.x, bottom + 25.0), Vec2::new(total, 56.0));
+        if big_button(ui, back, "Back to main menu", ("slots-back", 0)) {
             self.screen = Screen::Main;
         }
+        ui.allocate_space(Vec2::new(total, back.max.y - origin.y + 10.0));
         out
     }
 
     fn creation(&mut self, ui: &mut egui::Ui, slot: usize) -> Out {
         let mut out = Out::None;
-        ui.horizontal(|ui| {
-            for (n, sub) in [("frontier", "Balanced settlement"), ("siege", "Developed armies"), ("scarcity", "Every patch matters"), ("empire", "A grand battlefield")] {
-                if ui.button(format!("{}\n{}", crate::text::cap(n), sub)).clicked() {
-                    self.form.preset(n);
-                }
+        let origin = ui.cursor().min;
+        let total = ui.available_width().min(1140.0);
+        let left = 370.0f32.min(total * 0.32);
+        let painter = ui.painter().clone();
+        for (i, (n, sub)) in [("frontier", "Balanced settlement"), ("siege", "Developed armies"), ("scarcity", "Every patch matters"), ("empire", "A grand battlefield")].iter().enumerate() {
+            let r = Rect::from_min_size(Pos2::new(origin.x, origin.y + i as f32 * 92.0), Vec2::new(left, 80.0));
+            if menu_button(ui, r, &crate::text::cap(n), sub, true, 100 + i as u32) {
+                self.form.preset(n);
             }
-        });
-        ui.add_space(8.0);
+        }
+        let fx = origin.x + left + 30.0;
+        let fw = (total - left - 30.0).min(740.0);
+        let mut form_ui = ui.child_ui(Rect::from_min_size(Pos2::new(fx, origin.y), Vec2::new(fw, 5.0 * 82.0)), egui::Layout::top_down(egui::Align::Min), None);
         let mut f = self.form.clone();
-        f.ui(ui);
+        f.ui(&mut form_ui);
         self.form = f;
-        ui.label(RichText::new("Both armies receive the same stores, soldiers, workers, buildings, training costs and population rules. Resources are finite; fog conceals your settlement until explored.").size(10.0).color(col(MUTED)));
-        ui.add_space(8.0);
-        ui.horizontal(|ui| {
-            if ui.button(RichText::new("Raise the standards").size(15.0)).clicked() {
-                out = Out::Quick(self.form.config(), slot);
-            }
-            if ui.button("Back to sessions").clicked() {
-                self.screen = Screen::Slots;
-            }
-        });
+        let y = origin.y + 5.0 * 82.0 + 6.0;
+        painter.line_segment([Pos2::new(fx, y), Pos2::new(fx + fw, y)], Stroke::new(1.0, col("#4d4a38")));
+        painter.text(Pos2::new(fx, y + 14.0), Align2::LEFT_TOP, "Both armies receive the same stores, soldiers, workers, buildings, training costs and population rules. Resources are finite; fog conceals your settlement until explored.", sans(9.0), col("#b6bbaa"));
+        let half = (fw - 16.0) / 2.0;
+        let by = y + 41.0;
+        if big_button(ui, Rect::from_min_size(Pos2::new(fx, by), Vec2::new(half, 56.0)), "Raise the standards", ("raise", 0)) {
+            out = Out::Quick(self.form.config(), slot);
+        }
+        if big_button(ui, Rect::from_min_size(Pos2::new(fx + half + 16.0, by), Vec2::new(half, 56.0)), "Back to sessions", ("raise-back", 0)) {
+            self.screen = Screen::Slots;
+        }
+        ui.allocate_space(Vec2::new(total, by + 56.0 - origin.y + 10.0));
         out
     }
 
@@ -557,5 +606,16 @@ fn menu_button_plain(ui: &mut egui::Ui, rect: Rect, title: &str) -> bool {
     gradient_h(p, rect, l, r);
     p.rect_stroke(rect, 0.0, Stroke::new(1.0, if resp.hovered() { col("#f0c978") } else { col("#887042") }));
     p.text(Pos2::new(rect.min.x + 15.0, rect.center().y), Align2::LEFT_CENTER, title, serif(17.0), col("#f3e1b8"));
+    resp.clicked()
+}
+
+/// A full-size menu button: gradient plate and a 20px serif label.
+fn big_button(ui: &mut egui::Ui, rect: Rect, title: &str, id: (&str, usize)) -> bool {
+    let resp = ui.interact(rect, Id::new(("big-btn", id.0, id.1)), Sense::click());
+    let p = ui.painter();
+    let (l, r) = if resp.hovered() { (col("#4d4836"), col("#2a3631")) } else { (col("#3c382b"), col("#202927")) };
+    gradient_h(p, rect, l, r);
+    p.rect_stroke(rect, 0.0, Stroke::new(1.0, if resp.hovered() { col("#f0c978") } else { col("#887042") }));
+    p.text(Pos2::new(rect.min.x + 20.0, rect.center().y), Align2::LEFT_CENTER, title, serif(20.0), col("#f3e1b8"));
     resp.clicked()
 }
