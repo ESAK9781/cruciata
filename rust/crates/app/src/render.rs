@@ -502,6 +502,11 @@ impl App {
                     }
                 }
                 Event::Sound { kind, x, y, team } => {
+                    if let (Some(x), Some(y)) = (x, y) {
+                        if (kind == "siege" || kind == "great-launch") && self.view.zoom >= ANIM_SCALE && self.game.sees(x, y) {
+                            self.fx.plume(x, y, kind == "great-launch");
+                        }
+                    }
                     let Some(a) = self.audio.as_mut() else { continue };
                     let mut volume = 1.0f32;
                     if let (Some(x), Some(y)) = (x, y) {

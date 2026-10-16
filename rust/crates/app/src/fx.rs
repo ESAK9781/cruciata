@@ -82,6 +82,12 @@ impl Fx {
         }
     }
 
+    /// Smoke and sparks at the foot of a siege engine that just fired.
+    pub fn plume(&mut self, x: f64, y: f64, big: bool) {
+        self.dust(x, y, if big { 14 } else { 6 }, if big { 20.0 } else { 9.0 });
+        self.sparks(x, y - 4.0, -std::f64::consts::FRAC_PI_2, if big { 12 } else { 5 });
+    }
+
     /// Look for new melee blows and fallen structures among what the player
     /// can see, then advance and retire particles.
     pub fn update(&mut self, sim: &Sim, dt: f64, sees: impl Fn(f64, f64) -> bool, zoomed_in: bool) {

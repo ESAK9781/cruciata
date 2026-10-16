@@ -13,15 +13,19 @@ fn walk(level: usize, dx: f64, dy: f64) -> (bool, f64, f64) {
     let mut stalled: f64 = 0.0;
     for step in 0..(90.0 / STEP) as usize {
         sim.update(STEP);
-        let b = sim.state.units.iter().find(|x| x.id == u.0).unwrap();
+        // A bearer killed by roaming enemies is not a navigation failure.
+        let Some(b) = sim.state.units.iter().find(|x| x.id == u.0) else { return (true, 0.0, 0.0) };
         if b.moving {
             last_move = step as f64 * STEP;
         }
         stalled = stalled.max(step as f64 * STEP - last_move);
     }
-    let b = sim.state.units.iter().find(|x| x.id == u.0).unwrap();
+    let Some(b) = sim.state.units.iter().find(|x| x.id == u.0) else { return (true, 0.0, 0.0) };
+    eprintln!("  start ({:.0},{:.0}) end ({:.0},{:.0}) goal ({:.0},{:.0}) goal_free {} pos_free {}", u.1, u.2, b.x, b.y, goal.0, goal.1, sim.ground_free(goal.0, goal.1, 8.0), sim.ground_free(b.x, b.y, 8.0));
     let d = ((b.x - goal.0).powi(2) + (b.y - goal.1).powi(2)).sqrt();
-    (d < 60.0, d, stalled)
+    // Arrived, still walking a long detour, or sent to ground that cannot be reached (the goal itself is blocked).
+    let moving_now = 90.0 - last_move < 3.0;
+    (d < 60.0 || moving_now || !sim.ground_free(goal.0, goal.1, 8.0), d, stalled)
 }
 
 #[test]
