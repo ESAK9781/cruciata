@@ -6,7 +6,8 @@ use crate::store::{self, Progress};
 use cruciata_core::data::data;
 use cruciata_net::discovery::{Browser, HostInfo};
 use cruciata_net::session::{self, Host};
-use eframe::egui::{self, Align2, RichText, Stroke, Vec2};
+use crate::style::*;
+use eframe::egui::{self, Align2, Color32, Id, Pos2, Rect, RichText, Sense, Stroke, Vec2};
 use std::sync::mpsc::Receiver;
 
 #[derive(Clone)]
@@ -179,96 +180,112 @@ impl Menu {
         }
     }
 
-    pub fn show(&mut self, ctx: &egui::Context, progress: &Progress, in_game: bool, in_lan: bool, can_resume_campaign: bool) -> Out {
+    pub fn show(&mut self, ctx: &egui::Context, progress: &Progress, in_game: bool, in_lan: bool, can_resume_campaign: bool, icons: &Icons, banner: Option<egui::TextureId>) -> Out {
         let mut out = Out::None;
-        egui::CentralPanel::default().frame(egui::Frame::none().fill(col("#1c1f18"))).show(ctx, |ui| {
+        egui::CentralPanel::default().frame(egui::Frame::none()).show(ctx, |ui| {
             let r = ui.max_rect();
-            // Vignette.
-            ui.painter().rect_filled(r, 0.0, col("#1c1f18"));
-            ui.painter().circle_filled(r.center_top() + Vec2::new(-r.width() * 0.2, 0.0), r.width() * 0.45, col("#2d2b22"));
-            ui.vertical_centered(|ui| {
-                ui.add_space((r.height() * 0.06).max(20.0));
-                egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
-                    ui.set_max_width(760.0);
-                    ui.vertical_centered(|ui| {
-                        ui.set_width(720.0);
-                        ui.label(RichText::new("+  cruciāta").size(34.0).color(col("#e4cda2")).italics());
-                        ui.label(RichText::new("CHRONICA \u{b7} FIDES \u{b7} IMPERIUM").size(10.0).color(col(MUTED)).extra_letter_spacing(3.0));
-                        ui.add_space(14.0);
-                        match &self.screen {
-                            Screen::Main => out = self.main(ui, progress, in_game, in_lan, can_resume_campaign),
-                            Screen::Campaign => out = self.campaign(ui, progress),
-                            Screen::Slots => out = self.slots(ui),
-                            Screen::Creation(slot) => {
-                                let slot = *slot;
-                                out = self.creation(ui, slot);
-                            }
-                            Screen::LanHub => out = self.lan_hub(ui),
-                            Screen::LanHost => out = self.lan_host(ui),
-                            Screen::Loading(t) => {
-                                ui.add_space(60.0);
-                                ui.label(RichText::new(t.as_str()).size(22.0).color(col("#e4cda2")));
-                                ui.add(egui::Spinner::new().size(36.0));
-                            }
-                            Screen::LanMessage(m) => {
-                                ui.add_space(40.0);
-                                ui.label(RichText::new(m.as_str()).size(16.0).color(col("#e4cda2")));
-                                ui.add_space(16.0);
-                                if ui.button("Back").clicked() {
-                                    self.screen = Screen::LanHub;
-                                }
-                            }
-                            Screen::Playing => {}
+            let p = ui.painter().clone();
+            p.rect_filled(r, 0.0, col("#0c171c"));
+            // Warm glow at 80% / 35% fading out by 55% of the width.
+            let glow = Pos2::new(r.min.x + r.width() * 0.8, r.min.y + r.height() * 0.35);
+            radial_glow(&p, glow, r.width() * 0.55, Color32::from_rgba_unmultiplied(134, 92, 41, 48));
+            let left = (((r.width() - 1300.0).max(0.0)) / 2.0 + 75.0).max(40.0);
+            let x0 = r.min.x + left;
+            icons.draw(&p, "cross-gold", Rect::from_min_size(Pos2::new(x0, r.min.y + 40.0), Vec2::splat(65.0)));
+            p.text(Pos2::new(x0 + 87.0, r.min.y + 28.0), Align2::LEFT_TOP, "cruciāta", serif(46.0), col("#ddbd77"));
+            spaced(&p, Pos2::new(x0 + 87.0, r.min.y + 96.0), "CHRONICA \u{b7} FIDES \u{b7} IMPERIUM", sans(10.0), col("#ddbd77"), 4.0);
+            if let Some(t) = banner {
+                let h = (r.height() * 0.58).min(560.0);
+                let w = h * 260.0 / 620.0;
+                let bx = (r.max.x - 100.0 - w).max(x0 + 800.0);
+                p.image(t, Rect::from_min_size(Pos2::new(bx, r.min.y + r.height() * 0.15), Vec2::new(w, h)), Rect::from_min_max(Pos2::ZERO, Pos2::new(1.0, 1.0)), Color32::WHITE);
+            }
+            let foot = "A fictional chronicle of the First Crusade \u{b7} Local saves \u{b7} Original overhead artwork";
+            p.text(Pos2::new(x0 + 1.0, r.max.y - 42.0), Align2::LEFT_TOP, foot, sans(10.0), col("#8d9a94"));
+            let (eyebrow_txt, title): (String, String) = match &self.screen {
+                Screen::Main => ("AD MAIOREM DEI GLORIAM".into(), "The road to Jerusalem".into()),
+                Screen::Campaign => ("ITINERARIUM \u{b7} 1097\u{2013}1099".into(), "The pilgrim's chronicle".into()),
+                Screen::Slots => ("TRES CHRONICAE \u{b7} THREE LOCAL SESSIONS".into(), "Quickmatch".into()),
+                Screen::Creation(s) => (format!("QUICKMATCH \u{b7} SESSION {}", s + 1), "Shape the battlefield".into()),
+                Screen::LanHub | Screen::LanHost | Screen::LanMessage(_) => ("PLAYER VERSUS PLAYER \u{b7} SAME NETWORK".into(), "LAN multiplayer".into()),
+                Screen::Loading(_) => ("PLEASE WAIT".into(), "Raising the standards".into()),
+                Screen::Playing => (String::new(), String::new()),
+            };
+            spaced(&p, Pos2::new(x0, r.min.y + 132.0), &eyebrow_txt, sans(8.0), col("#bba279"), 1.4);
+            let main = matches!(self.screen, Screen::Main);
+            p.text(Pos2::new(x0, r.min.y + if main { 150.0 } else { 148.0 }), Align2::LEFT_TOP, &title, serif(if main { 52.0 } else { 40.0 }), col("#f7e8c5"));
+            let content_top = r.min.y + if main { 235.0 } else { 205.0 };
+            if main {
+                let galley = p.layout("Raise a settlement. Sustain a host. Carry your standard through a land shaped by faith, siege, and the cost of war.".to_string(), serif(18.0), col("#c5c4ae"), 670.0);
+                p.galley(Pos2::new(x0, content_top), galley, col("#c5c4ae"));
+                let mut y = r.min.y + 317.0;
+                let mut items: Vec<(&str, &str, bool, u8)> = vec![
+                    ("Campaign", "Six chapters \u{b7} the pilgrim's chronicle", true, 0),
+                    ("Quickmatch", "Generated battlefields \u{b7} three local sessions", true, 1),
+                    ("LAN multiplayer", "Play a friend on the same network \u{b7} no setup", true, 2),
+                    ("Continue campaign", "Your last recorded march", can_resume_campaign, 3),
+                    ("Settings", "Music, sound effects, and battle detail", true, 4),
+                    ("Quit", "Leave the game", true, 5),
+                ];
+                if in_game {
+                    items.insert(0, ("Return to the battle", "Close this menu", true, 6));
+                    if in_lan {
+                        items.insert(1, ("Leave the match", "Concede and disconnect from your opponent", true, 7));
+                    }
+                }
+                for (i, (t, s, enabled, id)) in items.iter().enumerate() {
+                    let (col_i, row_i) = (i % 2, i / 2);
+                    let rect = Rect::from_min_size(Pos2::new(x0 + col_i as f32 * 397.0, y + row_i as f32 * 94.0), Vec2::new(383.0, 80.0));
+                    if menu_button(ui, rect, t, s, *enabled, *id as u32) {
+                        match id {
+                            0 => self.screen = Screen::Campaign,
+                            1 => self.screen = Screen::Slots,
+                            2 => self.open_lan_hub(),
+                            3 => out = Out::ResumeCampaign,
+                            4 => out = Out::Settings,
+                            5 => out = Out::Quit,
+                            6 => out = Out::Resume,
+                            _ => out = Out::Leave,
                         }
-                        ui.add_space(24.0);
-                        ui.label(RichText::new("A fictional chronicle of the First Crusade \u{b7} Local saves \u{b7} Original overhead artwork").size(9.5).color(col(MUTED)));
-                    });
+                    }
+                }
+                y += ((items.len() + 1) / 2) as f32 * 94.0 + 6.0;
+                p.text(Pos2::new(x0, y + 22.0), Align2::LEFT_TOP, "\u{201c}Beati pacifici, quoniam filii Dei vocabuntur.\u{201d}", serif_italic(18.0), col("#dabd81"));
+                p.text(Pos2::new(x0, y + 54.0), Align2::LEFT_TOP, "Blessed are the peacemakers \u{b7} Matthew 5:9", sans(11.0), col("#b2b6a9"));
+            } else if matches!(self.screen, Screen::Loading(_)) {
+                if let Screen::Loading(t) = &self.screen {
+                    p.text(Pos2::new(x0, content_top + 10.0), Align2::LEFT_TOP, t, serif(20.0), col("#e4cda2"));
+                }
+                let mut child = ui.child_ui(Rect::from_min_size(Pos2::new(x0, content_top + 50.0), Vec2::new(200.0, 60.0)), egui::Layout::left_to_right(egui::Align::Min), None);
+                child.add(egui::Spinner::new().size(34.0));
+            } else {
+                let area = Rect::from_min_max(Pos2::new(x0, content_top), Pos2::new((x0 + 820.0).min(r.max.x - 20.0), r.max.y - 60.0));
+                let mut child = ui.child_ui(area, egui::Layout::top_down(egui::Align::Min), None);
+                child.set_clip_rect(area);
+                egui::ScrollArea::vertical().auto_shrink([false, false]).show(&mut child, |ui| {
+                    ui.set_width(area.width() - 12.0);
+                    match &self.screen {
+                        Screen::Campaign => out = self.campaign(ui, progress),
+                        Screen::Slots => out = self.slots(ui),
+                        Screen::Creation(slot) => {
+                            let slot = *slot;
+                            out = self.creation(ui, slot);
+                        }
+                        Screen::LanHub => out = self.lan_hub(ui),
+                        Screen::LanHost => out = self.lan_host(ui),
+                        Screen::LanMessage(m) => {
+                            let m = m.clone();
+                            ui.label(RichText::new(m).size(16.0).color(col("#e4cda2")));
+                            ui.add_space(16.0);
+                            if ui.button("Back").clicked() {
+                                self.screen = Screen::LanHub;
+                            }
+                        }
+                        _ => {}
+                    }
                 });
-            });
-        });
-        out
-    }
-
-    fn big(ui: &mut egui::Ui, title: &str, sub: &str) -> bool {
-        let r = ui.add_sized([420.0, 54.0], egui::Button::new(RichText::new(format!("{title}\n{sub}")).size(15.0)).wrap());
-        r.clicked()
-    }
-
-    fn main(&mut self, ui: &mut egui::Ui, _p: &Progress, in_game: bool, in_lan: bool, can_resume_campaign: bool) -> Out {
-        let mut out = Out::None;
-        eyebrow(ui, "AD MAIOREM DEI GLORIAM");
-        ui.label(RichText::new("The road to Jerusalem").size(30.0).color(col("#e4cda2")));
-        ui.label(RichText::new("Raise a settlement. Sustain a host. Carry your standard through a land shaped by faith, siege, and the cost of war.").size(12.0).color(col(INK)));
-        ui.add_space(14.0);
-        if in_game && Self::big(ui, "Return to the battle", "Close this menu") {
-            out = Out::Resume;
-        }
-        if in_game && in_lan && Self::big(ui, "Leave the match", "Concede and disconnect from your opponent") {
-            out = Out::Leave;
-        }
-        if Self::big(ui, "Campaign", "Six chapters \u{b7} the pilgrim's chronicle") {
-            self.screen = Screen::Campaign;
-        }
-        if Self::big(ui, "Quickmatch", "Generated battlefields \u{b7} three local sessions") {
-            self.screen = Screen::Slots;
-        }
-        if Self::big(ui, "LAN multiplayer", "Play a friend on the same network \u{b7} no setup") {
-            self.open_lan_hub();
-        }
-        ui.add_enabled_ui(can_resume_campaign, |ui| {
-            if Self::big(ui, "Continue campaign", "Your last recorded march") {
-                out = Out::ResumeCampaign;
             }
         });
-        if Self::big(ui, "Settings", "Music, sound effects, and battle detail") {
-            out = Out::Settings;
-        }
-        if Self::big(ui, "Quit", "") {
-            out = Out::Quit;
-        }
-        ui.add_space(12.0);
-        ui.label(RichText::new("\u{201c}Beati pacifici, quoniam filii Dei vocabuntur.\u{201d}").italics().size(13.0).color(col(GOLD)));
-        ui.label(RichText::new("Blessed are the peacemakers \u{b7} Matthew 5:9").size(9.5).color(col(MUTED)));
         out
     }
 
@@ -439,4 +456,18 @@ fn combo_row(ui: &mut egui::Ui, label: &str, value: &mut usize, items: &[&str]) 
 
 pub fn _anchor() -> Align2 {
     Align2::CENTER_CENTER
+}
+
+/// One of the big menu buttons (110-degree gradient, serif title).
+fn menu_button(ui: &mut egui::Ui, rect: Rect, title: &str, sub: &str, enabled: bool, id: u32) -> bool {
+    let resp = ui.interact(rect, Id::new(("menu-btn", id)), if enabled { Sense::click() } else { Sense::hover() });
+    let p = ui.painter();
+    let hovered = resp.hovered() && enabled;
+    let (l, r) = if hovered { (col("#4d4836"), col("#2a3631")) } else { (col("#3c382b"), col("#202927")) };
+    gradient_h(p, rect, l, r);
+    p.rect_stroke(rect, 0.0, Stroke::new(1.0, if hovered { col("#b09250") } else { col("#887042") }));
+    let fade = if enabled { 1.0 } else { 0.45 };
+    p.text(Pos2::new(rect.min.x + 20.0, rect.min.y + 17.0), Align2::LEFT_TOP, title, serif(20.0), col("#f3e1b8").gamma_multiply(fade));
+    p.text(Pos2::new(rect.min.x + 20.0, rect.min.y + 48.0), Align2::LEFT_TOP, sub, sans(12.0), col("#b6bbaa").gamma_multiply(fade));
+    enabled && resp.clicked()
 }

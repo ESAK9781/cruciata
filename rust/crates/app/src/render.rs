@@ -5,6 +5,8 @@ use crate::atlas::Atlas;
 use crate::cluster::{clustered, Clusters};
 use crate::game::Game;
 use crate::hud::{self, Action, Frame};
+use crate::{chrome, mapui};
+use crate::style::Icons;
 use crate::input::{self, InputState};
 use crate::keys::*;
 use crate::overlay::{self, FogTex, Settings};
@@ -57,6 +59,7 @@ pub struct App {
     gates: crate::gate3d::GateCache,
     desync_warned: bool,
     fps_mark: Option<(std::time::Instant, u32)>,
+    icons: Icons,
     last_volumes: (f32, f32, bool),
 }
 
@@ -97,6 +100,7 @@ fn start_sim(args: &Args) -> Sim {
 impl App {
     pub fn new(cc: &eframe::CreationContext<'_>, args: Args) -> App {
         hud::apply_theme(&cc.egui_ctx);
+        crate::style::install_fonts(&cc.egui_ctx);
         let atlas = Atlas::load(assets_dir()).expect("sprite atlas");
         let mut sim = start_sim(&args);
         let (w, h) = (sim.geo.w, sim.geo.h);
@@ -195,6 +199,7 @@ impl App {
             gates: Default::default(),
             desync_warned: false,
             fps_mark: None,
+            icons: Icons::load(&cc.egui_ctx, &assets_dir()),
             last_volumes: (-1.0, -1.0, true),
         }
     }
@@ -513,6 +518,19 @@ impl App {
             let bx = cruciata_core::world::river_x(&sim.state, sim.geo.w, by);
             if view.on_screen(bx, by, 200.0) {
                 batch.frame(atlas, &view, "bridge", 105.0, 80.0, bx, by, 1.0, -1.0e9, white);
+            }
+        }
+        if sim.state.mode != "quickmatch" && data().levels[sim.state.level].terrain == 0 {
+            for (i, y) in [1580.0f64, 1780.0, 2000.0].iter().enumerate() {
+                if !view.on_screen(cruciata_core::world::coast_x(*y), *y, 300.0) {
+                    continue;
+                }
+                let v = i as f64;
+                let t = draw_time;
+                let x = cruciata_core::world::coast_x(*y) - 95.0 + (t * 0.35 + v).sin() * 1.5;
+                let yy = y + (t * 0.7 + v).sin() * 2.0;
+                let frame = ((((t + v) % std::f64::consts::TAU) / std::f64::consts::TAU) * 16.0).floor() as i64;
+                batch.frame(atlas, &view, &format!("ship:{frame}"), 75.0, 160.0, x, yy, 1.0, y - 1.0e6, white);
             }
         }
         // ---- decorations ----
@@ -1065,6 +1083,10 @@ impl eframe::App for App {
         self.ui.clock += dt;
         self.atlas.begin_frame(ctx);
         let shot_mode = self.args.shot.is_some();
+        if self.audio.is_none() && !shot_mode && self.frames == 3 {
+            self.audio = crate::audio::Audio::new(assets_dir());
+        }
+        self.sync_audio();
         if let Some(rx) = &self.loader {
             if let Ok(res) = rx.try_recv() {
                 self.loader = None;
@@ -1086,7 +1108,7 @@ impl eframe::App for App {
             self.menu.poll_lan();
             let in_game = !matches!(self.menu.screen, Screen::Loading(_)) && self.game.sim.state.result.is_none() && self.game.sim.state.time > 0.0 && !self.game.left;
             let can_resume = store::read_save(None).is_some();
-            let out = self.menu.show(ctx, &self.progress, in_game, self.game.is_lan(), can_resume);
+            let out = self.menu.show(ctx, &self.progress, in_game, self.game.is_lan(), can_resume, &self.icons, self.icons.map.get("banner").map(|t| t.id()));
             self.handle_menu(out);
             let np = self.audio.as_ref().and_then(|a| a.current).map(|t| format!("Now playing: {t} (shuffled playlist)")).unwrap_or_else(|| "Background music: shuffled playlist".to_string());
             overlay::settings_dialog(ctx, &mut self.ui.show_settings, &mut self.settings, &np);
@@ -1096,9 +1118,6 @@ impl eframe::App for App {
         }
         if !shot_mode && !self.ui.show_menu {
             self.game.advance(dt);
-        }
-        if self.audio.is_none() && self.args.shot.is_none() && self.frames == 2 {
-            self.audio = crate::audio::Audio::new(assets_dir());
         }
         if let Some(ls) = self.game.lock.as_ref() {
             if ls.disconnected && self.game.sim.state.result.is_none() {
@@ -1113,7 +1132,6 @@ impl eframe::App for App {
                 }
             }
         }
-        self.sync_audio();
         self.handle_events();
         self.save_clock += dt;
         if self.save_clock > 20.0 && !shot_mode {
@@ -1144,34 +1162,37 @@ impl eframe::App for App {
         self.fog_tex.update(ctx, &self.game);
         self.ensure_terrain(ctx);
         let mut actions: Vec<Action> = Vec::new();
-        {
-            let mut f = Frame { g: &mut self.game, ui: &mut self.ui, atlas: &mut self.atlas };
-            hud::header(ctx, &mut f, &mut actions);
-            hud::sidebar(ctx, &mut f, &mut actions);
-            hud::resource_bar(ctx, &mut f);
-            panel::command_panel(ctx, &mut f);
-        }
         let mut look: Option<(f64, f64)> = input::keys(ctx, &mut self.view, &mut self.ui, &mut self.game, dt);
-        let mut map_rect = Rect::NOTHING;
+        let screen = ctx.screen_rect();
+        let lay = chrome::layout(screen);
+        let map_rect = lay.map.shrink(3.0);
+        let status = "LOCAL CHRONICLE";
+        let mut minimap_order: Option<(f64, f64, bool)> = None;
         egui::CentralPanel::default().frame(egui::Frame::none()).show(ctx, |ui| {
-            let rect = ui.max_rect();
-            map_rect = rect;
-            let resp = ui.allocate_rect(rect, Sense::click_and_drag());
-            self.view.rect = rect;
+            chrome::draw(ui, &lay, &self.game, &mut self.ui, &self.icons, &mut actions, status);
+            {
+                let mut f = Frame { g: &mut self.game, ui: &mut self.ui, atlas: &mut self.atlas };
+                panel::command_panel(ui, lay.panel, &mut f);
+            }
+            self.view.rect = map_rect;
+            let resp = ui.interact(map_rect, egui::Id::new("battlefield"), Sense::click_and_drag());
             input::map_input(ctx, &resp, &mut self.view, &mut self.ui, &mut self.game, &mut self.input);
-            self.draw_world(ui, rect, dt);
+            self.draw_world(ui, map_rect, dt);
+            let tex = self.terrain.as_ref().map(|t| t.1.id());
+            let out = mapui::draw(ui, map_rect, &self.game, &mut self.ui, &mut self.view, &self.fog_tex, tex, &self.icons);
+            if out.look.is_some() {
+                look = out.look;
+            }
+            minimap_order = out.minimap_order;
+            mapui::toasts(ui, map_rect, &mut self.ui);
         });
-        let ground = self.ground_color();
-        overlay::objective_panel(ctx, map_rect, &self.game);
-        if let Some((x, y, attack)) = overlay::minimap(ctx, map_rect, &self.game, &mut self.ui, &mut self.view, &self.fog_tex, ground, self.terrain.as_ref().map(|t| t.1.id())) {
+        if let Some((x, y, attack)) = minimap_order {
             let t = input::resolve_targets(&self.game, Pt::new(x, y));
             self.ui.issue_order(&mut self.game, Pt::new(x, y), attack, false, t.enemy, t.node, t.building, t.escort);
         }
         if let Some(l) = overlay::colossus_banner(ctx, map_rect, &self.game) {
             look = Some(l);
         }
-        overlay::map_controls(ctx, map_rect, &self.game, &mut self.ui, &mut self.view, &mut look);
-        overlay::toasts(ctx, map_rect, &mut self.ui);
         for a in actions {
             match a {
                 Action::Help => self.ui.show_help = true,

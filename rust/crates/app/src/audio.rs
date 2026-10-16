@@ -62,7 +62,13 @@ pub struct Audio {
 
 impl Audio {
     pub fn new(assets: PathBuf) -> Option<Audio> {
-        let (stream, handle) = OutputStream::try_default().ok()?;
+        let (stream, handle) = match OutputStream::try_default() {
+            Ok(s) => s,
+            Err(e) => {
+                eprintln!("audio: no output device ({e})");
+                return None;
+            }
+        };
         let seed = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_nanos() as u64).unwrap_or(1) | 1;
         Some(Audio {
             _stream: stream,
@@ -126,8 +132,17 @@ impl Audio {
         let n = self.counts.entry(kind.to_string()).or_insert(0);
         let name = names[*n % names.len()];
         *n += 1;
-        let Some(bytes) = self.bytes(name) else { return };
-        let Ok(src) = Decoder::new(Cursor::new((*bytes).clone())) else { return };
+        let Some(bytes) = self.bytes(name) else {
+            eprintln!("audio: missing effect {name}");
+            return;
+        };
+        let src = match Decoder::new(Cursor::new((*bytes).clone())) {
+            Ok(s) => s,
+            Err(e) => {
+                eprintln!("audio: cannot decode effect {name}: {e}");
+                return;
+            }
+        };
         let base = (volume * if priority { 0.95 } else if matches!(kind, "hit" | "wood" | "gold" | "stone" | "food" | "build") { 0.24 } else { 0.48 }).min(1.0);
         if let Ok(sink) = Sink::try_new(&self.handle) {
             sink.set_volume((base * self.effects).min(1.0));
@@ -185,8 +200,20 @@ impl Audio {
         self.previous = Some(idx);
         let (id, title) = TRACKS[idx];
         let path = self.dir.join("music").join(format!("{id}.mp3"));
-        let Ok(file) = std::fs::File::open(path) else { return };
-        let Ok(src) = Decoder::new(std::io::BufReader::new(file)) else { return };
+        let file = match std::fs::File::open(&path) {
+            Ok(f) => f,
+            Err(e) => {
+                eprintln!("audio: cannot open {}: {e}", path.display());
+                return;
+            }
+        };
+        let src = match Decoder::new(std::io::BufReader::new(file)) {
+            Ok(s) => s,
+            Err(e) => {
+                eprintln!("audio: cannot decode {}: {e}", path.display());
+                return;
+            }
+        };
         if let Ok(sink) = Sink::try_new(&self.handle) {
             sink.set_volume(0.0);
             sink.append(src);
