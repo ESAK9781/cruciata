@@ -83,8 +83,9 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAG: ${{ github.event.inputs.tag || github.ref_name }}
         run: |
-          gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1 || \
-            pre=""; case "$TAG" in *-*) pre="--prerelease";; esac
-            gh release create "$TAG" $pre --repo "$GITHUB_REPOSITORY" --title "Cruciata $TAG" \
-              --notes "Native desktop build with LAN multiplayer. Download the installer for your system; see the install page for details."
+          pre=""
+          case "$TAG" in *-*) pre="--prerelease" ;; esac
+          if ! gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release create "$TAG" $pre --repo "$GITHUB_REPOSITORY" --title "Cruciata $TAG"               --notes "Native desktop build with LAN multiplayer. Download the installer for your system; see the install page for details."
+          fi
           gh release upload "$TAG" out/* --repo "$GITHUB_REPOSITORY" --clobber
