@@ -255,6 +255,32 @@ const fs = require("node:fs"),
                       );
                     }
             }
+        // Destroyed curtain sections stay as rubble heaps.
+        for (const fortified of [false, true])
+          for (const team of [0, 1, 2, 3])
+            for (const architecture of ["christian", "islamic"]) {
+              if ((team === 1) !== (architecture === "islamic") && team !== 0)
+                continue;
+              for (let id = 0; id < 3; id++)
+                A.structure(
+                  g,
+                  {
+                    id,
+                    kind: "wall",
+                    w: 32,
+                    h: 32,
+                    x: 0,
+                    y: 0,
+                    hp: 0,
+                    maxHp: 100,
+                    team,
+                    architecture,
+                    fortified,
+                    progress: 1,
+                  },
+                  0,
+                );
+            }
         for (const [kind, w, h] of sizes)
           for (const team of [0, 1, 2, 3])
             for (const architecture of ["christian", "islamic"]) {

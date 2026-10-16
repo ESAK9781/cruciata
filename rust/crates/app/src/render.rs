@@ -211,6 +211,14 @@ impl App {
                         if focus.is_none() { focus = Some((tc.0 + n[2], tc.1 + n[3])); }
                     }
                 }
+                "ruinwall" => {
+                    for (i, b) in game.sim.state.buildings.iter_mut().filter(|b| b.team == 0 && b.kind == BKind::Wall).enumerate() {
+                        if i % 3 == 1 {
+                            b.hp = 0.0;
+                            focus = Some((b.x, b.y));
+                        }
+                    }
+                }
                 "towerwall" => {
                     // Debug: turn the middle player wall into an attached guard tower.
                     let walls: Vec<usize> = game.sim.state.buildings.iter().enumerate().filter(|(_, b)| b.team == 0 && b.kind == BKind::Wall).map(|(i, _)| i).collect();
@@ -1018,6 +1026,17 @@ impl App {
                     let mut wb = (*b).clone();
                     if b.kind == BKind::Bastionwall {
                         wb.fortified = true;
+                    }
+                    if b.hp <= 0.0 {
+                        // Destroyed curtain: the baked rubble heap (`rubble` in isometric-art.js).
+                        wb.kind = BKind::Wall;
+                        wb.links = None;
+                        wb.wall_angle = None;
+                        wb.w = 32.0;
+                        wb.h = 32.0;
+                        let (width, _h, oy) = building_canvas(&wb);
+                        batch.frame(atlas, &view, &building_key(&wb), width / 2.0, oy, b.x, b.y, 1.0, depth, white);
+                        continue;
                     }
                     let alpha = if b.hp > 0.0 && b.progress < 1.0 { 0.55 + 0.45 * b.progress } else { 1.0 };
                     wall_shape(&mut batch, &view, walls.get(&wb), b.x, b.y, depth, alpha as f32);
