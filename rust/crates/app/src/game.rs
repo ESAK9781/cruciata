@@ -53,9 +53,15 @@ impl Game {
         } else if !self.sim.state.paused {
             self.acc = (self.acc + dt).min(0.25);
             let speed = self.sim.speed_cheat();
+            // A frame may spend at most ~10 ms on the simulation: if a step runs long (route
+            // searches) the game briefly slows rather than freezing for several frames.
+            let t0 = std::time::Instant::now();
             while self.acc >= STEP {
                 self.sim.update(STEP * speed);
                 self.acc -= STEP;
+                if t0.elapsed().as_millis() >= 10 {
+                    break;
+                }
             }
         }
         self.events.append(&mut self.sim.events);

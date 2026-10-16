@@ -86,7 +86,7 @@ impl Cv {
 
 /// Bake the ground. `level` is the biome index used by the original
 /// (0 coastal, 1 river, 2 arid, 3 winter); `coast` enables the sea.
-pub fn bake(state: &State, w: f64, h: f64, level: i32, coast: bool) -> (ColorImage, ColorImage) {
+pub fn bake(state: &State, w: f64, h: f64, level: i32, coast: bool, details: bool) -> (ColorImage, ColorImage) {
     let scale = 0.5f64.min(2560.0 / w).min(1800.0 / h);
     let (pw, ph) = ((w * scale).ceil() as u32, (h * scale).ceil() as u32);
     let mut cv = Cv { pm: Pixmap::new(pw.max(1), ph.max(1)).unwrap(), s: scale as f32 };
@@ -125,7 +125,13 @@ pub fn bake(state: &State, w: f64, h: f64, level: i32, coast: bool) -> (ColorIma
         }
         cw.line(&shore, 22.0, "#d4c592");
         cw.line(&shore.iter().map(|&(x, y)| (x - 15.0, y)).collect::<Vec<_>>(), 3.0, "#bdd2b7");
-        cw.line(&shore.iter().map(|&(x, y)| (x + 8.0, y)).collect::<Vec<_>>(), 2.0, "#b9a77c");
+        if details {
+            // The live `terrainDetails` strand: a wider sand band over the baked shore, a
+            // shallow-water edge on the sea side and a dry-sand edge on the land side.
+            cw.line(&shore, 24.0, "#d5c28c");
+            cw.line(&shore.iter().map(|&(x, y)| (x - 11.0, y)).collect::<Vec<_>>(), 3.0, "#82bbb0");
+            cw.line(&shore.iter().map(|&(x, y)| (x + 8.0, y)).collect::<Vec<_>>(), 2.0, "#b9a77c");
+        }
         for _ in 0..600 {
             let y = rand.next() * h;
             let x = rand.next() * coast_x(y);
@@ -197,13 +203,110 @@ fn rock_path(contours: &[Vec<cruciata_core::nav::Pt>]) -> Option<tiny_skia::Path
     pb.finish()
 }
 
-/// Rock masses (blocking cliffs and boulder fields) painted onto a transparent overlay.
-pub fn bake_rocks(state: &State, w: f64, h: f64) -> ColorImage {
-    let scale = 0.5f64.min(2560.0 / w).min(1800.0 / h);
-    let (pw, ph) = ((w * scale).ceil() as u32, (h * scale).ceil() as u32);
-    let mut cv = Cv { pm: Pixmap::new(pw.max(1), ph.max(1)).unwrap(), s: scale as f32 };
-    let sk = Transform::from_scale(scale as f32, scale as f32);
-    for f in state.terrain_features.iter().filter(|f| f.kind == "rockmass" && f.forest != Some(true)) {
+/// World-space bounding boxes (with the rim's reach) of every rock mass: (min x, min y, max x, max y).
+pub fn rock_boxes(state: &State) -> Vec<(usize, [f64; 4])> {
+    let mut out = Vec::new();
+    for (i, f) in state.terrain_features.iter().enumerate() {
+        if f.kind != "rockmass" || f.forest == Some(true) {
+            continue;
+        }
+        let mut b = [f64::INFINITY, f64::INFINITY, f64::NEG_INFINITY, f64::NEG_INFINITY];
+        for c in &f.contours {
+            for p in c {
+                b = [b[0].min(p.x), b[1].min(p.y), b[2].max(p.x), b[3].max(p.y)];
+            }
+        }
+        if b[0].is_finite() {
+            out.push((i, [b[0] - 44.0, b[1] - 44.0, b[2] + 48.0, b[3] + 50.0]));
+        }
+    }
+    out
+}
+
+struct RockDetail {
+    walls: [Option<tiny_skia::Path>; 3],
+    fractures: Option<tiny_skia::Path>,
+    chips: [Option<tiny_skia::Path>; 2],
+    highlights: Option<tiny_skia::Path>,
+}
+
+/// Port of the lazily built `detail` paths of `Art.rockMass`: three stratified
+/// wall bands along every edge, fracture lines, chipped stones and their highlights.
+fn rock_detail(contours: &[Vec<cruciata_core::nav::Pt>]) -> RockDetail {
+    let mut walls = [PathBuilder::new(), PathBuilder::new(), PathBuilder::new()];
+    let mut fractures = PathBuilder::new();
+    let mut chips = [PathBuilder::new(), PathBuilder::new()];
+    let mut highlights = PathBuilder::new();
+    for contour in contours {
+        let n = contour.len();
+        for i in 0..n {
+            let (a, b) = (contour[i], contour[(i + 1) % n]);
+            let length = ((b.x - a.x).powi(2) + (b.y - a.y).powi(2)).sqrt();
+            if length < 1e-6 {
+                continue;
+            }
+            let (dx, dy) = ((b.x - a.x) / length, (b.y - a.y) / length);
+            let (nx, ny) = (-dy, dx);
+            for (band, path) in walls.iter_mut().enumerate() {
+                let near = band as f64 * 10.0 + 3.0;
+                let far = near + 11.0;
+                path.move_to((a.x + nx * near) as f32, (a.y + ny * near) as f32);
+                path.line_to((b.x + nx * near) as f32, (b.y + ny * near) as f32);
+                path.line_to((b.x + nx * far) as f32, (b.y + ny * far) as f32);
+                path.line_to((a.x + nx * far) as f32, (a.y + ny * far) as f32);
+                path.close();
+            }
+            let mut t = 12.0;
+            while t < length {
+                let (x, y) = (a.x + dx * t, a.y + dy * t);
+                fractures.move_to((x - dy * 6.0) as f32, (y + dx * 6.0) as f32);
+                fractures.line_to((x - dy * 17.0 + dx * 2.0) as f32, (y + dx * 17.0 + dy * 2.0) as f32);
+                fractures.line_to((x - dy * 32.0) as f32, (y + dx * 32.0) as f32);
+                t += 27.0;
+            }
+            let mut t = 7.0;
+            while t < length - 3.0 {
+                let jitter = (a.x * 0.31 + a.y * 0.17 + t).sin() * 5.0;
+                let (x, y) = (a.x + dx * t - dy * jitter, a.y + dy * t + dx * jitter);
+                let radius = 5.0 + ((x * 0.9 + y * 0.7).sin() + 1.0) * 2.5;
+                let pts: Vec<(f32, f32)> = (0..6)
+                    .map(|k| {
+                        let angle = k as f64 * std::f64::consts::PI / 3.0 + 0.3;
+                        let rr = radius * (0.75 + 0.2 * (x + y + k as f64 * 9.0).sin());
+                        ((x + angle.cos() * rr) as f32, (y + angle.sin() * rr) as f32)
+                    })
+                    .collect();
+                let chip = &mut chips[if (x + y).sin() > 0.0 { 0 } else { 1 }];
+                chip.move_to(pts[0].0, pts[0].1);
+                for p in &pts[1..] {
+                    chip.line_to(p.0, p.1);
+                }
+                chip.close();
+                highlights.move_to(pts[3].0, pts[3].1);
+                highlights.line_to(pts[4].0, pts[4].1);
+                highlights.line_to(pts[5].0, pts[5].1);
+                t += 15.0;
+            }
+        }
+    }
+    let [w0, w1, w2] = walls;
+    let [c0, c1] = chips;
+    RockDetail { walls: [w0.finish(), w1.finish(), w2.finish()], fractures: fractures.finish(), chips: [c0.finish(), c1.finish()], highlights: highlights.finish() }
+}
+
+/// One square tile of the rock layer at `ppu` pixels per world unit, or `None`
+/// when no mass reaches it. Rocks are redrawn at the camera's own resolution so
+/// they stay crisp at any zoom, like the web's live vector drawing.
+pub fn bake_rock_tile(state: &State, boxes: &[(usize, [f64; 4])], x0: f64, y0: f64, size: f64, ppu: f64) -> Option<ColorImage> {
+    let hits: Vec<usize> = boxes.iter().filter(|(_, b)| b[2] >= x0 && b[0] <= x0 + size && b[3] >= y0 && b[1] <= y0 + size).map(|(i, _)| *i).collect();
+    if hits.is_empty() {
+        return None;
+    }
+    let px = (size * ppu).ceil() as u32;
+    let mut cv = Cv { pm: Pixmap::new(px, px)?, s: ppu as f32 };
+    let sk = Transform::from_scale(ppu as f32, ppu as f32).pre_translate(-(x0 as f32), -(y0 as f32));
+    for i in hits {
+        let f = &state.terrain_features[i];
         let Some(path) = rock_path(&f.contours) else { continue };
         let rim = match f.biome as i32 {
             1 => ["#627465", "#93a48e", "#b7c4a9"],
@@ -212,6 +315,7 @@ pub fn bake_rocks(state: &State, w: f64, h: f64) -> ColorImage {
             _ => ["#6d7162", "#a2a38d", "#c1bea5"],
         };
         let round = |w: f32| Stroke { width: w, line_join: tiny_skia::LineJoin::Round, line_cap: tiny_skia::LineCap::Round, ..Default::default() };
+        let thin = |w: f32| Stroke { width: w, ..Default::default() };
         let shadow = sk.pre_translate(4.0, 6.0);
         cv.pm.fill_path(&path, &Cv::paint("#19201955"), FillRule::EvenOdd, shadow, None);
         cv.pm.stroke_path(&path, &Cv::paint("#19201940"), &round(34.0), shadow, None);
@@ -219,14 +323,40 @@ pub fn bake_rocks(state: &State, w: f64, h: f64) -> ColorImage {
         cv.pm.stroke_path(&path, &Cv::paint(rim[0]), &round(28.0), sk, None);
         cv.pm.stroke_path(&path, &Cv::paint(rim[1]), &round(18.0), sk, None);
         cv.pm.stroke_path(&path, &Cv::paint(rim[2]), &round(1.0), sk, None);
+        let detail = rock_detail(&f.contours);
+        let faces = if f.biome as i32 == 2 { ["#a47a43", "#664422", "#302016"] } else { [rim[0], "#44483d", "#202820"] };
+        if let Some(mut mask) = tiny_skia::Mask::new(px, px) {
+            mask.fill_path(&path, FillRule::EvenOdd, true, sk);
+            for (k, wall) in detail.walls.iter().enumerate() {
+                if let Some(p) = wall {
+                    cv.pm.fill_path(p, &Cv::paint(faces[k]), FillRule::Winding, sk, Some(&mask));
+                }
+            }
+            if let Some(p) = &detail.fractures {
+                cv.pm.stroke_path(p, &Cv::paint(if f.biome as i32 == 2 { "#1e120cc0" } else { "#111b14aa" }), &thin(1.2), sk, Some(&mask));
+            }
+        }
+        for k in 0..2 {
+            if let Some(p) = &detail.chips[k] {
+                cv.pm.fill_path(p, &Cv::paint(rim[k]), FillRule::Winding, sk, None);
+                cv.pm.stroke_path(p, &Cv::paint("#383e3480"), &thin(1.0), sk, None);
+            }
+        }
+        if let Some(p) = &detail.highlights {
+            cv.pm.stroke_path(p, &Cv::paint(rim[2]), &thin(0.8), sk, None);
+        }
     }
-    let px: Vec<eframe::egui::Color32> = cv.pm.pixels().iter().map(|p| {
-        let c = p.demultiply();
-        crate::paint::rgba(c.red(), c.green(), c.blue(), c.alpha())
-    }).collect();
-    ColorImage { size: [pw as usize, ph as usize], pixels: px }
+    let pixels: Vec<eframe::egui::Color32> = cv
+        .pm
+        .pixels()
+        .iter()
+        .map(|p| {
+            let c = p.demultiply();
+            crate::paint::rgba(c.red(), c.green(), c.blue(), c.alpha())
+        })
+        .collect();
+    Some(ColorImage { size: [px as usize, px as usize], pixels })
 }
-
 
 /// The 512-unit grass/ground tile the web version repeats over the land (`groundTexture`).
 pub fn ground_tile(level: i32) -> ColorImage {

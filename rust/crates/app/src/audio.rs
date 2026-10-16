@@ -41,9 +41,17 @@ fn bank(kind: &str) -> &'static [&'static str] {
     }
 }
 
+fn default_device_name() -> Option<String> {
+    use rodio::cpal::traits::{DeviceTrait, HostTrait};
+    rodio::cpal::default_host().default_output_device().and_then(|d| d.name().ok())
+}
+
 pub struct Audio {
     _stream: OutputStream,
     handle: OutputStreamHandle,
+    /// Name of the output device the stream was opened on, and when it was last checked.
+    device: Option<String>,
+    checked: Instant,
     dir: PathBuf,
     cache: HashMap<String, Arc<Vec<u8>>>,
     counts: HashMap<String, usize>,
@@ -73,6 +81,8 @@ impl Audio {
         Some(Audio {
             _stream: stream,
             handle,
+            device: default_device_name(),
+            checked: Instant::now(),
             dir: assets,
             cache: HashMap::new(),
             counts: HashMap::new(),
@@ -88,6 +98,29 @@ impl Audio {
             enabled: true,
             rng: seed,
         })
+    }
+
+    /// Follow the system's default output: when it changes (headphones plugged in,
+    /// Bluetooth connected, a monitor removed) the old stream goes silent, so open a new one.
+    fn follow_default_device(&mut self) {
+        if self.checked.elapsed() < Duration::from_secs(2) {
+            return;
+        }
+        self.checked = Instant::now();
+        let now = default_device_name();
+        if now == self.device {
+            return;
+        }
+        match OutputStream::try_default() {
+            Ok((stream, handle)) => {
+                self.active.clear();
+                self.music = None;
+                self._stream = stream;
+                self.handle = handle;
+                self.device = now;
+            }
+            Err(e) => eprintln!("audio: cannot open the new output device ({e})"),
+        }
     }
 
     fn rand(&mut self) -> u64 {
@@ -225,6 +258,7 @@ impl Audio {
 
     /// Per-frame upkeep: keep the playlist going and fade tracks in.
     pub fn update(&mut self) {
+        self.follow_default_device();
         self.active.retain(|(s, _)| !s.empty());
         if self.music_volume <= 0.0 {
             return;

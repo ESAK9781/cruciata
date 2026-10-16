@@ -32,6 +32,8 @@ pub struct Atlas {
     pub scale: f32,
     pages: Vec<String>,
     frames: HashMap<String, Frame>,
+    /// Keys sharing everything before their last `:` (the frames of one animation).
+    families: HashMap<String, Vec<String>>,
     resident: HashMap<u16, Resident>,
     requested: HashSet<u16>,
     tx: Sender<u16>,
@@ -52,6 +54,12 @@ impl Atlas {
             let n = |i: usize| a.get(i).and_then(|x| x.as_f64()).unwrap_or(0.0) as f32;
             frames.insert(k.clone(), Frame { page: n(0) as u16, x: n(1), y: n(2), w: n(3), h: n(4), dx: n(5), dy: n(6) });
         }
+        let mut families: HashMap<String, Vec<String>> = HashMap::new();
+        for k in frames.keys() {
+            if let Some(i) = k.rfind(':') {
+                families.entry(k[..i].to_string()).or_default().push(k.clone());
+            }
+        }
         let (tx, req_rx) = channel::<u16>();
         let (done_tx, rx) = channel();
         let req_rx = Arc::new(Mutex::new(req_rx));
@@ -71,7 +79,7 @@ impl Atlas {
                 }
             });
         }
-        Ok(Atlas { dir, scale, pages, frames, resident: HashMap::new(), requested: HashSet::new(), tx, rx, tick: 0, misses: 0 })
+        Ok(Atlas { dir, scale, pages, frames, families, resident: HashMap::new(), requested: HashSet::new(), tx, rx, tick: 0, misses: 0 })
     }
 
     pub fn dir(&self) -> &PathBuf {
@@ -111,6 +119,8 @@ impl Atlas {
     }
 
     /// Frame plus the texture of its page (when decoded). Requests the page otherwise.
+    /// While a page is still loading (or was evicted) the nearest resident frame of
+    /// the same animation is used instead, so moving machines never blink out.
     pub fn lookup(&mut self, key: &str) -> Option<(Frame, Option<TextureId>)> {
         let f = *self.frames.get(key)?;
         if let Some(r) = self.resident.get_mut(&f.page) {
@@ -121,7 +131,32 @@ impl Atlas {
             let _ = self.tx.send(f.page);
         }
         self.misses += 1;
-        Some((f, None))
+        let i = key.rfind(':')?;
+        let want = key[i + 1..].rsplit('-').next().and_then(|n| n.parse::<i64>().ok());
+        let mut best: Option<(i64, Frame, TextureId)> = None;
+        let mut prefetch = 0;
+        if let Some(sibs) = self.families.get(&key[..i]) {
+            for s in sibs {
+                let Some(sf) = self.frames.get(s).copied() else { continue };
+                if let Some(r) = self.resident.get(&sf.page) {
+                    let n = s[s.rfind(':').map(|j| j + 1).unwrap_or(0)..].rsplit('-').next().and_then(|n| n.parse::<i64>().ok());
+                    let dist = match (want, n) {
+                        (Some(w), Some(n)) => (w - n).abs(),
+                        _ => 1000,
+                    };
+                    if best.as_ref().map(|b| dist < b.0).unwrap_or(true) {
+                        best = Some((dist, sf, r.handle.id()));
+                    }
+                } else if prefetch < 6 && self.requested.insert(sf.page) {
+                    let _ = self.tx.send(sf.page);
+                    prefetch += 1;
+                }
+            }
+        }
+        match best {
+            Some((_, sf, id)) => Some((sf, Some(id))),
+            None => Some((f, None)),
+        }
     }
 
     pub fn resident_pages(&self) -> usize {

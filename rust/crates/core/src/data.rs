@@ -77,6 +77,9 @@ pub struct Data {
     buildings: Vec<(BKind, BuildingSpec)>,
     pub techs: Vec<Tech>,
     pub levels: Vec<Level>,
+    /// Position of each unit type / building kind in the vectors above (indexed by discriminant).
+    type_ix: Vec<usize>,
+    bld_ix: Vec<usize>,
 }
 
 pub const ALL_UTYPES: [UType; 12] = [
@@ -96,10 +99,10 @@ pub const ALL_UTYPES: [UType; 12] = [
 
 impl Data {
     pub fn ty(&self, t: UType) -> &TypeSpec {
-        &self.types.iter().find(|(k, _)| *k == t).unwrap().1
+        &self.types[self.type_ix[t as usize]].1
     }
     pub fn bld(&self, k: BKind) -> &BuildingSpec {
-        &self.buildings.iter().find(|(x, _)| *x == k).unwrap().1
+        &self.buildings[self.bld_ix[k as usize]].1
     }
     pub fn tech(&self, key: &str) -> Option<&Tech> {
         self.techs.iter().find(|t| t.key == key)
@@ -344,7 +347,15 @@ fn build() -> Data {
         requires: Some("engineworks"),
     });
 
-    Data { types, buildings: b, techs, levels: levels() }
+    let mut type_ix = vec![usize::MAX; 64];
+    for (i, (k, _)) in types.iter().enumerate() {
+        type_ix[*k as usize] = i;
+    }
+    let mut bld_ix = vec![usize::MAX; 128];
+    for (i, (k, _)) in b.iter().enumerate() {
+        bld_ix[*k as usize] = i;
+    }
+    Data { types, buildings: b, techs, levels: levels(), type_ix, bld_ix }
 }
 
 fn levels() -> Vec<Level> {

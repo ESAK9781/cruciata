@@ -54,7 +54,9 @@ pub struct App {
     save_clock: f64,
     result_handled: bool,
     terrain: Option<(u64, TextureHandle)>,
-    rocks: Option<TextureHandle>,
+    /// Rock layer tiles keyed by (tile x, tile y, resolution level); None marks an empty tile.
+    rock_tiles: HashMap<(i32, i32, u8), Option<TextureHandle>>,
+    rock_boxes: Vec<(usize, [f64; 4])>,
     cover: Vec<crate::extras::Patch>,
     fx: crate::fx::Fx,
     water: Option<TextureHandle>,
@@ -65,6 +67,10 @@ pub struct App {
     desync_warned: bool,
     demo_at: Option<u8>,
     fps_mark: Option<(std::time::Instant, u32)>,
+    /// Per-phase milliseconds since the last report (`CRUCIATA_FPS`): sim, fx, fog, world, minimap.
+    prof: [f64; 6],
+    slow_frames: u32,
+    sim_max: f64,
     icons: Icons,
     last_volumes: (f32, f32, bool),
 }
@@ -139,6 +145,11 @@ impl App {
                         focus = Some((b.x, b.y));
                     }
                 }
+                "rock" => {
+                    if let Some((_, b)) = crate::terrain::rock_boxes(&game.sim.state).into_iter().nth(v.parse::<usize>().unwrap_or(0)) {
+                        focus = Some(((b[0] + b[2]) / 2.0, (b[1] + b[3]) / 2.0));
+                    }
+                }
                 "standard" => {
                     if let Some(u) = game.sim.state.units.iter().find(|u| u.team == 0 && u.ty == UType::Standard) {
                         app_ui.selected = HashSet::from([u.id]);
@@ -151,6 +162,23 @@ impl App {
                         let g = Pt::new(u.0 + dx, u.1 + dy);
                         let t = input::resolve_targets(&game, g);
                         app_ui.issue_order(&mut game, g, false, false, t.enemy, t.node, t.building, t.escort);
+                    }
+                }
+                "wallrel" => {
+                    // Debug: plan a wall relative to the town centre and finish it at once.
+                    let n: Vec<f64> = v.split(',').filter_map(|x| x.parse().ok()).collect();
+                    if let (4, Some(tc)) = (n.len(), game.sim.state.buildings.iter().find(|b| b.team == 0 && b.kind == BKind::Towncenter).map(|b| (b.x, b.y))) {
+                        game.sim.state.resources.stone = 50000.0;
+                        game.sim.state.resources.wood = 50000.0;
+                        let snap = |v: f64| (v / 32.0).round() * 32.0;
+                        let cmd = cruciata_core::commands::Command::PlaceWall { kind: BKind::Wall, ax: snap(tc.0 + n[0]), ay: snap(tc.1 + n[1]), bx: snap(tc.0 + n[2]), by: snap(tc.1 + n[3]), builders: vec![], append: false };
+                        game.sim.run_command(0, 0, &cruciata_core::lockstep::PlayerCommand::Game(cmd));
+                        for b in game.sim.state.buildings.iter_mut().filter(|b| b.team == 0 && b.kind == BKind::Wall) {
+                            b.progress = 1.0;
+                            b.hp = b.max_hp;
+                        }
+                        game.sim.rebuild_navigation();
+                        if focus.is_none() { focus = Some((tc.0 + n[2], tc.1 + n[3])); }
                     }
                 }
                 "settings" => app_ui.show_settings = true,
@@ -236,7 +264,8 @@ impl App {
             save_clock: 0.0,
             result_handled: false,
             terrain: None,
-            rocks: None,
+            rock_tiles: HashMap::new(),
+            rock_boxes: Vec::new(),
             cover: Vec::new(),
             fx: Default::default(),
             water: None,
@@ -247,6 +276,9 @@ impl App {
             desync_warned: false,
             demo_at: None,
             fps_mark: None,
+            prof: [0.0; 6],
+            slow_frames: 0,
+            sim_max: 0.0,
             icons: Icons::load(&cc.egui_ctx, &assets_dir()),
             last_volumes: (-1.0, -1.0, true),
         }
@@ -427,7 +459,7 @@ impl App {
             return;
         }
         let coast = true;
-        let (mut img, water) = crate::terrain::bake(s, self.game.sim.geo.w, self.game.sim.geo.h, self.biome(), coast);
+        let (mut img, water) = crate::terrain::bake(s, self.game.sim.geo.w, self.game.sim.geo.h, self.biome(), coast, s.mode != "quickmatch");
         self.water = Some(ctx.load_texture("water", water, egui::TextureOptions::LINEAR));
         let repeat = egui::TextureOptions { wrap_mode: egui::TextureWrapMode::Repeat, ..egui::TextureOptions::LINEAR };
         self.tile = Some(ctx.load_texture("ground-tile", crate::terrain::ground_tile(self.biome()), repeat));
@@ -439,8 +471,8 @@ impl App {
             }
         }
         self.terrain = Some((key, ctx.load_texture("terrain", img, egui::TextureOptions::LINEAR)));
-        let rocks = crate::terrain::bake_rocks(s, self.game.sim.geo.w, self.game.sim.geo.h);
-        self.rocks = Some(ctx.load_texture("rocks", rocks, egui::TextureOptions::LINEAR));
+        self.rock_tiles.clear();
+        self.rock_boxes = crate::terrain::rock_boxes(s);
         self.cover = crate::extras::make_cover(&self.game.sim, self.biome());
     }
 
@@ -689,8 +721,38 @@ impl App {
                 line(-7.0, 0.8, crate::paint::col("#8d78493d"));
                 line(7.0, 0.8, crate::paint::col("#8d78493d"));
             }
-            if let Some(rk) = &self.rocks {
-                painter.image(rk.id(), Rect::from_min_max(tl, br), Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)), Color32::WHITE);
+            // Rock masses, drawn from tiles baked at the camera's resolution.
+            {
+                const TILE: f64 = 512.0;
+                let level: u8 = if view.zoom >= 1.1 { 3 } else if view.zoom >= 0.55 { 2 } else if view.zoom >= 0.28 { 1 } else { 0 };
+                let ppu = [0.2, 0.4, 0.9, 1.6][level as usize];
+                let (tx0, ty0) = (((view.x - 60.0) / TILE).floor() as i32, ((view.y - 60.0) / TILE).floor() as i32);
+                let (tx1, ty1) = (((view.x + view.w + 60.0) / TILE).floor() as i32, ((view.y + view.h + 60.0) / TILE).floor() as i32);
+                let mut baked = 0;
+                let full = Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0));
+                for ty in ty0.max(0)..=ty1 {
+                    for tx in tx0.max(0)..=tx1 {
+                        let key = (tx, ty, level);
+                        if !self.rock_tiles.contains_key(&key) {
+                            if baked >= 2 {
+                                continue;
+                            }
+                            baked += 1;
+                            let img = crate::terrain::bake_rock_tile(&self.game.sim.state, &self.rock_boxes, tx as f64 * TILE, ty as f64 * TILE, TILE, ppu);
+                            let tex = img.map(|i| ui.ctx().load_texture(format!("rocks-{tx}-{ty}-{level}"), i, egui::TextureOptions::LINEAR));
+                            self.rock_tiles.insert(key, tex);
+                        }
+                        if let Some(Some(tex)) = self.rock_tiles.get(&key) {
+                            let a = view.to_screen(tx as f64 * TILE, ty as f64 * TILE);
+                            let b = view.to_screen((tx + 1) as f64 * TILE, (ty + 1) as f64 * TILE);
+                            painter.image(tex.id(), Rect::from_min_max(a, b), full, Color32::WHITE);
+                        }
+                    }
+                }
+                if self.rock_tiles.len() > 160 {
+                    // Keep only the tiles around the camera, at any resolution.
+                    self.rock_tiles.retain(|k, _| k.0 >= tx0 - 2 && k.0 <= tx1 + 2 && k.1 >= ty0 - 2 && k.1 <= ty1 + 2);
+                }
             }
             if !under_tile {
                 if let Some(wt) = &self.water {
@@ -756,7 +818,14 @@ impl App {
             }
             match d.kind {
                 cruciata_core::world::DecoKind::Rock => {
-                    cv.ellipse(d.x, d.y - d.r * 0.2, d.r * 1.1, d.r * 0.8, col("#8d8777"));
+                    // The web draws a seven-sided stone prism (`Art.boulder`); the atlas holds it at
+                    // radii 8..40 in steps of four, so scale the nearest one.
+                    let ra = ((d.r / 4.0).round() * 4.0).clamp(8.0, 40.0);
+                    let k = d.r / ra;
+                    cv.ellipse(d.x + 7.0, d.y + 7.0, d.r, d.r * 0.65, col("#25332330"));
+                    if !batch.frame(atlas, &view, &format!("boulder:{}", ra as i64), ra * 1.5 + 10.0, ra * 2.0 + 15.0, d.x, d.y, k, d.y, white) {
+                        cv.ellipse(d.x, d.y - d.r * 0.2, d.r * 1.1, d.r * 0.8, col("#8d8777"));
+                    }
                 }
                 _ => {
                     let k = d.scale;
@@ -1281,16 +1350,42 @@ impl eframe::App for App {
             let e = self.fps_mark.get_or_insert((now, 0u32));
             e.1 += 1;
             if now.duration_since(e.0).as_secs_f32() >= 2.0 {
-                eprintln!("{:.1} fps, sim {:.1} ms/step", e.1 as f32 / 2.0, self.game.sim.state.time);
+                let n = e.1.max(1) as f64;
+                let p = self.prof;
+                eprintln!("worst frame {:.1} ms, {} over 25 ms, atlas pages {} resident / {} pending, misses {}", p[5], self.slow_frames, self.atlas.resident_pages(), self.atlas.pending_pages(), self.atlas.misses);
+                self.slow_frames = 0;
+                let mut ph: Vec<(&&str, &f64)> = self.game.sim.phases.iter().collect();
+                ph.sort_by(|a, b| b.1.partial_cmp(a.1).unwrap_or(std::cmp::Ordering::Equal));
+                let line: Vec<String> = ph.iter().take(7).map(|(k, v)| format!("{k} {:.2}", **v * 1000.0 / n)).collect();
+                eprintln!("sim phases ms/frame: {}", line.join(", "));
+                self.game.sim.phases.clear();
+                eprintln!("worst sim advance {:.1} ms", self.sim_max);
+                self.sim_max = 0.0;
+                eprintln!("{:.1} fps | per frame ms: sim {:.2} fx {:.2} fog {:.2} world {:.2} map {:.2} | units {} bld {}", e.1 as f32 / 2.0, p[0] / n, p[1] / n, p[2] / n, p[3] / n, p[4] / n, self.game.sim.state.units.len(), self.game.sim.state.buildings.len());
+                self.prof = [0.0; 6];
                 *e = (now, 0);
             }
+        }
+        {
+            let ms = ctx.input(|i| i.unstable_dt) as f64 * 1000.0;
+            self.prof[5] = self.prof[5].max(ms);
+            if ms > 25.0 {
+                self.slow_frames += 1;
+            }
+        }
+        if let (Some(frames), true) = (live_frames(), std::env::var_os("CRUCIATA_PAN").is_some()) {
+            // Debug: sweep the camera across the map to exercise page streaming.
+            let t = self.frames as f64 / frames.max(1) as f64;
+            self.view.cx = self.view.world_w * (0.1 + 0.8 * (t * 3.0).fract());
+            self.view.cy = self.view.world_h * (0.2 + 0.6 * (t * 5.0).fract());
         }
         let dt = if live_frames().is_some() { 1.0 / 60.0 } else { (ctx.input(|i| i.unstable_dt) as f64).min(0.1) };
         self.ui.clock += dt;
         self.atlas.begin_frame(ctx);
         let shot_mode = self.args.shot.is_some();
-        if self.audio.is_none() && !shot_mode && self.frames == 3 {
+        if self.audio.is_none() && !shot_mode && (self.frames == 3 || self.frames % 240 == 0) {
             self.audio = crate::audio::Audio::new(assets_dir());
+            self.last_volumes = (-1.0, -1.0, false);
         }
         self.sync_audio();
         if let Some(rx) = &self.loader {
@@ -1332,9 +1427,13 @@ impl eframe::App for App {
             ctx.request_repaint_after(std::time::Duration::from_millis(16));
             return;
         }
+        let t0 = std::time::Instant::now();
         if (!shot_mode || live_frames().is_some()) && !self.ui.show_menu && !self.ui.show_debug {
             self.game.advance(dt);
         }
+        let ms = t0.elapsed().as_secs_f64() * 1000.0;
+        self.prof[0] += ms;
+        self.sim_max = self.sim_max.max(ms);
         self.lan_checks();
         self.handle_events();
         self.save_clock += dt;
@@ -1361,6 +1460,7 @@ impl eframe::App for App {
         }
         self.ui.rings.retain(|r| r.t < 1.0);
         self.ui.impacts.retain(|i| self.ui.clock - i.2 < 1.3);
+        let t0 = std::time::Instant::now();
         {
             let g = &self.game;
             let sees = |x: f64, y: f64| g.sees(x, y);
@@ -1376,9 +1476,12 @@ impl eframe::App for App {
             }
             self.fx.update(&g.sim, if g.paused() || self.ui.show_menu && !g.is_lan() || self.ui.show_debug { 0.0 } else { dt }, &look);
         }
+        self.prof[1] += t0.elapsed().as_secs_f64() * 1000.0;
         self.ui.shake = (self.ui.shake - dt * 16.0).max(0.0);
         self.ui.prune(&self.game);
+        let t0 = std::time::Instant::now();
         self.fog_tex.update(ctx, &self.game);
+        self.prof[2] += t0.elapsed().as_secs_f64() * 1000.0;
         self.ensure_terrain(ctx);
         let mut actions: Vec<Action> = Vec::new();
         let mut look: Option<(f64, f64)> = input::keys(ctx, &mut self.view, &mut self.ui, &mut self.game, dt);
@@ -1396,9 +1499,13 @@ impl eframe::App for App {
             self.view.rect = map_rect;
             let resp = ui.interact(map_rect, egui::Id::new("battlefield"), Sense::click_and_drag());
             input::map_input(ctx, &resp, &mut self.view, &mut self.ui, &mut self.game, &mut self.input);
+            let t0 = std::time::Instant::now();
             self.draw_world(ui, map_rect, dt);
+            self.prof[3] += t0.elapsed().as_secs_f64() * 1000.0;
+            let t0 = std::time::Instant::now();
             let tex = self.terrain.as_ref().map(|t| t.1.id());
             let out = mapui::draw(ui, map_rect, &self.game, &mut self.ui, &mut self.view, &self.fog_tex, tex, self.water.as_ref().map(|t| t.id()), &self.icons);
+            self.prof[4] += t0.elapsed().as_secs_f64() * 1000.0;
             if out.look.is_some() {
                 look = out.look;
             }
@@ -1493,7 +1600,9 @@ impl eframe::App for App {
             }
         let _ = (map_rect, self.last_time);
         self.shot_step(ctx);
-        ctx.request_repaint_after(std::time::Duration::from_millis(16));
+        // Repaint at once and let vsync pace the loop: a timer started after the frame ends
+        // lands just past the next vblank and makes motion judder.
+        ctx.request_repaint();
     }
 }
 

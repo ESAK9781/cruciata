@@ -319,7 +319,7 @@ impl Sim {
                 });
             }
         }
-        let mut buckets: HashMap<i32, Vec<usize>> = HashMap::new();
+        let mut buckets = crate::world::BucketMap::default();
         for (i, s) in curtain.iter().enumerate() {
             if s.hp > 0.0 && matches!(s.kind, BKind::Wall | BKind::Gate) {
                 insert_index(&mut buckets, i, s.x, s.y, s.w / 2.0, s.h / 2.0);

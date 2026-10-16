@@ -116,11 +116,16 @@ impl Lockstep {
         }
         self.acc = (self.acc + dt).min(TURN_DT * 12.0);
         let mut steps = 0;
+        let t0 = std::time::Instant::now();
         loop {
             self.pump_link();
             self.fill_sends();
             if self.acc < TURN_DT {
                 self.stalled = false;
+                break;
+            }
+            // Same frame budget as solo play: leave the rest of the turns for the next frame.
+            if steps > 0 && t0.elapsed().as_millis() >= 10 {
                 break;
             }
             let (Some(m), Some(t)) = (self.mine.get(&self.turn), self.theirs.get(&self.turn)) else {

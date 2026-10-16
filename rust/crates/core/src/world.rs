@@ -36,16 +36,40 @@ pub fn cell_key(gx: i32, gy: i32) -> i32 {
     (gx + 1024) * 4096 + (gy + 1024)
 }
 
+/// Multiplicative hasher for the integer bucket keys: SipHash dominated the
+/// cost of `ground_free`, which navigation calls about 100k times per long route.
+#[derive(Default, Clone, Copy)]
+pub struct BucketHasher(u64);
+
+impl std::hash::Hasher for BucketHasher {
+    fn finish(&self) -> u64 {
+        self.0
+    }
+    fn write(&mut self, bytes: &[u8]) {
+        for &b in bytes {
+            self.0 = (self.0 ^ b as u64).wrapping_mul(0x100000001b3);
+        }
+    }
+    fn write_i32(&mut self, v: i32) {
+        self.0 = (v as u32 as u64).wrapping_mul(0x9E3779B97F4A7C15);
+    }
+}
+
+/// Tile rows of a rock mass or forest: row -> set of columns, with the cheap integer hasher.
+pub type RockRows = HashMap<i32, HashSet<i32, std::hash::BuildHasherDefault<BucketHasher>>, std::hash::BuildHasherDefault<BucketHasher>>;
+
+pub type BucketMap = HashMap<i32, Vec<usize>, std::hash::BuildHasherDefault<BucketHasher>>;
+
 #[derive(Default)]
 pub struct ObstacleIndex {
-    pub buildings: HashMap<i32, Vec<usize>>,
-    pub decorations: HashMap<i32, Vec<usize>>,
-    pub masses: HashMap<i32, Vec<usize>>,
-    pub nodes: HashMap<i32, Vec<usize>>,
+    pub buildings: BucketMap,
+    pub decorations: BucketMap,
+    pub masses: BucketMap,
+    pub nodes: BucketMap,
     pub exact_when_dirty: bool,
 }
 
-pub fn insert_index(map: &mut HashMap<i32, Vec<usize>>, idx: usize, ox: f64, oy: f64, rx: f64, ry: f64) {
+pub fn insert_index(map: &mut BucketMap, idx: usize, ox: f64, oy: f64, rx: f64, ry: f64) {
     let y0 = ((oy - ry - 64.0) / 128.0).floor() as i32;
     let y1 = ((oy + ry + 64.0) / 128.0).floor() as i32;
     let x0 = ((ox - rx - 64.0) / 128.0).floor() as i32;
@@ -63,7 +87,7 @@ pub struct Geo {
     pub h: f64,
     pub decorations: Vec<Deco>,
     pub index: Option<ObstacleIndex>,
-    rock_rows: Vec<Option<HashMap<i32, HashSet<i32>>>>,
+    rock_rows: Vec<Option<RockRows>>,
 }
 
 impl Geo {
@@ -74,12 +98,12 @@ impl Geo {
     pub fn reset_rock_cache(&mut self, count: usize) {
         self.rock_rows = (0..count).map(|_| None).collect();
     }
-    fn rows(&mut self, i: usize, d: &TerrainFeature) -> &HashMap<i32, HashSet<i32>> {
+    fn rows(&mut self, i: usize, d: &TerrainFeature) -> &RockRows {
         if self.rock_rows.len() <= i {
             self.rock_rows.resize_with(i + 1, || None);
         }
         if self.rock_rows[i].is_none() {
-            let mut rows: HashMap<i32, HashSet<i32>> = HashMap::new();
+            let mut rows = RockRows::default();
             for p in &d.tiles {
                 rows.entry(p.y).or_default().insert(p.x);
             }
@@ -256,7 +280,7 @@ impl Geo {
             if d.tiles.is_empty() {
                 continue;
             }
-            let mut rows: HashMap<i32, HashSet<i32>> = HashMap::new();
+            let mut rows = RockRows::default();
             for p in &d.tiles {
                 rows.entry(p.y).or_default().insert(p.x);
             }
