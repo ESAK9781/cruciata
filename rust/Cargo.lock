@@ -541,6 +541,7 @@ dependencies = [
  "eframe",
  "image",
  "rodio",
+ "serde",
  "serde_json",
 ]
 

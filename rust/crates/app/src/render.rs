@@ -12,7 +12,10 @@ use crate::paint::{col, with_alpha, Batch, Canvas};
 use crate::panel;
 use crate::ui_state::*;
 use crate::view::View;
+use crate::menu::{Menu, Out, Screen};
+use crate::store::{self, Progress};
 use crate::Args;
+use std::sync::mpsc::{channel, Receiver};
 use cruciata_core::build::COLOSSUS_MIN_RANGE;
 use cruciata_core::data::data;
 use cruciata_core::model::*;
@@ -40,6 +43,13 @@ pub struct App {
     frames: u64,
     shot_state: ShotState,
     last_time: f64,
+    menu: Menu,
+    progress: Progress,
+    /// Slot of the running quickmatch (None for the campaign).
+    slot: Option<usize>,
+    loader: Option<Receiver<Result<Game, String>>>,
+    save_clock: f64,
+    result_handled: bool,
 }
 
 #[derive(PartialEq)]
@@ -102,6 +112,7 @@ impl App {
         for cmd in args.run.clone() {
             let (k, v) = cmd.split_once(':').unwrap_or((cmd.as_str(), ""));
             match k {
+                "menu" => app_ui.show_menu = true,
                 "army" => app_ui.select_army(&game),
                 "workers" => app_ui.select_workers(&game),
                 "tab" => app_ui.tab = match v { "build" => Tab::Settlement, "research" => Tab::Research, _ => Tab::Army },
@@ -125,6 +136,7 @@ impl App {
                 _ => {}
             }
         }
+        app_ui.show_menu = app_ui.show_menu || args.shot.is_none() && args.run.is_empty() && args.quick.is_none() && args.level == 0 && args.at.is_none();
         let shot_state = if args.shot.is_some() { ShotState::Waiting(0) } else { ShotState::Off };
         App {
             soft_shadow: make_shadow(&cc.egui_ctx),
@@ -142,6 +154,166 @@ impl App {
             frames: 0,
             shot_state,
             last_time: 0.0,
+            menu: Menu::new(),
+            progress: Progress::load(),
+            slot: None,
+            loader: None,
+            save_clock: 0.0,
+            result_handled: false,
+        }
+    }
+
+    fn begin_load(&mut self, label: &str, job: impl FnOnce() -> Result<Game, String> + Send + 'static) {
+        let (tx, rx) = channel();
+        std::thread::spawn(move || {
+            let _ = tx.send(job());
+        });
+        self.loader = Some(rx);
+        self.menu.screen = Screen::Loading(label.to_string());
+        self.ui.show_menu = true;
+    }
+
+    fn install(&mut self, g: Game) {
+        let rect = self.view.rect;
+        self.view = View::new(g.sim.geo.w, g.sim.geo.h);
+        self.view.rect = rect;
+        let me = g.me;
+        if let Some(b) = g.sim.state.buildings.iter().find(|b| b.kind == BKind::Towncenter && b.team == me) {
+            self.view.cx = b.x + 150.0;
+            self.view.cy = b.y - 100.0;
+        }
+        self.view.zoom = 0.8;
+        self.view.update();
+        self.game = g;
+        self.ui = UiState::new();
+        self.clusters = Clusters::default();
+        self.visual_angle.clear();
+        self.fog_tex = FogTex::new();
+        self.result_handled = false;
+        self.save_clock = 0.0;
+        self.menu.screen = Screen::Main;
+        self.menu.close_lan();
+    }
+
+    fn save_now(&mut self) {
+        if self.game.is_lan() || self.game.sim.state.result.is_some() {
+            return;
+        }
+        let doc = self.game.sim.save_json((self.view.cx, self.view.cy, self.view.zoom));
+        store::write_save(self.slot, &doc);
+        self.ui.toast("Your settlement and company have been recorded.");
+    }
+
+    fn start_campaign(&mut self, level: usize, diff: String) {
+        self.slot = None;
+        self.begin_load("Raising the standards...", move || {
+            let mut sim = Sim::start_level(level, None, &diff, false);
+            sim.state.paused = false;
+            Ok(Game::solo(sim))
+        });
+    }
+
+    fn handle_menu(&mut self, out: Out) {
+        match out {
+            Out::None => {}
+            Out::Campaign(l, d) => self.start_campaign(l, d),
+            Out::ResumeCampaign => self.resume(None),
+            Out::Quick(cfg, slot) => {
+                self.slot = Some(slot);
+                self.begin_load("Raising the standards...", move || {
+                    let diff = cfg["difficulty"].as_str().unwrap_or("normal").to_string();
+                    let mut sim = Sim::start_level(0, Some(cfg), &diff, false);
+                    sim.state.paused = false;
+                    Ok(Game::solo(sim))
+                });
+            }
+            Out::ResumeQuick(i) => self.resume(Some(i)),
+            Out::HostLan => {
+                let cfg = self.menu.lan_form.config();
+                let label = self.menu.lan_form.label();
+                match cruciata_net::session::Host::start(self.player_name(), label, cfg) {
+                    Ok(h) => {
+                        self.menu.lan.browser = None;
+                        self.menu.lan.host = Some(h);
+                        self.menu.screen = Screen::LanHost;
+                    }
+                    Err(e) => self.menu.lan.error = Some(format!("Could not start hosting: {e}")),
+                }
+            }
+            Out::JoinLan(addr) => {
+                let name = self.player_name();
+                self.menu.lan.browser = None;
+                self.begin_load("Joining the game...", move || {
+                    let s = cruciata_net::session::join(addr, &name)?;
+                    lan_game(s)
+                });
+            }
+            Out::Settings => self.ui.show_settings = true,
+            Out::Resume => {
+                self.ui.show_menu = false;
+                if !self.game.is_lan() {
+                    self.game.sim.state.paused = false;
+                }
+            }
+            Out::Quit => std::process::exit(0),
+        }
+    }
+
+    fn player_name(&self) -> String {
+        if self.progress.player_name.is_empty() {
+            cruciata_net::session::computer_name()
+        } else {
+            self.progress.player_name.clone()
+        }
+    }
+
+    fn resume(&mut self, slot: Option<usize>) {
+        let Some(doc) = store::read_save(slot) else {
+            self.ui.toast("No saved game found.");
+            return;
+        };
+        match Sim::restore_json(&doc) {
+            Ok((mut sim, cam)) => {
+                sim.state.paused = false;
+                self.slot = slot;
+                self.install(Game::solo(sim));
+                self.view.cx = cam.0;
+                self.view.cy = cam.1;
+                self.view.zoom = cam.2;
+                self.view.update();
+                self.ui.show_menu = false;
+            }
+            Err(e) => self.menu.lan.error = Some(format!("Could not load that save: {e}")),
+        }
+    }
+
+    fn shot_step(&mut self, ctx: &egui::Context) {
+        if let Some(path) = self.args.shot.clone() {
+            match self.shot_state {
+                ShotState::Waiting(n) => {
+                    let idle = self.atlas.pending_pages() == 0;
+                    self.shot_state = if (idle && n > 8) || n > 600 {
+                        ctx.send_viewport_cmd(egui::ViewportCommand::Screenshot);
+                        ShotState::Requested
+                    } else {
+                        ShotState::Waiting(n + 1)
+                    };
+                }
+                ShotState::Requested => {
+                    let img = ctx.input(|i| i.events.iter().find_map(|e| if let egui::Event::Screenshot { image, .. } = e { Some(image.clone()) } else { None }));
+                    if let Some(img) = img {
+                        let [w, h] = img.size;
+                        let mut rgba = Vec::with_capacity(w * h * 4);
+                        for p in &img.pixels {
+                            rgba.extend_from_slice(&p.to_array());
+                        }
+                        let _ = image::save_buffer(&path, &rgba, w as u32, h as u32, image::ColorType::Rgba8);
+                        self.shot_state = ShotState::Done;
+                        ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+                    }
+                }
+                _ => {}
+            }
         }
     }
 
@@ -607,10 +779,58 @@ impl eframe::App for App {
         self.ui.clock += dt;
         self.atlas.begin_frame(ctx);
         let shot_mode = self.args.shot.is_some();
+        if let Some(rx) = &self.loader {
+            if let Ok(res) = rx.try_recv() {
+                self.loader = None;
+                match res {
+                    Ok(g) => {
+                        self.install(g);
+                        self.ui.show_menu = false;
+                    }
+                    Err(e) => self.menu.screen = Screen::LanMessage(e),
+                }
+            }
+        }
+        let guest = self.menu.lan.host.as_mut().and_then(|h| h.poll());
+        if let Some(s) = guest {
+            self.menu.lan.host = None;
+            self.begin_load("A friend has joined...", move || lan_game(s));
+        }
+        if self.ui.show_menu {
+            self.menu.poll_lan();
+            let in_game = !matches!(self.menu.screen, Screen::Loading(_)) && self.game.sim.state.result.is_none() && self.game.sim.state.time > 0.0;
+            let can_resume = store::read_save(None).is_some();
+            let out = self.menu.show(ctx, &self.progress, in_game, can_resume);
+            self.handle_menu(out);
+            let np = "Background music: shuffled playlist".to_string();
+            overlay::settings_dialog(ctx, &mut self.ui.show_settings, &mut self.settings, &np);
+            self.shot_step(ctx);
+            ctx.request_repaint();
+            return;
+        }
         if !shot_mode && !self.ui.show_menu {
             self.game.advance(dt);
         }
         self.handle_events();
+        self.save_clock += dt;
+        if self.save_clock > 20.0 && !shot_mode {
+            self.save_clock = 0.0;
+            if !self.game.is_lan() && self.game.sim.state.result.is_none() && self.game.sim.state.time > 1.0 {
+                let doc = self.game.sim.save_json((self.view.cx, self.view.cy, self.view.zoom));
+                store::write_save(self.slot, &doc);
+            }
+        }
+        if let Some(won) = self.game.outcome() {
+            if !self.result_handled {
+                self.result_handled = true;
+                if !self.game.is_lan() {
+                    store::delete_save(self.slot);
+                    if won && self.game.sim.state.mode != "quickmatch" {
+                        self.progress.complete(self.game.sim.state.level);
+                    }
+                }
+            }
+        }
         for r in self.ui.rings.iter_mut() {
             r.t += dt;
         }
@@ -651,7 +871,27 @@ impl eframe::App for App {
                 Action::Help => self.ui.show_help = true,
                 Action::Settings => self.ui.show_settings = true,
                 Action::Pause => self.game.sim.state.paused = !self.game.sim.state.paused,
-                Action::Menu => self.ui.show_menu = true,
+                Action::Menu => {
+                    self.ui.show_menu = true;
+                    self.menu.screen = Screen::Main;
+                    if !self.game.is_lan() {
+                        self.game.sim.state.paused = true;
+                    }
+                }
+                Action::Save => self.save_now(),
+                Action::Restart => {
+                    let lvl = self.game.sim.state.level;
+                    let d = self.game.sim.state.difficulty.clone();
+                    if self.game.sim.state.mode != "quickmatch" {
+                        self.start_campaign(lvl, d);
+                    }
+                }
+                Action::Level(i) => {
+                    let d = self.game.sim.state.difficulty.clone();
+                    if i <= self.progress.unlocked {
+                        self.start_campaign(i, d);
+                    }
+                }
                 Action::Home => {
                     if let Some(b) = self.game.sim.state.buildings.iter().find(|b| b.kind == BKind::Towncenter && b.team == self.game.me) {
                         look = Some((b.x + 150.0, b.y - 100.0));
@@ -670,34 +910,19 @@ impl eframe::App for App {
         let np = "Background music: shuffled playlist".to_string();
         overlay::settings_dialog(ctx, &mut self.ui.show_settings, &mut self.settings, &np);
         let _ = (map_rect, self.last_time);
-        // Screenshot mode: wait for atlas pages, capture, quit.
-        if let Some(path) = self.args.shot.clone() {
-            match self.shot_state {
-                ShotState::Waiting(n) => {
-                    let idle = self.atlas.pending_pages() == 0;
-                    self.shot_state = if (idle && n > 8) || n > 600 {
-                        ctx.send_viewport_cmd(egui::ViewportCommand::Screenshot);
-                        ShotState::Requested
-                    } else {
-                        ShotState::Waiting(n + 1)
-                    };
-                }
-                ShotState::Requested => {
-                    let img = ctx.input(|i| i.events.iter().find_map(|e| if let egui::Event::Screenshot { image, .. } = e { Some(image.clone()) } else { None }));
-                    if let Some(img) = img {
-                        let [w, h] = img.size;
-                        let mut rgba = Vec::with_capacity(w * h * 4);
-                        for p in &img.pixels {
-                            rgba.extend_from_slice(&p.to_array());
-                        }
-                        let _ = image::save_buffer(&path, &rgba, w as u32, h as u32, image::ColorType::Rgba8);
-                        self.shot_state = ShotState::Done;
-                        ctx.send_viewport_cmd(egui::ViewportCommand::Close);
-                    }
-                }
-                _ => {}
-            }
-        }
+        self.shot_step(ctx);
         ctx.request_repaint();
     }
+}
+
+/// Build the simulation for a LAN match and wait for the other side.
+fn lan_game(s: cruciata_net::session::Session) -> Result<Game, String> {
+    let cfg = s.config.clone();
+    let peer = s.peer_name.clone();
+    let diff = cfg["difficulty"].as_str().unwrap_or("normal").to_string();
+    let mut sim = Sim::start_level(0, Some(cfg), &diff, false);
+    sim.settings.pvp = true;
+    sim.state.paused = false;
+    let lock = s.ready(std::time::Duration::from_secs(60))?;
+    Ok(Game::lan(sim, lock, peer))
 }

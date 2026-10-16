@@ -129,6 +129,9 @@ pub fn header(ctx: &egui::Context, f: &mut Frame, actions: &mut Vec<Action>) {
                 if button(ui, label, !f.g.is_lan()).clicked() {
                     actions.push(Action::Pause);
                 }
+                if !f.g.is_lan() && button(ui, "Save", true).clicked() {
+                    actions.push(Action::Save);
+                }
                 if button(ui, "Menu", true).clicked() {
                     actions.push(Action::Menu);
                 }
