@@ -42,6 +42,7 @@ pub struct ObstacleIndex {
     pub decorations: HashMap<i32, Vec<usize>>,
     pub masses: HashMap<i32, Vec<usize>>,
     pub nodes: HashMap<i32, Vec<usize>>,
+    pub exact_when_dirty: bool,
 }
 
 pub fn insert_index(map: &mut HashMap<i32, Vec<usize>>, idx: usize, ox: f64, oy: f64, rx: f64, ry: f64) {
@@ -314,7 +315,7 @@ pub fn ground_free(state: &State, geo: &Geo, x: f64, y: f64, margin: f64, ignore
     }
     let bucket = cell_key((x / 128.0).floor() as i32, (y / 128.0).floor() as i32);
     let index = match &geo.index {
-        Some(i) if !state.nav_dirty && margin <= 64.0 => Some(i),
+        Some(i) if (!state.nav_dirty || i.exact_when_dirty) && margin <= 64.0 => Some(i),
         _ => None,
     };
     let d = data();

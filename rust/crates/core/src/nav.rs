@@ -288,17 +288,7 @@ impl Nav {
                 if self.gap_edges.is_empty() {
                     // `!this.gapEdges` is only true before the first build.
                 }
-                let keys: Vec<u64> = self
-                    .gap_edges
-                    .iter()
-                    .filter(|(_, e)| {
-                        regions.iter().any(|a| e.max_x >= a.x && e.min_x <= a.x + a.w && e.max_y >= a.y && e.min_y <= a.y + a.h)
-                    })
-                    .map(|(k, _)| *k)
-                    .collect();
-                for k in keys {
-                    self.gap_edges.shift_remove(&k);
-                }
+                self.gap_edges.retain(|_, e| !regions.iter().any(|a| e.max_x >= a.x && e.min_x <= a.x + a.w && e.max_y >= a.y && e.min_y <= a.y + a.h));
             }
         }
         self.path_cache.clear();
@@ -775,7 +765,7 @@ impl Nav {
                     } else {
                         clear = self.clear_line(a, b, phys);
                         if self.gap_edges.len() > 50000 {
-                            self.gap_edges.shift_remove_index(0);
+                            self.gap_edges.swap_remove_index(0);
                         }
                         self.gap_edges.insert(
                             key,
@@ -1202,7 +1192,16 @@ impl Nav {
                 self.pending.shift_remove(&job.key);
                 continue;
             }
-            let path = self.find_route(job.start, job.destination, false, phys);
+            let t0 = std::time::Instant::now();
+            let calls = std::cell::Cell::new(0u64);
+            let counted = |x: f64, y: f64| { calls.set(calls.get() + 1); phys(x, y) };
+            let path = self.find_route(job.start, job.destination, false, &counted);
+            if std::env::var_os("NAV_TRACE").is_some() && t0.elapsed().as_millis() > 20 {
+                eprintln!("slow route {:.0}ms {:?}->{:?} len {} pending {}", t0.elapsed().as_secs_f64() * 1000.0, job.start, job.destination, path.len(), self.jobs.len());
+            }
+            if std::env::var_os("NAV_TRACE").is_some() && t0.elapsed().as_millis() > 20 {
+                eprintln!("  phys calls {}", calls.get());
+            }
             if job.revision == self.revision {
                 if self.path_cache.len() >= 512 {
                     self.path_cache.shift_remove_index(0);

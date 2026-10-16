@@ -70,6 +70,9 @@ pub struct Sim {
     pub fortifications: HashMap<u32, Vec<crate::build::Plot>>,
     /// Advance walk-cycle clocks (set by a front end that draws the units).
     pub visual: bool,
+    /// Cumulative wall-clock per update phase (profiling aid).
+    pub phases: HashMap<&'static str, f64>,
+    pub lap_at: Option<std::time::Instant>,
 }
 
 /// A curtain piece as seen by `wallConnections` (walls, gate parts and tower
@@ -117,6 +120,8 @@ impl Sim {
             nav_jobs_per_step: 4,
             fortifications: HashMap::new(),
             visual: true,
+            phases: HashMap::new(),
+            lap_at: None,
             state,
             geo,
             nav,
@@ -125,6 +130,15 @@ impl Sim {
     }
 
     // ---- small helpers -----------------------------------------------------
+
+    /// Attribute the time since the previous lap to `name`.
+    pub fn lap(&mut self, name: &'static str) {
+        let now = std::time::Instant::now();
+        if let Some(prev) = self.lap_at {
+            *self.phases.entry(name).or_insert(0.0) += now.duration_since(prev).as_secs_f64();
+        }
+        self.lap_at = Some(now);
+    }
 
     pub fn toast(&mut self, text: impl Into<String>) {
         self.events.push(Event::Toast(text.into()));
@@ -197,6 +211,36 @@ impl Sim {
 
     // ---- navigation rebuild (`rebuildNavigation`) --------------------------
 
+    /// Bucket every blocking obstacle. With `exact_when_dirty` the index is
+    /// trusted even while `nav_dirty` is set (it was just rebuilt from the
+    /// current state), which keeps physical queries fast for route searches.
+    pub fn build_obstacle_index(&mut self, exact_when_dirty: bool) {
+        let mut index = ObstacleIndex::default();
+        index.exact_when_dirty = exact_when_dirty;
+        for (i, b) in self.state.buildings.iter().enumerate() {
+            if b.hp > 0.0 {
+                insert_index(&mut index.buildings, i, b.x, b.y, 32f64.max(b.w / 2.0).max(b.r), 32f64.max(b.h / 2.0).max(b.r));
+            }
+        }
+        for (i, dd) in self.geo.decorations.iter().enumerate() {
+            if dd.block {
+                insert_index(&mut index.decorations, i, dd.x, dd.y, dd.r, dd.r);
+            }
+        }
+        for (i, m) in self.state.terrain_features.iter().enumerate() {
+            if m.block {
+                insert_index(&mut index.masses, i, m.x, m.y, m.rx, m.ry);
+            }
+        }
+        for (i, n) in self.state.nodes.iter().enumerate() {
+            if n.remaining > 0.0 {
+                let r = if n.kind == Res::Wood { 14.0 } else { 23.0 };
+                insert_index(&mut index.nodes, i, n.x, n.y, r, r);
+            }
+        }
+        self.geo.index = Some(index);
+    }
+
     pub fn rebuild_navigation(&mut self) {
         self.state.nav_dirty = false;
         self.state.nav_combat = false;
@@ -221,29 +265,7 @@ impl Sim {
                 self.combat_structure_radius = self.combat_structure_radius.max(b.r);
             }
         }
-        let mut index = ObstacleIndex::default();
-        for (i, b) in self.state.buildings.iter().enumerate() {
-            if b.hp > 0.0 {
-                insert_index(&mut index.buildings, i, b.x, b.y, 32f64.max(b.w / 2.0).max(b.r), 32f64.max(b.h / 2.0).max(b.r));
-            }
-        }
-        for (i, dd) in self.geo.decorations.iter().enumerate() {
-            if dd.block {
-                insert_index(&mut index.decorations, i, dd.x, dd.y, dd.r, dd.r);
-            }
-        }
-        for (i, m) in self.state.terrain_features.iter().enumerate() {
-            if m.block {
-                insert_index(&mut index.masses, i, m.x, m.y, m.rx, m.ry);
-            }
-        }
-        for (i, n) in self.state.nodes.iter().enumerate() {
-            if n.remaining > 0.0 {
-                let r = if n.kind == Res::Wood { 14.0 } else { 23.0 };
-                insert_index(&mut index.nodes, i, n.x, n.y, r, r);
-            }
-        }
-        self.geo.index = Some(index);
+        self.build_obstacle_index(false);
 
         // Curtain segments (walls, gate parts, tower attachments).
         let mut curtain: Vec<Segment> = Vec::new();

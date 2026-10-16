@@ -837,6 +837,7 @@ impl Sim {
                 }
             }
         }
+        self.lap_at = Some(std::time::Instant::now());
         self.state.time += dt;
         self.vision_timer -= dt;
         if self.vision_timer <= 0.0 {
@@ -868,19 +869,25 @@ impl Sim {
             self.state.nav_dirty = false;
             self.rebuild_navigation();
         }
+        self.lap("pre");
         self.rebuild_spatial();
+        self.lap("spatial");
         let gt = self.state.gate_timer.unwrap_or(0.0) - dt;
         self.state.gate_timer = Some(gt);
         if gt <= 0.0 {
             self.state.gate_timer = Some(0.25);
             self.update_gates();
         }
+        self.lap("gates");
         self.update_scouting(dt);
         self.update_formations();
+        self.lap("formations");
         if !self.settings.pvp {
             self.strategic_ai(dt);
         }
+        self.lap("ai");
         self.update_buildings(dt);
+        self.lap("buildings");
         // Units.
         let n = self.state.units.len();
         for ui in 0..n {
@@ -918,7 +925,9 @@ impl Sim {
                 }
             }
         }
+        self.lap("units");
         self.crowd_separation(dt);
+        self.lap("crowd");
         self.update_arrows(dt);
         self.update_boulders(dt);
         self.capture_cities(dt);
@@ -982,14 +991,20 @@ impl Sim {
                 return;
             }
         }
+        self.lap("misc");
+        if self.state.nav_dirty {
+            self.build_obstacle_index(true);
+        }
         {
             let (state, geo) = (&self.state, &self.geo);
             let now = self.state.time;
             self.nav.process(self.nav_jobs_per_step, now, &|x, y| ground_free(state, geo, x, y, 6.0, None, Adj::No));
         }
+        self.lap("tail");
         if self.objective_state().won {
             self.finish(true);
         }
+        self.lap("nav+objective");
         if self.state.save_timer <= 0.0 {
             self.state.save_timer = 20.0;
             self.events.push(Event::Autosave);
