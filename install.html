@@ -1,0 +1,213 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>Install cruciāta — desktop version</title>
+    <link rel="icon" type="image/svg+xml" href="assets/icons/favicon.svg" />
+    <style>
+      :root {
+        --gold: #c8a467;
+        --ink: #e7d8b8;
+        --muted: #a79c82;
+        --edge: #655039;
+      }
+      * {
+        box-sizing: border-box;
+      }
+      body {
+        margin: 0;
+        min-height: 100vh;
+        background: #24271f
+          radial-gradient(ellipse at 30% 0, #45423866, transparent 70%);
+        color: var(--ink);
+        font:
+          15px/1.55 "DM Sans",
+          system-ui,
+          sans-serif;
+      }
+      main {
+        max-width: 880px;
+        margin: 0 auto;
+        padding: 48px 20px 64px;
+      }
+      h1 {
+        font:
+          italic 40px Georgia,
+          serif;
+        margin: 4px 0 8px;
+        color: #e4cda2;
+      }
+      .eyebrow {
+        font-size: 11px;
+        letter-spacing: 2px;
+        color: var(--gold);
+      }
+      p {
+        color: var(--ink);
+        max-width: 62ch;
+      }
+      .grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+        gap: 14px;
+        margin: 28px 0;
+      }
+      .card {
+        border: 1px solid var(--edge);
+        background: linear-gradient(#2f3128, #2a2d24);
+        padding: 18px;
+        border-radius: 3px;
+      }
+      .card.recommended {
+        border-color: var(--gold);
+        box-shadow: 0 0 0 1px #c8a46755;
+      }
+      .card h2 {
+        margin: 0 0 4px;
+        font:
+          20px Georgia,
+          serif;
+        color: #e4cda2;
+      }
+      .card small {
+        color: var(--muted);
+        display: block;
+        margin-bottom: 12px;
+      }
+      a.button {
+        display: block;
+        text-align: center;
+        padding: 10px 12px;
+        margin-top: 8px;
+        border: 1px solid #806647;
+        background: linear-gradient(#51412e, #3e3023);
+        color: var(--ink);
+        text-decoration: none;
+        border-radius: 2px;
+      }
+      a.button:hover {
+        background: linear-gradient(#695236, #493725);
+        border-color: #b2915d;
+      }
+      ul {
+        color: var(--ink);
+        padding-left: 20px;
+      }
+      li {
+        margin: 6px 0;
+      }
+      .fine {
+        color: var(--muted);
+        font-size: 12.5px;
+      }
+      a {
+        color: #e4c281;
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <div class="eyebrow">DESKTOP VERSION · LAN MULTIPLAYER</div>
+      <h1>cruciāta for your computer</h1>
+      <p>
+        A native desktop build of the same game: it runs on its own (no
+        browser), keeps every campaign chapter and quickmatch option, and adds
+        head-to-head play against a friend on the same network.
+      </p>
+      <div class="grid" id="downloads">
+        <section class="card" data-os="windows">
+          <h2>Windows</h2>
+          <small>Windows 10 or 11 · 64-bit installer</small>
+          <a
+            class="button"
+            href="https://github.com/ESAK9781/cruciata/releases/latest/download/Cruciata-Setup-windows-x64.exe"
+            >Download installer (.exe)</a
+          >
+        </section>
+        <section class="card" data-os="mac">
+          <h2>macOS</h2>
+          <small>macOS 12 or newer · disk image</small>
+          <a
+            class="button"
+            href="https://github.com/ESAK9781/cruciata/releases/latest/download/Cruciata-macOS-arm64.dmg"
+            >Apple Silicon (.dmg)</a
+          >
+          <a
+            class="button"
+            href="https://github.com/ESAK9781/cruciata/releases/latest/download/Cruciata-macOS-x64.dmg"
+            >Intel (.dmg)</a
+          >
+        </section>
+        <section class="card" data-os="linux">
+          <h2>Linux</h2>
+          <small>64-bit · Debian/Ubuntu package or any distribution</small>
+          <a
+            class="button"
+            href="https://github.com/ESAK9781/cruciata/releases/latest/download/cruciata_amd64.deb"
+            >Debian / Ubuntu (.deb)</a
+          >
+          <a
+            class="button"
+            href="https://github.com/ESAK9781/cruciata/releases/latest/download/Cruciata-linux-x64.tar.gz"
+            >Other (.tar.gz)</a
+          >
+        </section>
+      </div>
+      <h2
+        style="
+          font:
+            22px Georgia,
+            serif;
+          color: #e4cda2;
+        "
+      >
+        Playing with a friend
+      </h2>
+      <ul>
+        <li>
+          Both of you install the same version and open
+          <strong>LAN multiplayer</strong>.
+        </li>
+        <li>
+          One chooses <strong>Host a game</strong>. The other sees it appear in
+          the list and presses <strong>Join</strong>.
+        </li>
+        <li>
+          That is all: no addresses, ports or router settings. Allow the game
+          through the firewall if your system asks once.
+        </li>
+      </ul>
+      <p class="fine">
+        Downloads come from the project's
+        <a href="https://github.com/ESAK9781/cruciata/releases"
+          >GitHub releases</a
+        >. Builds are not code-signed, so macOS may ask you to right-click →
+        Open the first time, and Windows may show a SmartScreen notice. The game
+        stays fully offline.
+      </p>
+      <p><a href="index.html">← Back to the browser version</a></p>
+    </main>
+    <script>
+      (() => {
+        const ua = (
+          navigator.userAgentData?.platform ||
+          navigator.platform ||
+          ""
+        ).toLowerCase();
+        const os = /win/.test(ua)
+          ? "windows"
+          : /mac/.test(ua)
+            ? "mac"
+            : /linux|x11/.test(ua)
+              ? "linux"
+              : "";
+        const mine = document.querySelector(`[data-os="${os}"]`);
+        if (mine) {
+          mine.classList.add("recommended");
+          mine.parentElement.prepend(mine);
+        }
+      })();
+    </script>
+  </body>
+</html>

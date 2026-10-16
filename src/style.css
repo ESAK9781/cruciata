@@ -2884,3 +2884,11 @@ main {
 .action-card.locked {
   filter: grayscale(0.7);
 }
+
+.menu-install {
+  display: inline-block;
+  margin: 12px 0 0;
+  color: #e4c281;
+  font-size: 12px;
+  text-decoration: underline;
+}
