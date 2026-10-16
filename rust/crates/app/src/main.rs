@@ -6,6 +6,7 @@ mod keys;
 mod paint;
 mod render;
 mod view;
+mod terrain;
 mod menu;
 mod store;
 mod game;

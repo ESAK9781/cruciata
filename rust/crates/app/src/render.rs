@@ -50,6 +50,7 @@ pub struct App {
     loader: Option<Receiver<Result<Game, String>>>,
     save_clock: f64,
     result_handled: bool,
+    terrain: Option<(u64, TextureHandle)>,
 }
 
 #[derive(PartialEq)]
@@ -113,6 +114,12 @@ impl App {
             let (k, v) = cmd.split_once(':').unwrap_or((cmd.as_str(), ""));
             match k {
                 "menu" => app_ui.show_menu = true,
+                "reveal" => {
+                    for v in game.sim.fog.explored.iter_mut() {
+                        *v = 1;
+                    }
+                    game.sim.fog.revision += 1;
+                }
                 "army" => app_ui.select_army(&game),
                 "workers" => app_ui.select_workers(&game),
                 "tab" => app_ui.tab = match v { "build" => Tab::Settlement, "research" => Tab::Research, _ => Tab::Army },
@@ -160,6 +167,7 @@ impl App {
             loader: None,
             save_clock: 0.0,
             result_handled: false,
+            terrain: None,
         }
     }
 
@@ -317,6 +325,24 @@ impl App {
         }
     }
 
+    fn ensure_terrain(&mut self, ctx: &egui::Context) {
+        let s = &self.game.sim.state;
+        let key = (s.seed as u64) ^ ((self.game.sim.geo.w as u64) << 20) ^ ((self.game.sim.geo.h as u64) << 36) ^ ((self.biome() as u64) << 58) ^ ((s.level as u64) << 52) ^ if s.mode == "quickmatch" { 1 } else { 0 };
+        if matches!(&self.terrain, Some((k, _)) if *k == key) {
+            return;
+        }
+        let coast = s.mode != "quickmatch";
+        let mut img = crate::terrain::bake(s, self.game.sim.geo.w, self.game.sim.geo.h, self.biome(), coast);
+        if data().levels[s.level].kind == "survival" {
+            for p in img.pixels.iter_mut() {
+                let [r, g, b, _] = p.to_srgba_unmultiplied();
+                let mix = |c: u8, t: u8| (c as f32 * (1.0 - 0.2) + t as f32 * 0.2) as u8;
+                *p = Color32::from_rgb(mix(r, 0xdc), mix(g, 0xe2), mix(b, 0xcc));
+            }
+        }
+        self.terrain = Some((key, ctx.load_texture("terrain", img, egui::TextureOptions::LINEAR)));
+    }
+
     fn biome(&self) -> i32 {
         let s = &self.game.sim.state;
         if let Some(b) = s.config.as_ref().and_then(|c| c.get("biome")).and_then(|b| b.as_f64()) {
@@ -359,6 +385,11 @@ impl App {
         let ground = self.ground_color();
         let biome = self.biome();
         painter.rect_filled(rect, 0.0, ground);
+        if let Some((_, t)) = &self.terrain {
+            let tl = view.to_screen(0.0, 0.0);
+            let br = view.to_screen(self.game.sim.geo.w, self.game.sim.geo.h);
+            painter.image(t.id(), Rect::from_min_max(tl, br), Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)), Color32::WHITE);
+        }
         let cv = Canvas { painter: &painter, view: &view };
         let g = &self.game;
         let sim = &g.sim;
@@ -837,6 +868,7 @@ impl eframe::App for App {
         self.ui.rings.retain(|r| r.t < 1.0);
         self.ui.prune(&self.game);
         self.fog_tex.update(ctx, &self.game);
+        self.ensure_terrain(ctx);
         let mut actions: Vec<Action> = Vec::new();
         {
             let mut f = Frame { g: &mut self.game, ui: &mut self.ui, atlas: &mut self.atlas };
@@ -857,7 +889,7 @@ impl eframe::App for App {
         });
         let ground = self.ground_color();
         overlay::objective_panel(ctx, map_rect, &self.game);
-        if let Some((x, y, attack)) = overlay::minimap(ctx, map_rect, &self.game, &mut self.ui, &mut self.view, &self.fog_tex, ground) {
+        if let Some((x, y, attack)) = overlay::minimap(ctx, map_rect, &self.game, &mut self.ui, &mut self.view, &self.fog_tex, ground, self.terrain.as_ref().map(|t| t.1.id())) {
             let t = input::resolve_targets(&self.game, Pt::new(x, y));
             self.ui.issue_order(&mut self.game, Pt::new(x, y), attack, false, t.enemy, t.node, t.building, t.escort);
         }

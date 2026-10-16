@@ -58,7 +58,7 @@ impl FogTex {
     }
 }
 
-pub fn minimap(ctx: &egui::Context, rect: Rect, g: &Game, ui_state: &mut UiState, view: &mut View, fog: &FogTex, ground: Color32) -> Option<(f64, f64, bool)> {
+pub fn minimap(ctx: &egui::Context, rect: Rect, g: &Game, ui_state: &mut UiState, view: &mut View, fog: &FogTex, ground: Color32, terrain: Option<egui::TextureId>) -> Option<(f64, f64, bool)> {
     let mut command: Option<(f64, f64, bool)> = None;
     egui::Area::new("minimap".into()).pivot(Align2::RIGHT_BOTTOM).fixed_pos(rect.right_bottom() + Vec2::new(-12.0, -12.0)).order(egui::Order::Foreground).show(ctx, |ui| {
         egui::Frame::none().fill(col("#1b1e18")).stroke(Stroke::new(1.0, col("#806647"))).inner_margin(egui::Margin::same(4.0)).show(ui, |ui| {
@@ -67,6 +67,9 @@ pub fn minimap(ctx: &egui::Context, rect: Rect, g: &Game, ui_state: &mut UiState
             let (mrect, resp) = ui.allocate_exact_size(size, Sense::click_and_drag());
             let p = ui.painter_at(mrect);
             p.rect_filled(mrect, 0.0, ground);
+            if let Some(t) = terrain {
+                p.image(t, mrect, Rect::from_min_max(Pos2::ZERO, Pos2::new(1.0, 1.0)), Color32::WHITE);
+            }
             let (sx, sy) = (size.x as f64 / w, size.y as f64 / h);
             let at = |x: f64, y: f64| Pos2::new(mrect.min.x + (x * sx) as f32, mrect.min.y + (y * sy) as f32);
             for f in &g.sim.state.terrain_features {
