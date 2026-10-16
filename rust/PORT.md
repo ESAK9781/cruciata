@@ -41,8 +41,8 @@ See the checklist at the bottom; update it as work lands.
 - [x] PvP flag (`Settings::pvp`), `state_hash`, determinism test (`tests/determinism.rs`)
 - [x] saves (`save.rs`, web-compatible JSON; `tests/save_roundtrip.rs`)
 - [x] LAN: `crates/net` discovery, TCP link, lockstep, handshake (`tests/lan.rs`)
-- [~] native client `crates/app`: atlas sprites, HUD, input, minimap, fog work; `menu.rs`/`store.rs` written but not wired
-- [ ] terrain bake, walls/gates, construction sites, rocks/cliffs, Colossus art, particles, corpses
-- [ ] audio, menus wired, LAN lobby flow, result screens, autosave
+- [x] native client `crates/app`: atlas sprites, HUD, input, minimap, fog, menus, saves/autosave, campaign progress, LAN host/join, results, audio
+- [x] baked terrain, runtime curtain walls and gatehouses, scaffolds, corpses/gore, impact smoke
+- [ ] still approximated: rocks/cliffs, ground cover, roads, Colossus (stand-in from great-engine frames), construction-site reveal details, ships/waves, particles/debris
 - [ ] installers, GitHub Actions matrix, releases, web install page
 - [x] parity: research, wall lines, gate/tower upgrades, demolish, scout (`tests/commands2_parity.rs`)
