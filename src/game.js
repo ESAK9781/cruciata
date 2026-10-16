@@ -12981,6 +12981,29 @@
       placementRotation = rotation;
       return placeBuild(p, false);
     },
+    upgradeWall: (kind, ids) => {
+      if (!TEST) return;
+      selectedBuildings = new Set(ids);
+      selectedBuilding = ids[0] || null;
+      queueWallUpgrade(kind);
+    },
+    demolish: (ids) => {
+      if (!TEST) return;
+      selectedBuildings = new Set(ids);
+      selectedBuilding = ids[0] || null;
+      destroySelectedBuilding();
+    },
+    scout: (ids) => {
+      if (!TEST) return;
+      selected = new Set(ids);
+      autoScout();
+    },
+    wallLine: (kind, a, b, ids) => {
+      if (!TEST) return;
+      selected = new Set(ids);
+      placement = kind;
+      placeWallLine(a, b, false);
+    },
     save: () => saveGame(true),
     phases: () => {
       const copy = { ...phases };

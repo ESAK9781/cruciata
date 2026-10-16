@@ -45,4 +45,4 @@ See the checklist at the bottom; update it as work lands.
 - [ ] terrain bake, walls/gates, construction sites, rocks/cliffs, Colossus art, particles, corpses
 - [ ] audio, menus wired, LAN lobby flow, result screens, autosave
 - [ ] installers, GitHub Actions matrix, releases, web install page
-- [ ] more JS parity: research, wall upgrades, demolish, scout, gates, wall lines
+- [x] parity: research, wall lines, gate/tower upgrades, demolish, scout (`tests/commands2_parity.rs`)
