@@ -752,8 +752,10 @@
       x: 0,
       y: 0,
     };
-    camera.x = clamp(camera.x, view.w / 2, W - view.w / 2);
-    camera.y = clamp(camera.y, view.h / 2, H - view.h / 2);
+    // The view may slide past the edge (shown black) to centre edge objects,
+    // but at least a fifth of it must still overlap the land.
+    camera.x = clamp(camera.x, -view.w * 0.3, W + view.w * 0.3);
+    camera.y = clamp(camera.y, -view.h * 0.3, H + view.h * 0.3);
     view.x = camera.x - view.w / 2;
     view.y = camera.y - view.h / 2;
   }
@@ -795,6 +797,10 @@
     if (b) {
       camera.x = b.x + 150;
       camera.y = b.y - 100;
+      updateView();
+      // Starting views stay on the land; only manual panning may slip past the edge.
+      camera.x = clamp(camera.x, view.w / 2, W - view.w / 2);
+      camera.y = clamp(camera.y, view.h / 2, H - view.h / 2);
       updateView();
     }
   }
@@ -3502,6 +3508,34 @@
     else hideOverlay();
     updateUI();
   }
+  // War orders can be minimized so they never hide the battlefield.
+  (() => {
+    const panel = $("objective-panel"),
+      toggle = $("objective-toggle");
+    if (!panel || !toggle) return;
+    const apply = (collapsed) => {
+      panel.classList.toggle("collapsed", collapsed);
+      toggle.innerHTML = collapsed ? "+" : "&minus;";
+      toggle.title = collapsed ? "Show war orders" : "Minimize war orders";
+      toggle.setAttribute("aria-expanded", String(!collapsed));
+      toggle.setAttribute("aria-label", toggle.title);
+    };
+    let stored = false;
+    try {
+      stored = localStorage.getItem("cruciata-orders-collapsed") === "1";
+    } catch {}
+    apply(stored);
+    toggle.addEventListener("click", () => {
+      const collapsed = !panel.classList.contains("collapsed");
+      apply(collapsed);
+      try {
+        localStorage.setItem(
+          "cruciata-orders-collapsed",
+          collapsed ? "1" : "0",
+        );
+      } catch {}
+    });
+  })();
   function setMissionUI() {
     const l = LEVELS[state.level];
     $("chapter-label").textContent = `CHAPTER ${l.roman} · ${l.sub}`;
@@ -11126,6 +11160,11 @@
         : LEVELS[state.level].terrain >= 3
           ? 2
           : LEVELS[state.level].terrain;
+    // Ground detail stays on the land; whatever lies beyond the edge is black.
+    ctx.save();
+    ctx.beginPath();
+    ctx.rect(0, 0, W, H);
+    ctx.clip();
     Art.terrainDetails(
       ctx,
       view,
@@ -11136,6 +11175,7 @@
       bridgeY(),
       state.mode !== "quickmatch" && LEVELS[state.level].terrain === 0,
     );
+    ctx.restore();
     ctx.save();
     Art.clipLand(
       ctx,

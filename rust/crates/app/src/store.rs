@@ -28,11 +28,12 @@ pub struct Progress {
     pub gore: bool,
     pub player_name: String,
     pub difficulty: String,
+    pub orders_collapsed: bool,
 }
 
 impl Default for Progress {
     fn default() -> Self {
-        Progress { unlocked: 0, completed: vec![], music: 0.20, effects: 0.65, battle_sounds: true, gore: true, player_name: String::new(), difficulty: "normal".into() }
+        Progress { unlocked: 0, completed: vec![], music: 0.20, effects: 0.65, battle_sounds: true, gore: true, player_name: String::new(), difficulty: "normal".into(), orders_collapsed: false }
     }
 }
 

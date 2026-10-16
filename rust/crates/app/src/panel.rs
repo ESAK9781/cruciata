@@ -486,6 +486,11 @@ struct Card<'a> {
 
 fn card(ui: &mut egui::Ui, f: &mut Frame, c: &Card, size: Vec2, name_font: egui::FontId, art: &dyn Fn(&egui::Painter, &mut crate::atlas::Atlas, Rect)) -> bool {
     let (r, resp) = ui.allocate_exact_size(size, if c.enabled { Sense::click() } else { Sense::hover() });
+    card_in(ui, f, c, r, resp, name_font, art)
+}
+
+fn card_in(ui: &mut egui::Ui, f: &mut Frame, c: &Card, r: Rect, resp: egui::Response, name_font: egui::FontId, art: &dyn Fn(&egui::Painter, &mut crate::atlas::Atlas, Rect)) -> bool {
+    let size = r.size();
     let p = ui.painter().clone();
     let (top, bottom, border) = if c.active { (col("#715335"), col("#715335"), col("#d0ad6b")) } else if c.done { (col("#394530"), col("#394530"), col("#78875b")) } else if resp.hovered() && c.enabled { (col("#675038"), col("#503c2a"), col("#a98550")) } else { (col("#534128"), col("#403123"), col("#796040")) };
     gradient_v(&p, r, top, bottom);
@@ -573,33 +578,48 @@ fn build_cards(ui: &mut egui::Ui, f: &mut Frame) {
         ("Military", &["barracks", "stable", "siegeworkshop"]),
         ("Fortification", &["watchtower", "tower", "wall", "bastionwall", "greatengine", "colossus"]),
     ];
-    let mut clicked: Option<BKind> = None;
-    ui.horizontal_wrapped(|ui| {
-        ui.spacing_mut().item_spacing = Vec2::new(12.0, 8.0);
-        for (label, kinds) in groups {
-            ui.allocate_ui(Vec2::new(156.0, 0.0), |ui| {
-                ui.set_width(156.0);
-                ui.label(egui::RichText::new(label).font(fell(11.0)).color(col("#c8a467")));
-                ui.add_space(-2.0);
-                ui.horizontal_wrapped(|ui| {
-                    ui.spacing_mut().item_spacing = Vec2::new(4.0, 4.0);
-                    for k in kinds {
-                        let kind = kind_by_name(k);
-                        let spec = data().bld(kind);
-                        let Some(cost) = spec.cost.clone() else { continue };
-                        let locked = !f.g.sim.is_unlocked(kind, f.g.me);
-                        let enabled = !locked && f.g.sim.afford(&cost, f.g.me) && f.g.sim.state.result.is_none() && !(kind == BKind::Colossus && f.g.sim.colossus_of(f.g.me).is_some());
-                        let lock = if locked { Some(format!("Locked: research {} at a siege workshop.", if kind == BKind::Greatengine { "Great engines" } else { "Colossal engineering" })) } else { None };
-                        let tip = format!("{}s per villager. {}", spec.time, spec.description.unwrap_or(""));
-                        let c = Card { name: spec.name.to_string(), cost: Some(&cost), tip, enabled, active: f.ui.placement == Some(kind), done: false, badge: None, lock };
-                        if card(ui, f, &c, Vec2::new(74.0, 54.0), fell(9.5), &|p, a, r| portrait_building(p, a, kind, Rect::from_min_size(r.min, Vec2::new(r.width(), 24.0)), (30.0, 20.0))) {
-                            clicked = Some(kind);
-                        }
-                    }
-                });
-            });
+    let (cw, ch, gap, head) = (74.0f32, 54.0f32, 4.0f32, 20.0f32);
+    let group_w = cw * 2.0 + gap;
+    let avail = ui.available_width();
+    // Lay the groups out left to right, wrapping when the row is full.
+    let mut placed: Vec<(usize, f32, f32)> = Vec::new();
+    let (mut x, mut y, mut row_h) = (0.0f32, 0.0f32, 0.0f32);
+    for (i, (_, kinds)) in groups.iter().enumerate() {
+        let h = head + ((kinds.len() as f32 / 2.0).ceil()) * (ch + gap);
+        if x > 0.0 && x + group_w > avail {
+            x = 0.0;
+            y += row_h + 8.0;
+            row_h = 0.0;
         }
-    });
+        placed.push((i, x, y));
+        row_h = row_h.max(h);
+        x += group_w + 14.0;
+    }
+    let total_h = y + row_h;
+    let (origin_rect, _) = ui.allocate_exact_size(Vec2::new(avail, total_h), Sense::hover());
+    let mut clicked: Option<BKind> = None;
+    for (gi, gx, gy) in placed {
+        let (label, kinds) = groups[gi];
+        ui.painter().text(origin_rect.min + Vec2::new(gx, gy), Align2::LEFT_TOP, label, fell(12.0), col("#d7b574"));
+        let mut n = 0;
+        for k in kinds {
+            let kind = kind_by_name(k);
+            let spec = data().bld(kind);
+            let Some(cost) = spec.cost.clone() else { continue };
+            let (cx, cy) = (n % 2, n / 2);
+            n += 1;
+            let r = Rect::from_min_size(origin_rect.min + Vec2::new(gx + cx as f32 * (cw + gap), gy + head + cy as f32 * (ch + gap)), Vec2::new(cw, ch));
+            let locked = !f.g.sim.is_unlocked(kind, f.g.me);
+            let enabled = !locked && f.g.sim.afford(&cost, f.g.me) && f.g.sim.state.result.is_none() && !(kind == BKind::Colossus && f.g.sim.colossus_of(f.g.me).is_some());
+            let lock = if locked { Some(format!("Locked: research {} at a siege workshop.", if kind == BKind::Greatengine { "Great engines" } else { "Colossal engineering" })) } else { None };
+            let tip = format!("{}s per villager. {}", spec.time, spec.description.unwrap_or(""));
+            let c = Card { name: spec.name.to_string(), cost: Some(&cost), tip, enabled, active: f.ui.placement == Some(kind), done: false, badge: None, lock };
+            let resp = ui.interact(r, Id::new(("build-card", *k)), if enabled { Sense::click() } else { Sense::hover() });
+            if card_in(ui, f, &c, r, resp, fell(9.5), &|p, a, rr| portrait_building(p, a, kind, Rect::from_min_size(rr.min, Vec2::new(rr.width(), 24.0)), (30.0, 20.0))) {
+                clicked = Some(kind);
+            }
+        }
+    }
     if let Some(k) = clicked {
         let (ui_state, g) = (&mut *f.ui, &*f.g);
         ui_state.begin_build(g, k);

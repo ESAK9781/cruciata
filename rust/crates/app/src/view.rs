@@ -38,10 +38,22 @@ impl View {
         let h = (self.rect.height() as f64 / self.zoom).min(self.world_h);
         self.w = w;
         self.h = h;
-        self.cx = self.cx.clamp(w / 2.0, self.world_w - w / 2.0);
-        self.cy = self.cy.clamp(h / 2.0, self.world_h - h / 2.0);
+        // The view may slide past the edge (black) to centre edge objects, but a
+        // fifth of it must still overlap the land.
+        self.cx = self.cx.clamp(-w * 0.3, self.world_w + w * 0.3);
+        self.cy = self.cy.clamp(-h * 0.3, self.world_h + h * 0.3);
         self.x = self.cx - w / 2.0;
         self.y = self.cy - h / 2.0;
+    }
+
+    /// Centre on a point keeping the view on the land (used for starting and home views).
+    pub fn center_tight(&mut self, x: f64, y: f64) {
+        self.cx = x;
+        self.cy = y;
+        self.update();
+        self.cx = self.cx.clamp(self.w / 2.0, (self.world_w - self.w / 2.0).max(self.w / 2.0));
+        self.cy = self.cy.clamp(self.h / 2.0, (self.world_h - self.h / 2.0).max(self.h / 2.0));
+        self.update();
     }
 
     pub fn to_screen(&self, x: f64, y: f64) -> Pos2 {

@@ -75,6 +75,7 @@ pub struct UiState {
     pub show_help: bool,
     pub show_settings: bool,
     pub show_menu: bool,
+    pub orders_collapsed: bool,
 }
 
 impl UiState {
@@ -105,6 +106,7 @@ impl UiState {
             show_help: false,
             show_settings: false,
             show_menu: false,
+            orders_collapsed: false,
         }
     }
 

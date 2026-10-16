@@ -208,7 +208,11 @@ impl App {
             atlas,
             view,
             args,
-            ui: app_ui,
+            ui: {
+                let mut u = app_ui;
+                u.orders_collapsed = Progress::load().orders_collapsed;
+                u
+            },
             input: InputState::default(),
             fog_tex: FogTex::new(),
             settings: { let p = Progress::load(); Settings { music: p.music, effects: p.effects, battle_sounds: p.battle_sounds, gore: p.gore } },
@@ -257,8 +261,11 @@ impl App {
         }
         self.view.zoom = 0.8;
         self.view.update();
+        let (cx, cy) = (self.view.cx, self.view.cy);
+        self.view.center_tight(cx, cy);
         self.game = g;
         self.ui = UiState::new();
+        self.ui.orders_collapsed = self.progress.orders_collapsed;
         self.clusters = Clusters::default();
         self.visual_angle.clear();
         self.fog_tex = FogTex::new();
@@ -519,7 +526,8 @@ impl App {
         let painter = ui.painter_at(rect);
         let ground = self.ground_color();
         let biome = self.biome();
-        painter.rect_filled(rect, 0.0, ground);
+        painter.rect_filled(rect, 0.0, Color32::BLACK);
+        let _ = ground;
         if let Some((_, t)) = &self.terrain {
             let tl = view.to_screen(0.0, 0.0);
             let br = view.to_screen(self.game.sim.geo.w, self.game.sim.geo.h);
@@ -1220,6 +1228,10 @@ impl eframe::App for App {
                 look = out.look;
             }
             minimap_order = out.minimap_order;
+            if out.orders_toggled {
+                self.progress.orders_collapsed = self.ui.orders_collapsed;
+                self.progress.save();
+            }
             mapui::toasts(ui, map_rect, &mut self.ui);
         });
         if let Some((x, y, attack)) = minimap_order {
@@ -1265,9 +1277,11 @@ impl eframe::App for App {
             }
         }
         if let Some((x, y)) = look {
-            self.view.cx = x;
-            self.view.cy = y;
-            self.view.update();
+            self.view.center_tight(x, y);
+        }
+        if self.frames == 2 {
+            let (cx, cy) = (self.view.cx, self.view.cy);
+            self.view.center_tight(cx, cy);
         }
         match overlay::result_dialog(ctx, &self.game) {
             Some(overlay::ResultChoice::Menu) => {

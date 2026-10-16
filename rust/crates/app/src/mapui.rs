@@ -33,6 +33,7 @@ fn arrow(p: &egui::Painter, r: Rect, dir: Vec2, color: Color32) {
 }
 
 pub struct MapOut {
+    pub orders_toggled: bool,
     pub look: Option<(f64, f64)>,
     pub minimap_order: Option<(f64, f64, bool)>,
 }
@@ -41,13 +42,13 @@ pub struct MapOut {
 pub fn draw(ui: &mut egui::Ui, inner: Rect, g: &Game, st: &mut UiState, view: &mut View, fog: &FogTex, terrain: Option<TextureId>, icons: &Icons) -> MapOut {
     let p = ui.painter().clone();
     let ctx = ui.ctx().clone();
-    let mut out = MapOut { look: None, minimap_order: None };
+    let mut out = MapOut { orders_toggled: false, look: None, minimap_order: None };
     let lvl = &data().levels[g.sim.state.level.min(data().levels.len() - 1)];
     let quick = g.sim.state.mode == "quickmatch";
     let o = inner.min;
 
     // Place label.
-    let name = if quick { "THE THEATRE OF WAR".to_string() } else { lvl.sub.to_string() };
+    let name = if quick { format!("SEED {}", g.sim.state.seed) } else { lvl.sub.to_string() };
     let nw = spaced_width(&ctx, &name, sans(8.0), 1.2);
     let label = Rect::from_min_size(o + Vec2::new(14.0, 13.0), Vec2::new(nw + 52.0, 38.0));
     p.rect_filled(label, 0.0, c("#34372cdd"));
@@ -98,33 +99,45 @@ pub fn draw(ui: &mut egui::Ui, inner: Rect, g: &Game, st: &mut UiState, view: &m
         }
     }
 
-    // War orders.
+    // War orders (can be minimized to a small tab).
     let obj = g.sim.objective_state();
-    let (otxt, osub) = if quick { ("Destroy the enemy town center".to_string(), "Protect your own. Both armies begin with the same stores, soldiers and villagers.".to_string()) } else { (lvl.objective.to_string(), format!("{} Destroy the opposing capital for immediate victory; losing your capital is defeat.", lvl.desc)) };
-    let card_w = 228.0;
+    let (otxt, osub) = if quick { ("Defeat the opposing settlement".to_string(), "Destroy its town center. Both armies must gather, build and explore.".to_string()) } else { (lvl.objective.to_string(), format!("{} Destroy the opposing capital for immediate victory; losing your capital is defeat.", lvl.desc)) };
+    let card_w = if st.orders_collapsed { 150.0 } else { 228.0 };
     let pad = 12.0;
     let text_w = card_w - pad * 2.0;
     let h_obj = paragraph_height(&ctx, text_w, &otxt, fell(19.0), 24.0);
     let h_sub = paragraph_height(&ctx, text_w, &osub, sans(9.0), 15.0);
     let h_stage = paragraph_height(&ctx, text_w - 36.0, &obj.text, sans(8.0), 11.0);
-    let card_h = pad + 10.0 + 7.0 + h_obj + 7.0 + h_sub + 12.0 + h_stage + 6.0 + 4.0 + pad;
+    let card_h = if st.orders_collapsed { 30.0 } else { pad + 10.0 + 7.0 + h_obj + 7.0 + h_sub + 12.0 + h_stage + 6.0 + 4.0 + pad };
     let card = Rect::from_min_size(Pos2::new(inner.max.x - 14.0 - card_w, o.y + 13.0), Vec2::new(card_w, card_h));
     gradient_v(&p, card, c("#f1d49f"), c("#d8b576"));
     p.rect_stroke(card, 0.0, Stroke::new(1.0, c("#795328")));
     p.circle_filled(card.min + Vec2::new(7.0, 7.0), 2.5, c("#745333"));
-    p.circle_filled(card.max - Vec2::new(7.0, card_h - 7.0), 2.5, c("#745333"));
+    let toggle = Rect::from_min_size(Pos2::new(card.max.x - 26.0, card.min.y + 2.0), Vec2::new(24.0, 22.0));
+    let tresp = ui.interact(toggle, Id::new("orders-toggle"), Sense::click());
+    if tresp.hovered() {
+        p.rect_filled(toggle, 2.0, c("#8f693033"));
+    }
+    p.text(toggle.center(), Align2::CENTER_CENTER, if st.orders_collapsed { "+" } else { "\u{2212}" }, sans(16.0), c("#5e4226"));
+    let tresp = tresp.on_hover_text(if st.orders_collapsed { "Show war orders" } else { "Minimize war orders" });
+    if tresp.clicked() {
+        st.orders_collapsed = !st.orders_collapsed;
+        out.orders_toggled = true;
+    }
     let mut y = card.min.y + pad;
-    spaced(&p, Pos2::new(card.min.x + pad, y), "WAR ORDERS", sans(7.0), c("#856b47"), 1.4);
-    y += 10.0 + 7.0;
-    y += paragraph(&p, Pos2::new(card.min.x + pad, y), text_w, &otxt, fell(19.0), c("#392513"), 24.0) + 7.0;
-    y += paragraph(&p, Pos2::new(card.min.x + pad, y), text_w, &osub, sans(9.0), c("#5e4226"), 15.0);
-    y += 12.0;
-    paragraph(&p, Pos2::new(card.min.x + pad, y), text_w - 36.0, &obj.text, sans(8.0), c("#54482c"), 11.0);
-    p.text(Pos2::new(card.max.x - pad, y), Align2::RIGHT_TOP, format!("{}%", (obj.progress * 100.0).round()), sans(8.0), c("#54482c"));
-    y += h_stage + 6.0;
-    let track = Rect::from_min_size(Pos2::new(card.min.x + pad, y), Vec2::new(text_w, 4.0));
-    p.rect_filled(track, 0.0, c("#a7916b55"));
-    p.rect_filled(Rect::from_min_size(track.min, Vec2::new(track.width() * obj.progress.clamp(0.0, 1.0) as f32, 4.0)), 0.0, c("#905444"));
+    spaced(&p, Pos2::new(card.min.x + pad, if st.orders_collapsed { card.min.y + 11.0 } else { y }), "WAR ORDERS", sans(7.0), c("#856b47"), 1.4);
+    if !st.orders_collapsed {
+        y += 10.0 + 7.0;
+        y += paragraph(&p, Pos2::new(card.min.x + pad, y), text_w, &otxt, fell(19.0), c("#392513"), 24.0) + 7.0;
+        y += paragraph(&p, Pos2::new(card.min.x + pad, y), text_w, &osub, sans(9.0), c("#5e4226"), 15.0);
+        y += 12.0;
+        paragraph(&p, Pos2::new(card.min.x + pad, y), text_w - 36.0, &obj.text, sans(8.0), c("#54482c"), 11.0);
+        p.text(Pos2::new(card.max.x - pad, y), Align2::RIGHT_TOP, format!("{}%", (obj.progress * 100.0).round()), sans(8.0), c("#54482c"));
+        y += h_stage + 6.0;
+        let track = Rect::from_min_size(Pos2::new(card.min.x + pad, y), Vec2::new(text_w, 4.0));
+        p.rect_filled(track, 0.0, c("#a7916b55"));
+        p.rect_filled(Rect::from_min_size(track.min, Vec2::new(track.width() * obj.progress.clamp(0.0, 1.0) as f32, 4.0)), 0.0, c("#905444"));
+    }
 
     // Season label and quick buttons (bottom-left).
     let by = inner.max.y - 12.0;
