@@ -27,7 +27,7 @@ use cruciata_core::sim::{Event, Sim, STEP};
 use eframe::egui::{self, Color32, Rect, Sense, Stroke, TextureHandle};
 use std::collections::{HashMap, HashSet};
 
-const ANIM_SCALE: f64 = 0.5;
+pub const ANIM_SCALE: f64 = 0.5;
 const CLUSTER_SCALE: f64 = 0.25;
 
 pub struct App {
@@ -63,6 +63,7 @@ pub struct App {
     audio: Option<crate::audio::Audio>,
     gates: crate::gate3d::GateCache,
     desync_warned: bool,
+    demo_at: Option<u8>,
     fps_mark: Option<(std::time::Instant, u32)>,
     icons: Icons,
     last_volumes: (f32, f32, bool),
@@ -244,6 +245,7 @@ impl App {
             audio: None,
             gates: Default::default(),
             desync_warned: false,
+            demo_at: None,
             fps_mark: None,
             icons: Icons::load(&cc.egui_ctx, &assets_dir()),
             last_volumes: (-1.0, -1.0, true),
@@ -392,7 +394,8 @@ impl App {
             match self.shot_state {
                 ShotState::Waiting(n) => {
                     let idle = self.atlas.pending_pages() == 0;
-                    self.shot_state = if (idle && n > 8) || n > 600 {
+                    let need = live_frames().unwrap_or(8);
+                    self.shot_state = if (idle && n > need) || n > need + 600 {
                         ctx.send_viewport_cmd(egui::ViewportCommand::Screenshot);
                         ShotState::Requested
                     } else {
@@ -487,6 +490,22 @@ impl App {
         }
     }
 
+    /// Opponent left / desync notices for a running LAN match.
+    fn lan_checks(&mut self) {
+        let Some(ls) = self.game.lock.as_ref() else { return };
+        if ls.disconnected && self.game.sim.state.result.is_none() {
+            let me0 = self.game.me == 0;
+            self.game.sim.finish(me0);
+            self.ui.toast("Your opponent has left the match.");
+        }
+        if let Some(t) = ls.desync {
+            if !self.desync_warned {
+                self.desync_warned = true;
+                self.ui.toast(format!("The two games have fallen out of step (turn {t}). Please restart the match."));
+            }
+        }
+    }
+
     fn handle_events(&mut self) {
         let events = std::mem::take(&mut self.game.events);
         for e in events {
@@ -504,8 +523,14 @@ impl App {
                 }
                 Event::Sound { kind, x, y, team } => {
                     if let (Some(x), Some(y)) = (x, y) {
-                        if (kind == "siege" || kind == "great-launch") && self.view.zoom >= ANIM_SCALE && self.game.sees(x, y) {
-                            self.fx.plume(x, y, kind == "great-launch");
+                        if (kind == "siege" || kind == "great-launch") && self.game.sees(x, y) {
+                            let g = &self.game;
+                            let sees = |x: f64, y: f64| g.sees(x, y);
+                            let look = crate::fx::Look { view: &self.view, sees: &sees, gore: g.sim.settings.gore };
+                            self.fx.launch(&g.sim, &look, x, y, kind == "great-launch");
+                            if kind == "great-launch" {
+                                self.ui.shake = self.ui.shake.max(3.0);
+                            }
                         }
                     }
                     let Some(a) = self.audio.as_mut() else { continue };
@@ -521,9 +546,11 @@ impl App {
                     a.play(&kind, volume);
                 }
                 Event::Impact { x, y, heavy } => {
-                    self.ui.impacts.push((x, y, self.ui.clock, heavy));
-                    if self.ui.impacts.len() > 60 {
-                        self.ui.impacts.remove(0);
+                    {
+                        let g = &self.game;
+                        let sees = |x: f64, y: f64| g.sees(x, y);
+                        let look = crate::fx::Look { view: &self.view, sees: &sees, gore: g.sim.settings.gore };
+                        self.fx.impact(&look, x, y, heavy);
                     }
                     let d = ((x - self.view.cx).powi(2) + (y - self.view.cy).powi(2)).sqrt();
                     let power = if heavy { 14.0 } else { 5.0 } * (1.0 - d / 3600.0).clamp(0.0, 1.0);
@@ -980,12 +1007,6 @@ impl App {
         for b in sim.state.buildings.iter().filter(|b| b.kind == BKind::Colossus && b.hp > 0.0 && b.team != me && b.team != 2 && view.on_screen(b.x, b.y, 400.0)) {
             crate::extras::colossus_beacon(&cv, b, time);
         }
-        if view.zoom >= ANIM_SCALE {
-            for b in known.iter().filter(|b| b.team != 2 && b.hp > 0.0 && b.progress >= 1.0 && b.max_hp > 0.0 && b.hp < b.max_hp * 0.45 && view.on_screen(b.x, b.y, 150.0)) {
-                crate::extras::damage_fx(&cv, b, visual_height(b) * 0.7, time);
-            }
-        }
-
         // ---- markers: rally points, order lines, attack reticles ----
         for b in &known {
             if let Some(r) = b.rally {
@@ -1079,24 +1100,8 @@ impl App {
                 cv.ellipse(x - 1.0, fy - 1.0, 4.5 * k, 4.5 * k, col("#f5a23b"));
             }
         }
-        // ---- impact smoke and dust ----
-        for &(x, y, t0, heavy) in &self.ui.impacts {
-            let t = time_clock - t0;
-            if !(0.0..1.2).contains(&t) || !view.on_screen(x, y, 200.0) {
-                continue;
-            }
-            let k = t / 1.2;
-            let scale = if heavy { 90.0 } else { 38.0 };
-            cv.ellipse(x, y, scale * (0.4 + k), scale * 0.7 * (0.4 + k), with_alpha(col("#6b5d49"), 0.5 * (1.0 - k) as f32));
-            for i in 0..7 {
-                let a = i as f64 * 0.9 + x * 0.01;
-                let r = scale * 0.7 * k;
-                cv.ellipse(x + a.cos() * r, y + a.sin() * r * 0.6 - k * 25.0, scale * 0.22 * (1.0 + k), scale * 0.2 * (1.0 + k), with_alpha(col("#4a4036"), 0.55 * (1.0 - k) as f32));
-            }
-            if t < 0.25 {
-                cv.ellipse(x, y - 6.0, scale * 0.5 * (1.0 - t * 2.0), scale * 0.4 * (1.0 - t * 2.0), with_alpha(col("#ffd27a"), 0.9 * (1.0 - t * 4.0) as f32));
-            }
-        }
+        // ---- shock rings (charges, landing shots) ----
+        self.fx.draw_rings(&cv, &sim.state.rings);
         // ---- fog ----
         if !g.revealed() {
             self.fog_tex.paint(&painter, &view, sim.geo.w, sim.geo.h);
@@ -1280,7 +1285,7 @@ impl eframe::App for App {
                 *e = (now, 0);
             }
         }
-        let dt = (ctx.input(|i| i.unstable_dt) as f64).min(0.1);
+        let dt = if live_frames().is_some() { 1.0 / 60.0 } else { (ctx.input(|i| i.unstable_dt) as f64).min(0.1) };
         self.ui.clock += dt;
         self.atlas.begin_frame(ctx);
         let shot_mode = self.args.shot.is_some();
@@ -1306,6 +1311,12 @@ impl eframe::App for App {
             self.begin_load("A friend has joined...", move || lan_game(s));
         }
         if self.ui.show_menu {
+            // A LAN match never pauses: keep trading turns so the opponent is not held up.
+            if self.game.is_lan() && !shot_mode {
+                self.game.advance(dt);
+                self.lan_checks();
+                self.handle_events();
+            }
             self.menu.poll_lan();
             let in_game = !matches!(self.menu.screen, Screen::Loading(_)) && self.game.sim.state.result.is_none() && self.game.sim.state.time > 0.0 && !self.game.left;
             let can_resume = store::read_save(None).is_some();
@@ -1321,22 +1332,10 @@ impl eframe::App for App {
             ctx.request_repaint_after(std::time::Duration::from_millis(16));
             return;
         }
-        if !shot_mode && !self.ui.show_menu && !self.ui.show_debug {
+        if (!shot_mode || live_frames().is_some()) && !self.ui.show_menu && !self.ui.show_debug {
             self.game.advance(dt);
         }
-        if let Some(ls) = self.game.lock.as_ref() {
-            if ls.disconnected && self.game.sim.state.result.is_none() {
-                let me0 = self.game.me == 0;
-                self.game.sim.finish(me0);
-                self.ui.toast("Your opponent has left the match.");
-            }
-            if let Some(t) = ls.desync {
-                if !self.desync_warned {
-                    self.desync_warned = true;
-                    self.ui.toast(format!("The two games have fallen out of step (turn {t}). Please restart the match."));
-                }
-            }
-        }
+        self.lan_checks();
         self.handle_events();
         self.save_clock += dt;
         if self.save_clock > 20.0 && !shot_mode {
@@ -1364,10 +1363,18 @@ impl eframe::App for App {
         self.ui.impacts.retain(|i| self.ui.clock - i.2 < 1.3);
         {
             let g = &self.game;
-            let zoomed = self.view.zoom >= ANIM_SCALE;
-            let (cx, cy) = (self.view.cx, self.view.cy);
-            let near = |x: f64, y: f64| (x - cx).abs() < 2400.0 && (y - cy).abs() < 1800.0 && g.sees(x, y);
-            self.fx.update(&g.sim, if g.paused() || self.ui.show_menu || self.ui.show_debug { 0.0 } else { dt }, near, zoomed);
+            let sees = |x: f64, y: f64| g.sees(x, y);
+            let look = crate::fx::Look { view: &self.view, sees: &sees, gore: g.sim.settings.gore };
+            self.fx.load(ctx);
+            if self.args.run.iter().any(|c| c == "fxdemo") {
+                let n = self.demo_at.unwrap_or(0);
+                self.demo_at = Some(n.saturating_add(1));
+                if n == 4 {
+                    let (cx, cy) = (self.view.cx, self.view.cy);
+                    self.fx.demo(&g.sim, &look, cx, cy);
+                }
+            }
+            self.fx.update(&g.sim, if g.paused() || self.ui.show_menu && !g.is_lan() || self.ui.show_debug { 0.0 } else { dt }, &look);
         }
         self.ui.shake = (self.ui.shake - dt * 16.0).max(0.0);
         self.ui.prune(&self.game);
@@ -1500,4 +1507,9 @@ fn lan_game(s: cruciata_net::session::Session) -> Result<Game, String> {
     sim.state.paused = false;
     let lock = s.ready(std::time::Duration::from_secs(60))?;
     Ok(Game::lan(sim, lock, peer))
+}
+
+/// Debug: `CRUCIATA_LIVE=<frames>` lets screenshot runs advance the live simulation for that many frames.
+fn live_frames() -> Option<u32> {
+    std::env::var("CRUCIATA_LIVE").ok().and_then(|v| v.parse().ok())
 }

@@ -61,6 +61,11 @@ impl Game {
         self.events.append(&mut self.sim.events);
     }
 
+    /// A LAN peer's turn has not arrived yet, so the simulation is waiting.
+    pub fn waiting(&self) -> bool {
+        self.lock.as_ref().is_some_and(|l| l.stalled && !l.disconnected)
+    }
+
     pub fn paused(&self) -> bool {
         self.lock.is_none() && self.sim.state.paused
     }

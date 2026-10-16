@@ -275,7 +275,7 @@ pub fn resource_bar(ctx: &egui::Context, f: &mut Frame) {
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 let t = st.time;
                 ui.label(RichText::new(format!("{:02}:{:02}", (t / 60.0).floor() as i64, (t % 60.0).floor() as i64)).size(20.0).color(col("#e4cda2")));
-                let status = if let Some(w) = f.g.outcome() { if w { "VICTORY" } else { "DEFEAT" }.to_string() } else if f.g.paused() { "AT REST".into() } else if f.g.stock().food < 1.0 { "FOOD SHORTAGE".into() } else { "THE HOST MARCHES".into() };
+                let status = if let Some(w) = f.g.outcome() { if w { "VICTORY" } else { "DEFEAT" }.to_string() } else if f.g.waiting() { "WAITING FOR OPPONENT".into() } else if f.g.paused() { "AT REST".into() } else if f.g.stock().food < 1.0 { "FOOD SHORTAGE".into() } else { "THE HOST MARCHES".into() };
                 ui.label(RichText::new(status).size(9.5).color(col(GOLD)));
             });
         });

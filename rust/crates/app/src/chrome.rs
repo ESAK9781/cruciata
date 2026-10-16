@@ -211,7 +211,7 @@ pub fn draw(ui: &mut egui::Ui, lay: &Layout, g: &Game, st: &mut UiState, icons: 
         p.text(Pos2::new(x, cy + 1.0), Align2::LEFT_CENTER, label, sans(8.0), c("#d5bd95"));
         x += text_width(&ctx, label, sans(8.0)) + 24.0;
     }
-    let status_txt = if let Some(w) = g.outcome() { if w { "VICTORY" } else { "DEFEAT" }.to_string() } else if g.paused() { "AT REST".into() } else if g.stock().food < 1.0 { "FOOD SHORTAGE".into() } else { "THE HOST MARCHES".into() };
+    let status_txt = if let Some(w) = g.outcome() { if w { "VICTORY" } else { "DEFEAT" }.to_string() } else if g.waiting() { "WAITING FOR OPPONENT".into() } else if g.paused() { "AT REST".into() } else if g.stock().food < 1.0 { "FOOD SHORTAGE".into() } else { "THE HOST MARCHES".into() };
     let sw = spaced_width(&ctx, &status_txt, sans(7.0), 1.0);
     spaced(&p, Pos2::new(rb.max.x - 12.0 - sw, cy - 4.0), &status_txt, sans(7.0), c("#bfb293"), 1.0);
 

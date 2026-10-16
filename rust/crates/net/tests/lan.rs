@@ -105,3 +105,48 @@ fn tcp_discovery_join_and_play() {
     assert!(a.1.desync.is_none() && b.1.desync.is_none());
     assert!(a.1.turn() > 50, "turns executed: {}", a.1.turn());
 }
+
+#[test]
+fn a_stalled_peer_holds_the_other_then_both_resume_in_sync() {
+    let cfg = config();
+    let (la, lb) = mem_pair();
+    let mut a = (build(&cfg), Lockstep::new(0, Box::new(la)));
+    let mut b = (build(&cfg), Lockstep::new(1, Box::new(lb)));
+    for tick in 0..200 {
+        act(&a.0, &mut a.1, tick);
+        act(&b.0, &mut b.1, tick);
+        a.1.advance(&mut a.0, 1.0 / 60.0);
+        b.1.advance(&mut b.0, 1.0 / 60.0);
+    }
+    // B goes silent (a frozen window); A may only run the turns it already holds.
+    let held = a.1.turn();
+    for _ in 0..600 {
+        a.1.advance(&mut a.0, 1.0 / 60.0);
+    }
+    assert!(a.1.stalled, "A should be waiting for B");
+    assert!(a.1.turn() <= held + 4, "A must not run ahead of B's input ({} vs {})", a.1.turn(), held);
+    // B comes back and both catch up without any divergence.
+    for tick in 200..1200 {
+        act(&a.0, &mut a.1, tick);
+        act(&b.0, &mut b.1, tick);
+        a.1.advance(&mut a.0, 1.0 / 60.0);
+        b.1.advance(&mut b.0, 1.0 / 60.0);
+    }
+    assert!(a.1.desync.is_none() && b.1.desync.is_none(), "desync after a stall");
+    assert!(a.1.turn() > held + 100, "play resumed");
+}
+
+#[test]
+fn leaving_ends_the_match_for_the_other_side() {
+    let cfg = config();
+    let (la, lb) = mem_pair();
+    let mut a = (build(&cfg), Lockstep::new(0, Box::new(la)));
+    let mut b = (build(&cfg), Lockstep::new(1, Box::new(lb)));
+    for _ in 0..60 {
+        a.1.advance(&mut a.0, 1.0 / 60.0);
+        b.1.advance(&mut b.0, 1.0 / 60.0);
+    }
+    b.1.leave();
+    a.1.advance(&mut a.0, 1.0 / 60.0);
+    assert!(a.1.disconnected);
+}
