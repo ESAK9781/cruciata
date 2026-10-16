@@ -12961,6 +12961,26 @@
         issueOrder(target.x, target.y, attack, false);
       }
     },
+    // Test-only command drivers (same code paths as the interface).
+    recruit: (type, buildingIds) => {
+      if (!TEST) return false;
+      selectedBuildings = new Set(buildingIds);
+      selectedBuilding = buildingIds[0] || null;
+      return recruit(type);
+    },
+    research: (key, buildingIds) => {
+      if (!TEST) return false;
+      selectedBuildings = new Set(buildingIds);
+      selectedBuilding = buildingIds[0] || null;
+      return research(key);
+    },
+    place: (kind, p, builderIds, rotation = 0) => {
+      if (!TEST) return false;
+      selected = new Set(builderIds);
+      placement = kind;
+      placementRotation = rotation;
+      return placeBuild(p, false);
+    },
     save: () => saveGame(true),
     phases: () => {
       const copy = { ...phases };

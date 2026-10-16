@@ -27,7 +27,7 @@ impl Sim {
         !self.state.paused && self.state.result.is_none()
     }
 
-    fn refresh_fog(&mut self) {
+    pub fn refresh_fog(&mut self) {
         let shots = self.siege_shots();
         let r0 = self.colossus_reveals(0);
         let r1 = self.colossus_reveals(1);

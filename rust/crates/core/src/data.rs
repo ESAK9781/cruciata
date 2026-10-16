@@ -73,7 +73,7 @@ pub struct Level {
 }
 
 pub struct Data {
-    types: Vec<(UType, TypeSpec)>,
+    pub types: Vec<(UType, TypeSpec)>,
     buildings: Vec<(BKind, BuildingSpec)>,
     pub techs: Vec<Tech>,
     pub levels: Vec<Level>,
