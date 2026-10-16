@@ -51,6 +51,7 @@ pub struct App {
     save_clock: f64,
     result_handled: bool,
     terrain: Option<(u64, TextureHandle)>,
+    walls: crate::wall3d::WallCache,
 }
 
 #[derive(PartialEq)]
@@ -109,13 +110,23 @@ impl App {
             sim.update(STEP);
         }
         let mut app_ui = UiState::new();
+        let mut focus: Option<(f64, f64)> = None;
         let mut game = Game::solo(sim);
         for cmd in args.run.clone() {
             let (k, v) = cmd.split_once(':').unwrap_or((cmd.as_str(), ""));
             match k {
+                "focus" => {
+                    let kind = match v { "gate" => BKind::Gate, "tower" => BKind::Tower, _ => BKind::Wall };
+                    if let Some(b) = game.sim.state.buildings.iter().find(|b| b.kind == kind && b.hp > 0.0 && b.team == 1) {
+                        focus = Some((b.x, b.y));
+                    }
+                }
                 "menu" => app_ui.show_menu = true,
                 "reveal" => {
                     for v in game.sim.fog.explored.iter_mut() {
+                        *v = 1;
+                    }
+                    for v in game.sim.fog.visible.iter_mut() {
                         *v = 1;
                     }
                     game.sim.fog.revision += 1;
@@ -144,6 +155,10 @@ impl App {
             }
         }
         app_ui.show_menu = app_ui.show_menu || args.shot.is_none() && args.run.is_empty() && args.quick.is_none() && args.level == 0 && args.at.is_none();
+        if let Some((x, y)) = focus {
+            view.cx = x;
+            view.cy = y;
+        }
         let shot_state = if args.shot.is_some() { ShotState::Waiting(0) } else { ShotState::Off };
         App {
             soft_shadow: make_shadow(&cc.egui_ctx),
@@ -168,6 +183,7 @@ impl App {
             save_clock: 0.0,
             result_handled: false,
             terrain: None,
+            walls: Default::default(),
         }
     }
 
@@ -400,6 +416,7 @@ impl App {
         let mut batch = Batch::new();
         let shadow_id = self.soft_shadow.id();
         let atlas = &mut self.atlas;
+        let walls = &mut self.walls;
         let white = Color32::WHITE;
         let full_uv = Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0));
 
@@ -476,7 +493,12 @@ impl App {
             let depth = b.y + b.h * 0.3 + if b.wall_attachment.is_some() { 40.0 } else { 0.0 };
             match b.kind {
                 BKind::Wall | BKind::Bastionwall => {
-                    cv.rect(b.x - 16.0, b.y - 16.0, 32.0, 32.0, col(if b.fortified { "#6d6a63" } else { "#a09a89" }));
+                    let mut wb = (*b).clone();
+                    if b.kind == BKind::Bastionwall {
+                        wb.fortified = true;
+                    }
+                    let alpha = if b.hp > 0.0 && b.progress < 1.0 { 0.55 + 0.45 * b.progress } else { 1.0 };
+                    wall_shape(&mut batch, &view, walls.get(&wb), b.x, b.y, depth, alpha as f32);
                 }
                 BKind::Greatengine => {
                     batch.frame(atlas, &view, &great_engine_key(b, time), 150.0, 240.0, b.x, b.y, 1.0, depth, white);
@@ -485,6 +507,18 @@ impl App {
                     cv.ellipse(b.x, b.y, b.w / 2.0, b.h / 2.0, col("#4a3b2a"));
                 }
                 _ => {
+                    if let (Some(att), true) = (&b.wall_attachment, b.hp > 0.0) {
+                        let mut wb = (*b).clone();
+                        wb.kind = BKind::Wall;
+                        wb.x = att.x;
+                        wb.y = att.y;
+                        wb.w = att.w;
+                        wb.h = att.h;
+                        wb.wall_angle = att.wall_angle;
+                        wb.links = att.links.clone();
+                        wb.fortified = b.fortified || att.fortified == Some(true);
+                        wall_shape(&mut batch, &view, walls.get(&wb), att.x, att.y, depth - 0.01, 1.0);
+                    }
                     let (width, _h, oy) = building_canvas(b);
                     let key = building_key(b);
                     if b.hp > 0.0 && b.progress < 1.0 {
@@ -796,6 +830,19 @@ impl App {
             }
         }
     }
+}
+
+fn wall_shape(batch: &mut Batch, view: &View, m: &crate::wall3d::Model, x: f64, y: f64, depth: f64, alpha: f32) {
+    let mut shapes = Vec::with_capacity(m.faces.len());
+    for f in &m.faces {
+        let pts: Vec<egui::Pos2> = f.pts.iter().map(|p| view.to_screen(x + p[0] as f64, y + p[1] as f64)).collect();
+        let c = if alpha < 1.0 { f.color.gamma_multiply(alpha) } else { f.color };
+        match f.width {
+            Some(w) => shapes.push(egui::Shape::line(pts, Stroke::new((w as f64 * view.zoom) as f32, c))),
+            None => shapes.push(egui::Shape::convex_polygon(pts, c, Stroke::new(0.5, c))),
+        }
+    }
+    batch.shape(depth, egui::Shape::Vec(shapes));
 }
 
 pub fn health_bar(cv: &Canvas, x: f64, y: f64, ratio: f64, w: f64, team: i32) {
