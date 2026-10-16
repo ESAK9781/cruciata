@@ -12983,6 +12983,8 @@
             renderStats,
             motionVisible,
             unitTree: () => unitTree,
+            uid: () => uid,
+            rebuildNavigation,
           }
         : null,
   };
