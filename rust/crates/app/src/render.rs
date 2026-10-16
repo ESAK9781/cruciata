@@ -54,6 +54,7 @@ pub struct App {
     result_handled: bool,
     terrain: Option<(u64, TextureHandle)>,
     rocks: Option<TextureHandle>,
+    cover: Vec<crate::extras::Patch>,
     water: Option<TextureHandle>,
     tile: Option<TextureHandle>,
     walls: crate::wall3d::WallCache,
@@ -233,6 +234,7 @@ impl App {
             result_handled: false,
             terrain: None,
             rocks: None,
+            cover: Vec::new(),
             water: None,
             tile: None,
             walls: Default::default(),
@@ -432,6 +434,7 @@ impl App {
         self.terrain = Some((key, ctx.load_texture("terrain", img, egui::TextureOptions::LINEAR)));
         let rocks = crate::terrain::bake_rocks(s, self.game.sim.geo.w, self.game.sim.geo.h);
         self.rocks = Some(ctx.load_texture("rocks", rocks, egui::TextureOptions::LINEAR));
+        self.cover = crate::extras::make_cover(&self.game.sim, self.biome());
     }
 
     fn biome(&self) -> i32 {
@@ -674,6 +677,17 @@ impl App {
                 let yy = y + (t * 0.7 + v).sin() * 2.0;
                 let frame = ((((t + v) % std::f64::consts::TAU) / std::f64::consts::TAU) * 16.0).floor() as i64;
                 batch.frame(atlas, &view, &format!("ship:{frame}"), 75.0, 160.0, x, yy, 1.0, y - 1.0e6, white);
+            }
+        }
+        // ---- ground cover ----
+        if view.zoom >= 0.3 {
+            let movers: Vec<(f64, f64, f64, u32)> = sim.state.units.iter().filter(|u| u.hp > 0.0 && u.moving && view.on_screen(u.x, u.y, 240.0) && (u.team == me || g.sees(u.x, u.y))).map(|u| (u.x, u.y, u.angle, u.id)).collect();
+            for p in &self.cover {
+                if !view.on_screen(p.x, p.y, 220.0) {
+                    continue;
+                }
+                let near: Vec<(f64, f64, f64, u32)> = movers.iter().copied().filter(|m| (m.0 - p.x).abs() < p.rx + 35.0 && (m.1 - p.y).abs() < p.ry + 35.0).collect();
+                crate::extras::draw_cover(&cv, p, &near, draw_time);
             }
         }
         // ---- decorations ----
@@ -929,6 +943,15 @@ impl App {
             }
         }
         batch.flush(&painter);
+        crate::extras::sites_and_cities(&cv, sim, g, draw_time, |x, y, r, w| health_bar(&cv, x, y, r, w, 0));
+        for b in sim.state.buildings.iter().filter(|b| b.kind == BKind::Colossus && b.hp > 0.0 && b.team != me && b.team != 2 && view.on_screen(b.x, b.y, 400.0)) {
+            crate::extras::colossus_beacon(&cv, b, time);
+        }
+        if view.zoom >= ANIM_SCALE {
+            for b in known.iter().filter(|b| b.team != 2 && b.hp > 0.0 && b.progress >= 1.0 && b.max_hp > 0.0 && b.hp < b.max_hp * 0.45 && view.on_screen(b.x, b.y, 150.0)) {
+                crate::extras::damage_fx(&cv, b, visual_height(b) * 0.7, time);
+            }
+        }
 
         // ---- markers: rally points, order lines, attack reticles ----
         for b in &known {

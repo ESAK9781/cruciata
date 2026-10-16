@@ -2,6 +2,7 @@
 mod assets;
 mod atlas;
 mod cluster;
+mod extras;
 mod keys;
 mod paint;
 mod render;
