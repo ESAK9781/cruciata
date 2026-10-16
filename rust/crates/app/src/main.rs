@@ -15,6 +15,7 @@ mod mapui;
 mod gate3d;
 mod audio;
 mod wall3d;
+mod site;
 mod terrain;
 mod menu;
 mod store;

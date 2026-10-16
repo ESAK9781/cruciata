@@ -155,6 +155,22 @@ impl App {
                         focus = Some((tc.0 + 700.0, tc.1 - 100.0));
                     }
                 }
+                "foundations" => {
+                    // Debug: half-built structures beside the town centre (compare with the web).
+                    if let Some(tc) = game.sim.state.buildings.iter().find(|b| b.team == 0 && b.kind == BKind::Towncenter).map(|b| (b.x, b.y)) {
+                        let p: f64 = v.parse().unwrap_or(0.5);
+                        for (kind, dx, dy) in [(BKind::Barracks, 520.0, -150.0), (BKind::House, 520.0, 150.0), (BKind::Farm, 760.0, 0.0), (BKind::Tower, 760.0, -300.0), (BKind::Stable, 520.0, 330.0)] {
+                            let b = game.sim.make_building(kind, 0, tc.0 + dx, tc.1 + dy, p);
+                            game.sim.state.buildings.push(b);
+                        }
+                        focus = Some((tc.0 + 640.0, tc.1 - 20.0));
+                    }
+                }
+                "sites" => {
+                    for s in game.sim.state.sites.iter().take(3) {
+                        eprintln!("site {} ({:.0},{:.0}) r {} team {:?} captured {} claim {:?}", s.name, s.x, s.y, s.r, s.team, s.captured, s.claim_progress);
+                    }
+                }
                 "cheat" => {
                     game.sim.cheat(v);
                 }
@@ -740,8 +756,16 @@ impl App {
                     let pts: Vec<egui::Pos2> = road.iter().map(|p| view.to_screen(p.x + off, p.y)).collect();
                     painter.add(egui::Shape::line(pts, egui::Stroke::new((width * view.zoom).max(0.5) as f32, c)));
                 };
+                // Round caps and joins, like the canvas stroke.
+                let dots = |width: f64, c: Color32| {
+                    for p in road.iter() {
+                        painter.circle_filled(view.to_screen(p.x, p.y), (width * 0.5 * view.zoom) as f32, c);
+                    }
+                };
                 line(0.0, 38.0, crate::paint::col("#827761"));
+                dots(38.0, crate::paint::col("#827761"));
                 line(0.0, 33.0, crate::paint::col("#a89b7e"));
+                dots(33.0, crate::paint::col("#a89b7e"));
                 line(-7.0, 0.8, crate::paint::col("#8d78493d"));
                 line(7.0, 0.8, crate::paint::col("#8d78493d"));
             }
@@ -949,16 +973,24 @@ impl App {
                     }
                     let alpha = if b.hp > 0.0 && b.progress < 1.0 { 0.55 + 0.45 * b.progress } else { 1.0 };
                     wall_shape(&mut batch, &view, walls.get(&wb), b.x, b.y, depth, alpha as f32);
+                    if b.hp > 0.0 && b.progress < 1.0 {
+                        draw_site(&mut batch, atlas, &view, b, draw_time, depth, None, white);
+                    }
                 }
                 BKind::Greatengine => {
-                    batch.frame(atlas, &view, &great_engine_key(b, time), 150.0, 240.0, b.x, b.y, 1.0, depth, white);
+                    let key = great_engine_key(b, time);
+                    if b.hp > 0.0 && b.progress < 1.0 {
+                        draw_site(&mut batch, atlas, &view, b, draw_time, depth, Some((key, 150.0, 240.0, 1.0)), white);
+                    } else {
+                        batch.frame(atlas, &view, &key, 150.0, 240.0, b.x, b.y, 1.0, depth, white);
+                    }
                 }
                 BKind::Colossus => {
                     let baked_key = colossus_key(b, time);
                     if atlas.has(&baked_key) {
                         // The real Colossus art (reduced pose set baked by `scripts/bake-colossus.js`).
                         if b.progress < 1.0 {
-                            batch.frame_partial(atlas, &view, &baked_key, 210.0, 500.0, b.x, b.y, 1.0, depth, b.progress.max(0.08), Color32::from_white_alpha(220));
+                            draw_site(&mut batch, atlas, &view, b, draw_time, depth, Some((baked_key.clone(), 210.0, 500.0, 1.0)), white);
                         } else {
                             batch.frame(atlas, &view, &baked_key, 210.0, 500.0, b.x, b.y, 1.0, depth, white);
                             if let Some(tex) = self.colossus_flags.get(b.team.clamp(0, 1) as usize) {
@@ -992,7 +1024,7 @@ impl App {
                         let key = great_engine_key(&g2, time);
                         let tint = Color32::from_rgb(190, 175, 160);
                         if b.progress < 1.0 {
-                            batch.frame_partial(atlas, &view, &key, 150.0, 240.0, b.x, b.y, 2.0, depth, b.progress.max(0.08), Color32::from_white_alpha(220));
+                            draw_site(&mut batch, atlas, &view, b, draw_time, depth, Some((key, 150.0, 240.0, 2.0)), tint);
                         } else {
                             batch.frame(atlas, &view, &key, 150.0, 240.0, b.x, b.y, 2.0, depth, tint);
                         }
@@ -1018,7 +1050,7 @@ impl App {
                         continue;
                     }
                     if b.hp > 0.0 && b.progress < 1.0 {
-                        batch.frame_partial(atlas, &view, &key, width / 2.0, oy, b.x, b.y, 1.0, depth, b.progress.max(0.08), Color32::from_white_alpha(230));
+                        draw_site(&mut batch, atlas, &view, b, draw_time, depth, Some((key.clone(), width / 2.0, oy, 1.0)), white);
                     } else {
                         batch.frame(atlas, &view, &key, width / 2.0, oy, b.x, b.y, 1.0, depth, white);
                         if b.hp > 0.0 && !matches!(b.kind, BKind::Wall | BKind::Farm | BKind::Gate | BKind::Bastiongate) {
@@ -1027,34 +1059,6 @@ impl App {
                         }
                     }
                 }
-            }
-        }
-        // ---- scaffolds on unfinished structures ----
-        for b in &known {
-            if b.hp > 0.0 && b.progress < 1.0 && !matches!(b.kind, BKind::Wall | BKind::Bastionwall) && view.on_screen(b.x, b.y, 200.0) {
-                let h = visual_height(b) * 0.8 + 10.0;
-                let top = h * b.progress.clamp(0.05, 1.0);
-                let (hx, hy) = (b.w / 2.0 + 4.0, b.h / 2.0 + 4.0);
-                let depth = b.y + b.h * 0.3 + 0.5;
-                let mut shapes: Vec<egui::Shape> = Vec::new();
-                let wood = col("#8a6a3c");
-                let dirt = crate::paint::rgba(120, 100, 70, 90);
-                shapes.push(crate::paint::ellipse_shape(&view, b.x, b.y, hx + 6.0, (hy + 6.0) * 0.72, dirt, Stroke::NONE));
-                for (cx, cy) in [(-hx, -hy), (hx, -hy), (-hx, hy), (hx, hy)] {
-                    let base = view.to_screen(b.x + cx, b.y + cy * 0.72);
-                    let tip = view.to_screen(b.x + cx, b.y + cy * 0.72 - top);
-                    shapes.push(egui::Shape::line_segment([base, tip], Stroke::new((2.2 * view.zoom) as f32, wood)));
-                }
-                let mut z = 12.0;
-                while z < top {
-                    for (a, c) in [((-hx, hy), (hx, hy)), ((-hx, -hy), (hx, -hy)), ((-hx, -hy), (-hx, hy)), ((hx, -hy), (hx, hy))] {
-                        let p = view.to_screen(b.x + a.0, b.y + a.1 * 0.72 - z);
-                        let q = view.to_screen(b.x + c.0, b.y + c.1 * 0.72 - z);
-                        shapes.push(egui::Shape::line_segment([p, q], Stroke::new((1.2 * view.zoom) as f32, wood.gamma_multiply(0.85))));
-                    }
-                    z += 14.0;
-                }
-                batch2.push((depth, egui::Shape::Vec(shapes)));
             }
         }
         for (d, s) in batch2.drain(..) {
@@ -1364,6 +1368,124 @@ impl App {
                 }
             }
         }
+    }
+}
+
+/// Footprint options for a construction site (web `constructionSite` `o`).
+fn site_opts(b: &Building) -> crate::site::Opts {
+    use crate::site::Opts;
+    match b.kind {
+        BKind::Colossus => Opts { half_w: b.w * 0.5, half_d: b.h * 0.5, h: 300.0, round: true, light: false },
+        BKind::Greatengine => Opts { half_w: b.w * 0.5, half_d: b.h * 0.5, h: 150.0, round: true, light: false },
+        BKind::Wall | BKind::Bastionwall => Opts { half_w: 26.0, half_d: if b.fortified || b.kind == BKind::Bastionwall { 24.0 } else { 15.0 }, h: if b.fortified || b.kind == BKind::Bastionwall { 62.0 } else { 50.0 }, round: false, light: true },
+        _ => {
+            let turned = b.rotation == Some(90.0) || b.gate_angle == Some(std::f64::consts::FRAC_PI_2);
+            let (w, h) = if turned { (b.h, b.w) } else { (b.w, b.h) };
+            Opts { half_w: w * 0.5, half_d: h * 0.5, h: visual_height(b) + 14.0, round: false, light: false }
+        }
+    }
+}
+
+/// Everything around an unfinished structure except the finished sprite itself:
+/// ground, footing, the sprite rising from the ground (`finished` = key, origin x/y, scale),
+/// mortar course, scaffold, piles, hoist and dust. `depth` is the structure's sort depth.
+#[allow(clippy::too_many_arguments)]
+fn draw_site(batch: &mut Batch, atlas: &mut Atlas, view: &View, b: &Building, time: f64, depth: f64, finished: Option<(String, f64, f64, f64)>, tint: Color32) {
+    use crate::site;
+    let o = site_opts(b);
+    let p = b.progress;
+    let id = b.id as f64;
+    let rise = site::site_rise(p);
+    let (cut_y, zc) = site::cut_and_zc(&o, p);
+    let hw = o.half_w + 7.0;
+    let at = |x: f64, y: f64| view.to_screen(b.x + x, b.y + y);
+    let line = |pts: &[(f64, f64)], w: f64, c: Color32| egui::Shape::line(pts.iter().map(|&(x, y)| at(x, y)).collect(), Stroke::new((w * view.zoom).max(0.5) as f32, c));
+    let quad = |pts: [(f64, f64); 4], fill: Color32, stroke: Color32| egui::Shape::convex_polygon(pts.iter().map(|&(x, y)| at(x, y)).collect(), fill, Stroke::new(1.0, stroke));
+    if !o.light {
+        let mut ground: Vec<egui::Shape> = vec![
+            crate::paint::ellipse_shape(view, b.x, b.y + 3.0, o.half_w * 1.22 + 12.0, o.half_d * 1.28 + 10.0, col("#7a6742"), Stroke::new(1.0, col("#58492c"))),
+            crate::paint::ellipse_shape(view, b.x, b.y + 2.0, o.half_w * 1.02 + 6.0, o.half_d * 1.06 + 6.0, col("#8d7a50"), Stroke::NONE),
+        ];
+        if p < 0.2 {
+            let stakes = [(-o.half_w - 6.0, -o.half_d - 4.0), (o.half_w + 6.0, -o.half_d - 4.0), (o.half_w + 6.0, o.half_d + 4.0), (-o.half_w - 6.0, o.half_d + 4.0)];
+            for i in 0..4 {
+                ground.push(line(&[stakes[i], stakes[(i + 1) % 4]], 1.2, col("#e4d7ae")));
+            }
+            for (x, y) in stakes {
+                ground.push(line(&[(x, y), (x, y - 12.0)], 2.6, col("#7b5a34")));
+            }
+        }
+        batch.shape(depth - 0.4, egui::Shape::Vec(ground));
+        if p > 0.015 {
+            wall_shape(batch, view, &site::footing(&o, p), b.x, b.y, depth - 0.35, 1.0);
+        }
+    }
+    if rise > 0.0 {
+        if let Some((key, ox, oy, scale)) = finished {
+            if let Some(f) = atlas.frame(&key) {
+                // Keep only the part of the sprite below the cut line.
+                let top = (f.dy as f64 - oy) * scale;
+                let height = f.h as f64 / f.res as f64 * scale;
+                let fraction = ((top + height - cut_y) / height).clamp(0.0, 1.0);
+                if fraction >= 0.999 {
+                    batch.frame(atlas, view, &key, ox, oy, b.x, b.y, scale, depth, tint);
+                } else if fraction > 0.0 {
+                    batch.frame_partial(atlas, view, &key, ox, oy, b.x, b.y, scale, depth, fraction, tint);
+                }
+            } else {
+                batch.frame(atlas, view, &key, ox, oy, b.x, b.y, scale, depth, tint);
+            }
+        }
+        if !o.round && !o.light && rise < 0.8 {
+            let (x0, x1) = (-o.half_w * 0.86, o.half_w * 0.86);
+            let mut course = vec![quad([(x0, cut_y - 3.0), (x1, cut_y - 3.0), (x1 + 3.0, cut_y + 3.0), (x0 - 3.0, cut_y + 3.0)], col("#d6c9a4"), col("#6f6347"))];
+            let mut x = x0 + 8.0;
+            while x < x1 {
+                course.push(line(&[(x, cut_y - 3.0), (x - 1.0, cut_y + 3.0)], 1.0, col("#8a7d5d")));
+                x += 14.0;
+            }
+            batch.shape(depth + 0.05, egui::Shape::Vec(course));
+        }
+    }
+    if !o.light && p > 0.04 && p < 0.995 {
+        let fade = if p > 0.9 { 1.0 - ((p - 0.9) / 0.1) * 0.75 } else { 1.0 };
+        wall_shape(batch, view, &site::scaffold(&o, zc, fade), b.x, b.y, depth + 0.1, 1.0);
+    }
+    if !o.light && p < 0.97 {
+        let left = ((1.0 - p) * 5.0).ceil() as i64;
+        wall_shape(batch, view, &site::piles(true, left), b.x - hw - 6.0, b.y + o.half_d + 4.0, depth + 0.15, 1.0);
+        wall_shape(batch, view, &site::piles(false, left), b.x + hw + 4.0, b.y + o.half_d + 8.0, depth + 0.15, 1.0);
+    }
+    if o.light {
+        let blocks = vec![
+            quad([(-18.0, 10.0), (-9.0, 10.0), (-9.0, 16.0), (-18.0, 16.0)], col("#c4b690"), col("#6f6347")),
+            quad([(10.0, 12.0), (22.0, 12.0), (22.0, 17.0), (10.0, 17.0)], col("#b9ab86"), col("#6f6347")),
+        ];
+        batch.shape(depth + 0.15, egui::Shape::Vec(blocks));
+    }
+    // Hoist on the front-right corner: a block rises and falls on a rope.
+    if !o.light && p > 0.07 && p < 0.9 {
+        let post = (hw - 8.0).min(hw * 0.85);
+        let y_top = o.half_d - (zc + 20.0) * 0.72;
+        let t = (1.0 - (time * 1.2 + id).cos()) / 2.0;
+        let ground = o.half_d + 6.0;
+        let by = ground + (y_top + 16.0 - ground) * t;
+        let hoist = vec![
+            line(&[(post, y_top), (post + 24.0, y_top + 3.0)], 3.0, col("#6a4d2d")),
+            line(&[(post + 24.0, y_top + 3.0), (post + 24.0, by)], 1.0, col("#e9ddb8")),
+            quad([(post + 17.0, by), (post + 31.0, by), (post + 31.0, by + 9.0), (post + 17.0, by + 9.0)], col("#c4b690"), col("#5f553d")),
+        ];
+        batch.shape(depth + 0.2, egui::Shape::Vec(hoist));
+    }
+    if p > 0.03 && p < 0.985 {
+        let mut dust: Vec<egui::Shape> = Vec::new();
+        for i in 0..6 {
+            let c = (time * 0.7 + i as f64 / 6.0 + (b.id % 7) as f64 * 0.13).rem_euclid(1.0);
+            let x = (i as f64 * 2.7 + id).sin() * o.half_w * 0.8 + c * 6.0;
+            let y = cut_y - c * 26.0 + 3.0;
+            dust.push(crate::paint::ellipse_shape(view, b.x + x, b.y + y, 3.0 + c * 6.0, 2.0 + c * 3.5, site::dust_color(0.4 * (1.0 - c)), Stroke::NONE));
+        }
+        batch.shape(depth + 0.3, egui::Shape::Vec(dust));
     }
 }
 
