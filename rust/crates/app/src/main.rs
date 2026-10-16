@@ -6,6 +6,7 @@ mod keys;
 mod paint;
 mod render;
 mod view;
+mod gate3d;
 mod audio;
 mod wall3d;
 mod terrain;
@@ -66,7 +67,53 @@ fn parse_args() -> Args {
     a
 }
 
+fn audit() {
+    use cruciata_core::model::*;
+    let atlas = atlas::Atlas::load(assets::assets_dir()).expect("atlas");
+    let mut missing: std::collections::BTreeMap<String, usize> = Default::default();
+    let mut total = 0usize;
+    for level in 0..6 {
+        let mut sim = cruciata_core::sim::Sim::start_level(level, None, "normal", false);
+        sim.state.paused = false;
+        for _ in 0..(20 * 30) {
+            sim.update(cruciata_core::sim::STEP);
+        }
+        let mut check = |k: String| {
+            total += 1;
+            if atlas.frame(&k).is_none() {
+                *missing.entry(k).or_default() += 1;
+            }
+        };
+        for u in &sim.state.units {
+            let k = match u.ty {
+                UType::Ram | UType::Ballista | UType::Trebuchet => keys::siege_machine_key(u, 0.0, u.angle),
+                UType::Pilgrim | UType::Merchant => keys::caravan_frame(u, 0.0, u.angle),
+                _ => keys::person_key(u, u.angle),
+            };
+            check(k);
+        }
+        for b in &sim.state.buildings {
+            if matches!(b.kind, BKind::Wall | BKind::Bastionwall | BKind::Colossus) {
+                continue;
+            }
+            if b.kind == BKind::Greatengine {
+                check(keys::great_engine_key(b, 0.0));
+            } else {
+                check(keys::building_key(b));
+            }
+        }
+    }
+    println!("{} lookups, {} distinct missing", total, missing.len());
+    for (k, n) in missing.iter().take(40) {
+        println!("{n:4} {k}");
+    }
+}
+
 fn main() -> eframe::Result<()> {
+    if std::env::args().any(|a| a == "--audit-keys") {
+        audit();
+        return Ok(());
+    }
     let args = parse_args();
     let size = args.size.unwrap_or((1360.0, 800.0));
     let options = eframe::NativeOptions {

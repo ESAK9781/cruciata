@@ -53,6 +53,7 @@ pub struct App {
     terrain: Option<(u64, TextureHandle)>,
     walls: crate::wall3d::WallCache,
     audio: Option<crate::audio::Audio>,
+    gates: crate::gate3d::GateCache,
     last_volumes: (f32, f32, bool),
 }
 
@@ -187,6 +188,7 @@ impl App {
             terrain: None,
             walls: Default::default(),
             audio: None,
+            gates: Default::default(),
             last_volumes: (-1.0, -1.0, true),
         }
     }
@@ -467,6 +469,7 @@ impl App {
         let shadow_id = self.soft_shadow.id();
         let atlas = &mut self.atlas;
         let walls = &mut self.walls;
+        let gates = &mut self.gates;
         let white = Color32::WHITE;
         let full_uv = Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0));
 
@@ -599,6 +602,10 @@ impl App {
                     }
                     let (width, _h, oy) = building_canvas(b);
                     let key = building_key(b);
+                    if matches!(b.kind, BKind::Gate | BKind::Bastiongate) && b.hp > 0.0 && atlas.frame(&key).is_none() {
+                        wall_shape(&mut batch, &view, gates.get(b), b.x, b.y, depth, 1.0);
+                        continue;
+                    }
                     if b.hp > 0.0 && b.progress < 1.0 {
                         batch.frame_partial(atlas, &view, &key, width / 2.0, oy, b.x, b.y, 1.0, depth, b.progress.max(0.08), Color32::from_white_alpha(230));
                     } else {
@@ -917,7 +924,21 @@ fn wall_shape(batch: &mut Batch, view: &View, m: &crate::wall3d::Model, x: f64, 
         let c = if alpha < 1.0 { f.color.gamma_multiply(alpha) } else { f.color };
         match f.width {
             Some(w) => shapes.push(egui::Shape::line(pts, Stroke::new((w as f64 * view.zoom) as f32, c))),
-            None => shapes.push(egui::Shape::convex_polygon(pts, c, Stroke::new(0.5, c))),
+            None => {
+                let (mut x0, mut y0, mut x1, mut y1) = (f32::MAX, f32::MAX, f32::MIN, f32::MIN);
+                for p in &pts {
+                    x0 = x0.min(p.x);
+                    y0 = y0.min(p.y);
+                    x1 = x1.max(p.x);
+                    y1 = y1.max(p.y);
+                }
+                let area: f32 = pts.iter().enumerate().map(|(i, p)| { let q = pts[(i + 1) % pts.len()]; p.x * q.y - q.x * p.y }).sum::<f32>() * 0.5;
+                if area.abs() < 0.2 {
+                    continue;
+                }
+                let stroke = if (x1 - x0).min(y1 - y0) > 2.5 { Stroke::new(0.5, c) } else { Stroke::NONE };
+                shapes.push(egui::Shape::convex_polygon(pts, c, stroke));
+            }
         }
     }
     batch.shape(depth, egui::Shape::Vec(shapes));
