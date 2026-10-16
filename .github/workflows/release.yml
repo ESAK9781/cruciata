@@ -29,6 +29,11 @@ jobs:
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
+      - name: Linux build dependencies
+        if: matrix.label == 'linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libasound2-dev libxkbcommon-dev libwayland-dev libgl1-mesa-dev libx11-dev
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
         with:
@@ -50,7 +55,7 @@ jobs:
         shell: bash
         working-directory: rust/packaging
         run: |
-          ./stage.sh stage/cruciata ../target/release/cruciata.exe
+          bash ./stage.sh stage/cruciata ../target/release/cruciata.exe
           iscc //DVersion=${{ steps.v.outputs.version }} //DStage=stage\cruciata windows.iss
           mkdir -p ../../out && mv Cruciata-Setup-windows-x64.exe ../../out/
       - name: Package (macOS)
@@ -58,13 +63,13 @@ jobs:
         shell: bash
         run: |
           arch="${{ matrix.label }}"; arch="${arch#macos-}"
-          ./rust/packaging/bundle-macos.sh "$arch" "${{ steps.v.outputs.version }}"
+          bash ./rust/packaging/bundle-macos.sh "$arch" "${{ steps.v.outputs.version }}"
           mkdir -p out && mv Cruciata-macOS-*.dmg out/
       - name: Package (Linux)
         if: matrix.label == 'linux'
         shell: bash
         run: |
-          ./rust/packaging/bundle-linux.sh "${{ steps.v.outputs.version }}"
+          bash ./rust/packaging/bundle-linux.sh "${{ steps.v.outputs.version }}"
           mkdir -p out && mv Cruciata-linux-x64.tar.gz cruciata_amd64.deb out/
       - uses: actions/upload-artifact@v4
         with:
