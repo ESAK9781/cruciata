@@ -207,3 +207,9 @@ Verification: `npx playwright test tests/selection-sites.spec.js tests/colossus.
 
 Muslim units never carry crosses: swordsmen and riders have round shields with a crescent and star, standards and building flags use the crescent, and the legacy chaplain staff uses a sigil. Their atlas keys are versioned (`sword2`, `knight6`) so the corrected frames were baked with `node scripts/bake-art.js --append` (the baker skips runtime-only `site:`/`colossus:` sprites).
 
+
+## Native Rust port (`rust/`, branch `rust-native`)
+
+Workspace crates: `core` (deterministic simulation ported from `src/game.js`, bit-exact JS math in `js.rs`/`fdlibm.rs`), `net` (UDP-broadcast discovery, TCP_NODELAY link, lockstep with 2-step turns and 2-turn input delay, state-hash desync detection) and `app` (eframe/egui client drawing the baked atlas via `assets/atlas/manifest.json`, which `scripts/bake-art.js` now also writes; `rust/tools/export-atlas.js` converts an existing manifest). Player actions are `PlayerCommand`s carrying entity ids, applied with `Sim::run_command(team, local, cmd)`; PvP sets `Settings::pvp` (no enemy AI). Gameplay code must stay deterministic: no libm transcendental calls, no HashMap iteration in simulation paths. Saves are the web JSON (`Sim::save_json`/`restore_json`). Test-only JS hooks `cruciata.recruit/research/place` feed the fixtures made by `rust/tools/gen-commands.js`.
+
+Verification: `cd rust && cargo test --release` (parity, determinism, save, LAN), `cargo build --release -p cruciata`, then `target/release/cruciata --shot out.png --level 0 --seconds 5 --do "b:towncenter"` for screenshots. Status checklist: `rust/PORT.md`.

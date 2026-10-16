@@ -35,11 +35,14 @@ JS implementation ("differential testing").
 See the checklist at the bottom; update it as work lands.
 
 - [x] V8-exact `sin`/`cos`/`atan2`/`hypot`/`round`, mulberry32 (`tests: js::tests`)
-- [ ] data tables (TYPES, BUILDINGS, LEVELS, TECHS)
-- [ ] world generation + level setup (`startLevel`)
-- [ ] navigation, quadtree, fog
-- [ ] simulation (`update`), orders, workers, combat, siege, AI, campaigns
-- [ ] saves (JSON, JS-compatible)
-- [ ] native renderer (tiny-skia + baked atlas), UI, audio, menus
-- [ ] LAN multiplayer (discovery + lockstep)
-- [ ] installers, GitHub releases, install page
+- [x] data tables, world generation (all six chapters exact), navigation, quadtree, fog
+- [x] simulation (`update`), workers, combat, siege, AI, campaigns (long-run AI is statistical, not exact)
+- [x] player commands (`commands.rs`, `orders.rs`, `lockstep::PlayerCommand`); parity: orders, recruit, house placement (`tests/commands_parity.rs`)
+- [x] PvP flag (`Settings::pvp`), `state_hash`, determinism test (`tests/determinism.rs`)
+- [x] saves (`save.rs`, web-compatible JSON; `tests/save_roundtrip.rs`)
+- [x] LAN: `crates/net` discovery, TCP link, lockstep, handshake (`tests/lan.rs`)
+- [~] native client `crates/app`: atlas sprites, HUD, input, minimap, fog work; `menu.rs`/`store.rs` written but not wired
+- [ ] terrain bake, walls/gates, construction sites, rocks/cliffs, Colossus art, particles, corpses
+- [ ] audio, menus wired, LAN lobby flow, result screens, autosave
+- [ ] installers, GitHub Actions matrix, releases, web install page
+- [ ] more JS parity: research, wall upgrades, demolish, scout, gates, wall lines
