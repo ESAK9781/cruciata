@@ -43,6 +43,7 @@ See the checklist at the bottom; update it as work lands.
 - [x] LAN: `crates/net` discovery, TCP link, lockstep, handshake (`tests/lan.rs`)
 - [x] native client `crates/app`: atlas sprites, HUD, input, minimap, fog, menus, saves/autosave, campaign progress, LAN host/join, results, audio
 - [x] baked terrain, runtime curtain walls and gatehouses, scaffolds, corpses/gore, impact smoke
-- [ ] still approximated: rocks/cliffs, ground cover, roads, Colossus (stand-in from great-engine frames), construction-site reveal details, ships/waves, particles/debris
+- [x] rocks, roads, ground tile, water + animated waves, ground cover, sites/cities labels, damage smoke, battle sparks/debris, debug menu
+- [ ] still approximated: Colossus art (stand-in from great-engine frames), construction-site reveal details, siege launch plumes
 - [ ] installers, GitHub Actions matrix, releases, web install page
 - [x] parity: research, wall lines, gate/tower upgrades, demolish, scout (`tests/commands2_parity.rs`)

@@ -55,6 +55,7 @@ pub struct App {
     terrain: Option<(u64, TextureHandle)>,
     rocks: Option<TextureHandle>,
     cover: Vec<crate::extras::Patch>,
+    fx: crate::fx::Fx,
     water: Option<TextureHandle>,
     tile: Option<TextureHandle>,
     walls: crate::wall3d::WallCache,
@@ -235,6 +236,7 @@ impl App {
             terrain: None,
             rocks: None,
             cover: Vec::new(),
+            fx: Default::default(),
             water: None,
             tile: None,
             walls: Default::default(),
@@ -258,6 +260,7 @@ impl App {
     }
 
     fn install(&mut self, g: Game) {
+        self.fx.clear();
         let rect = self.view.rect;
         self.view = View::new(g.sim.geo.w, g.sim.geo.h);
         self.view.rect = rect;
@@ -943,6 +946,7 @@ impl App {
             }
         }
         batch.flush(&painter);
+        self.fx.draw(&cv);
         crate::extras::sites_and_cities(&cv, sim, g, draw_time, |x, y, r, w| health_bar(&cv, x, y, r, w, 0));
         for b in sim.state.buildings.iter().filter(|b| b.kind == BKind::Colossus && b.hp > 0.0 && b.team != me && b.team != 2 && view.on_screen(b.x, b.y, 400.0)) {
             crate::extras::colossus_beacon(&cv, b, time);
@@ -1329,6 +1333,13 @@ impl eframe::App for App {
         }
         self.ui.rings.retain(|r| r.t < 1.0);
         self.ui.impacts.retain(|i| self.ui.clock - i.2 < 1.3);
+        {
+            let g = &self.game;
+            let zoomed = self.view.zoom >= ANIM_SCALE;
+            let (cx, cy) = (self.view.cx, self.view.cy);
+            let near = |x: f64, y: f64| (x - cx).abs() < 2400.0 && (y - cy).abs() < 1800.0 && g.sees(x, y);
+            self.fx.update(&g.sim, if g.paused() || self.ui.show_menu || self.ui.show_debug { 0.0 } else { dt }, near, zoomed);
+        }
         self.ui.shake = (self.ui.shake - dt * 16.0).max(0.0);
         self.ui.prune(&self.game);
         self.fog_tex.update(ctx, &self.game);

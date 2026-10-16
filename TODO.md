@@ -111,6 +111,6 @@ Verification: all 20 campaign-scale checks passed in Chromium and Firefox. Twelv
 - [x] Deterministic core crate with JS parity fixtures (`rust/PORT.md`).
 - [x] Command layer, PvP mode, lockstep net crate, saves.
 - [x] Native client: atlas renderer, HUD, picking, orders, minimap, fog.
-- [ ] Wire menus/store, LAN host/join flow, autosave, results.
-- [ ] Terrain/walls/effects art, audio.
+- [x] Wire menus/store, LAN host/join flow, autosave, results.
+- [x] Terrain/walls/effects art, audio.
 - [ ] Installers, CI release matrix, GitHub releases, install page in the web version.
