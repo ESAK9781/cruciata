@@ -60,7 +60,7 @@ jobs:
         working-directory: rust/packaging
         run: |
           bash ./stage.sh stage/cruciata ../target/release/cruciata.exe
-          "/c/Program Files (x86)/Inno Setup 6/ISCC.exe" //DVersion=${{ steps.v.outputs.version }} //DStage=stage\cruciata windows.iss
+          "/c/Program Files (x86)/Inno Setup 6/ISCC.exe" //DVersion=${{ steps.v.outputs.version }} //DStage=stage/cruciata windows.iss
           mkdir -p ../../out && mv Cruciata-Setup-windows-x64.exe ../../out/
       - name: Package (macOS)
         if: startsWith(matrix.label, 'macos')
