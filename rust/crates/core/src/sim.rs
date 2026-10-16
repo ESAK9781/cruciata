@@ -18,6 +18,21 @@ pub const STEP: f64 = 1.0 / 30.0;
 pub enum Event {
     Toast(String),
     Sound { kind: String, x: Option<f64>, y: Option<f64>, team: Option<i32> },
+    /// A player unit or structure was attacked (front ends decide whether to ping).
+    Alert { x: f64, y: f64, kind: Option<BKind> },
+    /// The game ended (`true` when the player won).
+    Finished(bool),
+    /// Time to write an autosave.
+    Autosave,
+    /// A boulder landed (front ends add smoke, sparks, camera shake).
+    Impact { x: f64, y: f64, heavy: bool },
+    /// Structures `old` were replaced by structure `new` (gate upgrade).
+    Replaced { old: Vec<u32>, new: u32 },
+}
+
+#[derive(Clone, Debug)]
+pub struct Settings {
+    pub gore: bool,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -44,6 +59,15 @@ pub struct Sim {
     pub vision_timer: f64,
     nav_decor_gen: u64,
     pub decor_gen: u64,
+    pub clear_memos: crate::movement::ClearMemos,
+    pub settings: Settings,
+    pub combat_ready: bool,
+    /// Route searches resolved per fixed step.
+    pub nav_jobs_per_step: usize,
+    /// Planned fortifications per enemy base (regenerated deterministically).
+    pub fortifications: HashMap<u32, Vec<crate::build::Plot>>,
+    /// Advance walk-cycle clocks (set by a front end that draws the units).
+    pub visual: bool,
 }
 
 /// A curtain piece as seen by `wallConnections` (walls, gate parts and tower
@@ -85,6 +109,12 @@ impl Sim {
             vision_timer: 0.0,
             nav_decor_gen: u64::MAX,
             decor_gen: 0,
+            clear_memos: HashMap::new(),
+            settings: Settings { gore: true },
+            combat_ready: false,
+            nav_jobs_per_step: 4,
+            fortifications: HashMap::new(),
+            visual: true,
             state,
             geo,
             nav,
@@ -117,6 +147,14 @@ impl Sim {
 
     pub fn land_free(&self, x: f64, y: f64, margin: f64, allow_bridge: bool) -> bool {
         land_free(&self.state, self.geo.w, self.geo.h, x, y, margin, allow_bridge)
+    }
+
+    pub fn cheat_invulnerable(&self) -> bool {
+        self.state.cheats.as_ref().and_then(|c| c.get("invulnerable")).map(|v| v.as_bool().unwrap_or(false) || v.as_f64().map(|n| n != 0.0).unwrap_or(false)).unwrap_or(false)
+    }
+
+    pub fn cheat_reveal(&self) -> bool {
+        self.state.cheats.as_ref().and_then(|c| c.get("reveal")).map(|v| v.as_bool().unwrap_or(false)).unwrap_or(false)
     }
 
     pub fn w(&self) -> f64 {
@@ -167,6 +205,7 @@ impl Sim {
         // Combat structure trees (one per hostile side).
         self.combat_structures.clear();
         self.combat_structure_radius = 0.0;
+        self.combat_ready = true;
         for (i, b) in self.state.buildings.iter().enumerate() {
             if b.hp > 0.0 && b.team != 2 {
                 let pos = match self.combat_structures.iter().position(|(t, _)| *t == b.team) {

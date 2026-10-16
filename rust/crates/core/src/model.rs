@@ -277,6 +277,8 @@ pub struct Unit {
     pub build_queue: Option<Vec<u32>>,
     pub auto_scout: Option<u32>,
     pub fire_target: Option<Pt>,
+    pub evacuated: Option<bool>,
+    pub assault: Option<u32>,
     #[serde(flatten)]
     pub extra: Extra,
 }
@@ -511,6 +513,8 @@ pub struct Site {
     pub name: String,
     pub optional: Option<bool>,
     pub team: Option<i32>,
+    pub claiming_team: Option<i32>,
+    pub claim_progress: Option<f64>,
     #[serde(flatten)]
     pub extra: Extra,
 }
@@ -534,12 +538,36 @@ pub struct City {
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, Default)]
 #[serde(default, rename_all = "camelCase")]
+pub struct ScoutGroup {
+    pub id: u32,
+    pub members: Vec<u32>,
+    pub think: f64,
+    pub retreat_until: f64,
+    pub status: String,
+    pub goal: Option<Pt>,
+    pub formation: Option<u32>,
+    #[serde(flatten)]
+    pub extra: Extra,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, Default)]
+#[serde(default, rename_all = "camelCase")]
+pub struct Post {
+    pub id: u32,
+    pub x: f64,
+    pub y: f64,
+    pub goal: Pt,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, Default)]
+#[serde(default, rename_all = "camelCase")]
 pub struct Stats {
     pub gathered: Resources,
     pub built: f64,
     pub rescued: f64,
     pub siege_hits: f64,
     pub cities_captured: Option<f64>,
+    pub delivered: Option<f64>,
     #[serde(flatten)]
     pub extra: Extra,
 }
@@ -566,8 +594,20 @@ pub struct Enemy {
     pub discovered: bool,
     pub spent: f64,
     pub techs: Option<BTreeMap<String, bool>>,
+    pub intel: Option<BTreeMap<String, f64>>,
+    pub assault: Option<Assault>,
+    pub failures: Option<f64>,
     #[serde(flatten)]
     pub extra: Extra,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, Default)]
+#[serde(default, rename_all = "camelCase")]
+pub struct Assault {
+    pub id: u32,
+    pub size: f64,
+    pub at: f64,
+    pub continue_at: f64,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, Default)]
@@ -584,7 +624,7 @@ pub struct CampaignRules {
     pub interval: f64,
     pub grace: f64,
     pub attacks: f64,
-    pub posts: Vec<Value>,
+    pub posts: Vec<Post>,
     pub think: Option<f64>,
     pub route: Option<Vec<Pt>>,
     #[serde(flatten)]
@@ -641,7 +681,7 @@ pub struct State {
     pub roads: Vec<Vec<Pt>>,
     pub screen_shake: Option<f64>,
     pub gate_timer: Option<f64>,
-    pub scouting_groups: Option<Vec<Value>>,
+    pub scouting_groups: Option<Vec<ScoutGroup>>,
     pub regional_think: Option<f64>,
     pub regions: Value,
     pub city_economies: Value,
