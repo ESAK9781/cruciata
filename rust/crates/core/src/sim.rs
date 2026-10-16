@@ -72,6 +72,8 @@ pub struct Sim {
     pub visual: bool,
     /// Cumulative wall-clock per update phase (profiling aid).
     pub phases: HashMap<&'static str, f64>,
+    /// Debug: attribute unit AI time per unit type in `phases`.
+    pub profile_units: bool,
     pub lap_at: Option<std::time::Instant>,
 }
 
@@ -121,6 +123,7 @@ impl Sim {
             fortifications: HashMap::new(),
             visual: true,
             phases: HashMap::new(),
+            profile_units: false,
             lap_at: None,
             state,
             geo,

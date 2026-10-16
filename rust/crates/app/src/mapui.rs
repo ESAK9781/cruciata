@@ -227,7 +227,9 @@ pub fn draw(ui: &mut egui::Ui, inner: Rect, g: &Game, st: &mut UiState, view: &m
         };
         mp.rect_filled(Rect::from_center_size(at(u.x, u.y), Vec2::splat(2.0)), 0.0, c(k));
     }
-    fog.paint_rect(&mp, mrect);
+    if !g.revealed() {
+        fog.paint_rect(&mp, mrect);
+    }
     for b in g.sim.state.buildings.iter().filter(|b| b.kind == BKind::Colossus && b.hp > 0.0 && (b.team == 0 || b.team == 1)) {
         let pulse = 0.5 + (g.sim.state.time * 4.0).sin() * 0.5;
         let k = if b.team != g.me { c("#ff5a3c") } else { c("#f4d27a") };

@@ -155,6 +155,9 @@ impl App {
                         focus = Some((tc.0 + 700.0, tc.1 - 100.0));
                     }
                 }
+                "cheat" => {
+                    game.sim.cheat(v);
+                }
                 "rock" => {
                     if let Some((_, b)) = crate::terrain::rock_boxes(&game.sim.state).into_iter().nth(v.parse::<usize>().unwrap_or(0)) {
                         focus = Some(((b[0] + b[2]) / 2.0, (b[1] + b[3]) / 2.0));
@@ -1400,6 +1403,7 @@ impl eframe::App for App {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         self.frames += 1;
         if std::env::var_os("CRUCIATA_FPS").is_some() {
+            self.game.sim.profile_units = true;
             let now = std::time::Instant::now();
             let e = self.fps_mark.get_or_insert((now, 0u32));
             e.1 += 1;
@@ -1410,7 +1414,7 @@ impl eframe::App for App {
                 self.slow_frames = 0;
                 let mut ph: Vec<(&&str, &f64)> = self.game.sim.phases.iter().collect();
                 ph.sort_by(|a, b| b.1.partial_cmp(a.1).unwrap_or(std::cmp::Ordering::Equal));
-                let line: Vec<String> = ph.iter().take(7).map(|(k, v)| format!("{k} {:.2}", **v * 1000.0 / n)).collect();
+                let line: Vec<String> = ph.iter().take(12).map(|(k, v)| format!("{k} {:.2}", **v * 1000.0 / n)).collect();
                 eprintln!("sim phases ms/frame: {}", line.join(", "));
                 self.game.sim.phases.clear();
                 eprintln!("worst sim advance {:.1} ms", self.sim_max);

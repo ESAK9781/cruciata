@@ -136,6 +136,8 @@ pub struct Nav {
     chunk_rows: i32,
     chunk_links: Vec<IndexSet<usize>>,
     edge_caches: Vec<Option<Vec<u8>>>,
+    /// Results of the straight-line test between two small leaves, valid until the next rebuild.
+    pair_cache: HashMap<u64, bool, std::hash::BuildHasherDefault<crate::world::BucketHasher>>,
     corridors: IndexMap<String, IndexSet<usize>>,
     path_cache: IndexMap<String, Vec<Pt>>,
     pub pending: IndexMap<String, Job>,
@@ -188,6 +190,7 @@ impl Nav {
             chunk_rows,
             chunk_links: (0..chunks).map(|_| IndexSet::new()).collect(),
             edge_caches: vec![None; chunks],
+            pair_cache: HashMap::default(),
             corridors: IndexMap::new(),
             path_cache: IndexMap::new(),
             pending: IndexMap::new(),
@@ -282,6 +285,7 @@ impl Nav {
 
     /// `rebuild(test, waypoints, regions)`. `regions` is `None` for a full rebuild.
     pub fn rebuild(&mut self, test: Physical, waypoints: &[Pt], regions: Option<&[Area]>) -> bool {
+        self.pair_cache.clear();
         match regions {
             None => self.gap_edges.clear(),
             Some(regions) => {
@@ -987,11 +991,22 @@ impl Nav {
                 let b = self.ly[id] as i32 * cols + self.lx[id] as i32;
                 self.edge_open(a, b, phys)
             } else {
-                self.clear_line(
-                    Pt::new(cxo(self, current) * self.cell, cyo(self, current) * self.cell),
-                    Pt::new(cxo(self, id) * self.cell, cyo(self, id) * self.cell),
-                    phys,
-                )
+                let key = ((current as u64) << 32) | id as u64;
+                match self.pair_cache.get(&key) {
+                    Some(&v) => v,
+                    None => {
+                        let v = self.clear_line(
+                            Pt::new(cxo(self, current) * self.cell, cyo(self, current) * self.cell),
+                            Pt::new(cxo(self, id) * self.cell, cyo(self, id) * self.cell),
+                            phys,
+                        );
+                        if self.pair_cache.len() > 400_000 {
+                            self.pair_cache.clear();
+                        }
+                        self.pair_cache.insert(key, v);
+                        v
+                    }
+                }
             };
             if !open {
                 return;

@@ -924,6 +924,17 @@ impl Sim {
                     _ => self.combat_ai(ui, dt),
                 }
             }
+            if self.profile_units {
+                self.lap(match ty {
+                    UType::Worker => "u-worker",
+                    UType::Civilian => "u-civilian",
+                    UType::Pilgrim | UType::Merchant => "u-caravan",
+                    UType::Sword | UType::Standard | UType::Chaplain => "u-foot",
+                    UType::Archer => "u-archer",
+                    UType::Knight => "u-knight",
+                    _ => "u-siege",
+                });
+            }
         }
         self.lap("units");
         self.crowd_separation(dt);
@@ -1073,8 +1084,11 @@ impl Sim {
     fn update_buildings(&mut self, dt: f64) {
         let d = data();
         let ids: Vec<u32> = self.state.buildings.iter().map(|b| b.id).collect();
-        for id in ids {
-            let Some(mut bi) = self.state.buildings.iter().position(|b| b.id == id) else { continue };
+        for (n, id) in ids.into_iter().enumerate() {
+            // The id list was taken from this vector, so the slot is almost always the same
+            // position: only search when an earlier replacement shifted things.
+            let hint = if self.state.buildings.get(n).map(|b| b.id) == Some(id) { Some(n) } else { None };
+            let Some(mut bi) = hint.or_else(|| self.state.buildings.iter().position(|b| b.id == id)) else { continue };
             // Stale upgrade reservations.
             if let Some(owner_id) = self.state.buildings[bi].upgrade_owner {
                 let ok = match self.get_object(owner_id) {

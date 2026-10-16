@@ -188,6 +188,8 @@ fn main() -> eframe::Result<()> {
     }
     let options = eframe::NativeOptions {
         viewport,
+        // Debug: `CRUCIATA_NOVSYNC=1` uncaps the frame rate to measure real frame cost.
+        vsync: std::env::var_os("CRUCIATA_NOVSYNC").is_none(),
         ..Default::default()
     };
     eframe::run_native("Cruciata", options, Box::new(move |cc| Ok(Box::new(render::App::new(cc, args.clone())))))

@@ -50,6 +50,9 @@ impl std::hash::Hasher for BucketHasher {
             self.0 = (self.0 ^ b as u64).wrapping_mul(0x100000001b3);
         }
     }
+    fn write_u64(&mut self, v: u64) {
+        self.0 = (v ^ (v >> 29)).wrapping_mul(0x9E3779B97F4A7C15);
+    }
     fn write_i32(&mut self, v: i32) {
         self.0 = (v as u32 as u64).wrapping_mul(0x9E3779B97F4A7C15);
     }
