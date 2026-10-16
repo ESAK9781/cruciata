@@ -16,22 +16,22 @@ pub fn col(s: &str) -> Color32 {
                 Color32::from_rgb(d(0), d(1), d(2))
             }
             6 => Color32::from_rgb(v(0), v(2), v(4)),
-            8 => Color32::from_rgba_unmultiplied(v(0), v(2), v(4), v(6)),
+            8 => rgba(v(0), v(2), v(4), v(6)),
             _ => Color32::from_rgb(255, 0, 255),
         };
     }
     if let Some(r) = s.strip_prefix("rgba(").and_then(|r| r.strip_suffix(')')) {
         let p: Vec<f32> = r.split(',').filter_map(|x| x.trim().parse().ok()).collect();
         if p.len() == 4 {
-            return Color32::from_rgba_unmultiplied(p[0] as u8, p[1] as u8, p[2] as u8, (p[3] * 255.0) as u8);
+            return rgba(p[0] as u8, p[1] as u8, p[2] as u8, (p[3] * 255.0) as u8);
         }
     }
     Color32::from_rgb(255, 0, 255)
 }
 
 pub fn with_alpha(c: Color32, a: f32) -> Color32 {
-    let [r, g, b, al] = c.to_srgba_unmultiplied();
-    Color32::from_rgba_unmultiplied(r, g, b, (al as f32 * a.clamp(0.0, 1.0)) as u8)
+    let [r, g, b, al] = c.straight();
+    rgba(r, g, b, (al as f32 * a.clamp(0.0, 1.0)) as u8)
 }
 
 enum Item {
@@ -224,5 +224,35 @@ pub fn ellipse_shape(view: &View, x: f64, y: f64, rx: f64, ry: f64, fill: Color3
         Shape::line(p, stroke)
     } else {
         Shape::Path(epaint::PathShape { points: pts, closed: true, fill, stroke: stroke.into() })
+    }
+}
+
+/// Straight-alpha colour to egui's premultiplied form, blended in gamma space
+/// like a 2D canvas (egui's own constructor premultiplies in linear light,
+/// which makes every translucent colour paler than the web version).
+pub fn rgba(r: u8, g: u8, b: u8, a: u8) -> Color32 {
+    let m = |v: u8| ((v as u32 * a as u32 + 127) / 255) as u8;
+    Color32::from_rgba_premultiplied(m(r), m(g), m(b), a)
+}
+
+/// Build a texture image from straight-alpha RGBA bytes (canvas-style blending).
+pub fn image_from_straight(size: [usize; 2], rgba_bytes: &[u8]) -> eframe::egui::ColorImage {
+    let pixels = rgba_bytes.chunks_exact(4).map(|p| rgba(p[0], p[1], p[2], p[3])).collect();
+    eframe::egui::ColorImage { size, pixels }
+}
+
+pub trait Straight {
+    /// Straight-alpha bytes, inverse of `rgba`.
+    fn straight(&self) -> [u8; 4];
+}
+
+impl Straight for Color32 {
+    fn straight(&self) -> [u8; 4] {
+        let a = self.a();
+        if a == 0 {
+            return [0, 0, 0, 0];
+        }
+        let u = |v: u8| ((v as u32 * 255 + a as u32 / 2) / a as u32).min(255) as u8;
+        [u(self.r()), u(self.g()), u(self.b()), a]
     }
 }

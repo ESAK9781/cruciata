@@ -58,8 +58,6 @@ pub fn make_cover(sim: &Sim, biome: i32) -> Vec<Patch> {
             let angle = rnd.next() * std::f64::consts::TAU;
             let r = rnd.next().sqrt();
             let (px, py) = (x + angle.cos() * rx * r, y + angle.sin() * ry * r);
-            let height = 6.0 + rnd.next() * if kind == 2 { 20.0 } else { 13.0 };
-            let phase = rnd.next() * 6.28;
             if !sim.ground_free(px, py, 6.0) {
                 continue;
             }
@@ -68,6 +66,8 @@ pub fn make_cover(sim: &Sim, biome: i32) -> Vec<Patch> {
             if on_road {
                 continue;
             }
+            let height = 6.0 + rnd.next() * if kind == 2 { 20.0 } else { 13.0 };
+            let phase = rnd.next() * 6.28;
             stems.push(Stem { x: px, y: py, height, shade: (j % 3) as u8, phase });
         }
         if stems.len() > 30 {
@@ -93,9 +93,16 @@ pub fn draw_cover(cv: &Canvas, p: &Patch, actors: &[(f64, f64, f64, u32)], time:
         return;
     }
     if p.kind == 3 {
-        for k in 0..4 {
-            let f = 1.0 - k as f64 * 0.22;
-            cv.ellipse(p.x, p.y, p.rx * f, p.ry * f, col(["#baa14a18", "#baa14a22", "#baa14a2c", "#baa14a38"][k]));
+        // Radial wash: 0x55 at the centre, 0x28 at 70 percent, clear at the rim.
+        let target = |f: f64| if f < 0.7 { 0.333 - (0.333 - 0.157) * f / 0.7 } else { 0.157 * (1.0 - f) / 0.3 };
+        const N: usize = 16;
+        let mut prev = 0.0f64;
+        for k in 0..N {
+            let f = 1.0 - k as f64 / N as f64;
+            let want = target(f - 0.5 / N as f64).clamp(0.0, 0.99);
+            let a = (1.0 - (1.0 - want) / (1.0 - prev)).clamp(0.0, 1.0);
+            prev = want.max(prev);
+            cv.ellipse(p.x, p.y, p.rx * f, p.ry * f, with_alpha(col("#baa14a"), a as f32));
         }
     }
     let colors = match p.kind {

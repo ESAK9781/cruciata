@@ -1,4 +1,5 @@
 #![cfg_attr(all(windows, not(debug_assertions)), windows_subsystem = "windows")]
+use crate::paint::Straight as _;
 mod assets;
 mod atlas;
 mod cluster;
@@ -162,6 +163,13 @@ fn main() -> eframe::Result<()> {
     if let Some(i) = std::env::args().position(|a| a == "--make-icons") {
         let out = std::env::args().nth(i + 1).unwrap_or_else(|| "icons".into());
         make_icons(std::path::Path::new(&out));
+        return Ok(());
+    }
+    if let Some(i) = std::env::args().position(|a| a == "--dump-ground") {
+        let out = std::env::args().nth(i + 1).unwrap_or_else(|| "ground.png".into());
+        let t = terrain::ground_tile(0);
+        let raw: Vec<u8> = t.pixels.iter().flat_map(|p| p.straight()).collect();
+        image::RgbaImage::from_raw(512, 512, raw).unwrap().save(out).unwrap();
         return Ok(());
     }
     if std::env::args().any(|a| a == "--audit-keys") {

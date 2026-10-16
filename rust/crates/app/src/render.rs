@@ -1,5 +1,6 @@
 //! The application shell and the world renderer.
 
+use crate::paint::Straight;
 use crate::assets::assets_dir;
 use crate::atlas::Atlas;
 use crate::cluster::{clustered, Clusters};
@@ -85,7 +86,7 @@ fn make_shadow(ctx: &egui::Context) -> TextureHandle {
             let d = dx * dx + dy * dy;
             if d <= 1.0 {
                 let edge = ((1.0 - d.sqrt()) * 4.0).clamp(0.0, 1.0);
-                px[y * w + x] = Color32::from_rgba_unmultiplied(0x25, 0x33, 0x23, (0.19 * 255.0 * edge) as u8);
+                px[y * w + x] = crate::paint::rgba(0x25, 0x33, 0x23, (0.19 * 255.0 * edge) as u8);
             }
         }
     }
@@ -422,14 +423,14 @@ impl App {
         if matches!(&self.terrain, Some((k, _)) if *k == key) {
             return;
         }
-        let coast = s.mode != "quickmatch";
+        let coast = true;
         let (mut img, water) = crate::terrain::bake(s, self.game.sim.geo.w, self.game.sim.geo.h, self.biome(), coast);
         self.water = Some(ctx.load_texture("water", water, egui::TextureOptions::LINEAR));
         let repeat = egui::TextureOptions { wrap_mode: egui::TextureWrapMode::Repeat, ..egui::TextureOptions::LINEAR };
         self.tile = Some(ctx.load_texture("ground-tile", crate::terrain::ground_tile(self.biome()), repeat));
         if data().levels[s.level].kind == "survival" {
             for p in img.pixels.iter_mut() {
-                let [r, g, b, _] = p.to_srgba_unmultiplied();
+                let [r, g, b, _] = p.straight();
                 let mix = |c: u8, t: u8| (c as f32 * (1.0 - 0.2) + t as f32 * 0.2) as u8;
                 *p = Color32::from_rgb(mix(r, 0xdc), mix(g, 0xe2), mix(b, 0xcc));
             }
@@ -562,14 +563,14 @@ impl App {
                     y += 12.0;
                 }
                 let a = ((phase / 190.0 * std::f64::consts::PI).sin() * 0.28 * 255.0) as u8;
-                seg(pts, 0.7 + phase / 150.0, Color32::from_rgba_unmultiplied(220, 244, 226, a));
+                seg(pts, 0.7 + phase / 150.0, crate::paint::rgba(220, 244, 226, a));
             }
             let mut yy = (y0 / 75.0).floor() * 75.0;
             while yy < y1 {
                 let mut xx = (view.x.max(0.0) / 100.0).floor() * 100.0;
                 while xx < (view.x + view.w).min(coast_x(yy) - 50.0) {
                     let dy = (xx * 0.03 + time).sin() * 3.0;
-                    seg(vec![view.to_screen(xx, yy + dy), view.to_screen(xx + 20.0, yy + dy)], 0.8, Color32::from_rgba_unmultiplied(0x72, 0xb8, 0xbc, 0x44));
+                    seg(vec![view.to_screen(xx, yy + dy), view.to_screen(xx + 20.0, yy + dy)], 0.8, crate::paint::rgba(0x72, 0xb8, 0xbc, 0x44));
                     xx += 100.0;
                 }
                 yy += 75.0;
@@ -590,14 +591,14 @@ impl App {
                             view.to_screen(x + 3.0, yy + 25.0),
                         ],
                         1.0,
-                        Color32::from_rgba_unmultiplied(0xd3, 0xed, 0xe5, 0x44),
+                        crate::paint::rgba(0xd3, 0xed, 0xe5, 0x44),
                     );
                     y += 90.0;
                 }
             }
             for side in [-1.0f64, 1.0] {
                 let mut pts: Vec<egui::Pos2> = Vec::new();
-                let bank = Color32::from_rgba_unmultiplied(0xd8, 0xdf, 0xba, 0xaa);
+                let bank = crate::paint::rgba(0xd8, 0xdf, 0xba, 0xaa);
                 let mut y = (y0 / 12.0).floor() * 12.0;
                 while y < y1 + 12.0 {
                     if (y - by).abs() < 53.0 {
@@ -629,6 +630,13 @@ impl App {
             let tl = view.to_screen(0.0, 0.0);
             let br = view.to_screen(self.game.sim.geo.w, self.game.sim.geo.h);
             painter.image(t.id(), Rect::from_min_max(tl, br), Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)), Color32::WHITE);
+            // Quickmatch (no clipped sea) lets the ground pattern lie over the water, as on the web.
+            let under_tile = self.game.sim.state.mode == "quickmatch";
+            if under_tile {
+                if let Some(wt) = &self.water {
+                    painter.image(wt.id(), Rect::from_min_max(tl, br), Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)), Color32::WHITE);
+                }
+            }
             // Ground pattern over the land (repeats every 512 world units).
             if let Some(tile) = &self.tile {
                 let (x0, y0) = (view.x.max(0.0), view.y.max(0.0));
@@ -640,11 +648,27 @@ impl App {
                     painter.image(tile.id(), Rect::from_min_max(a, b), uv, Color32::WHITE);
                 }
             }
+            // Roads are drawn live, crisp at every zoom (web: 38/33 wide strokes plus ruts).
+            for road in &self.game.sim.state.roads {
+                if road.len() < 2 || !road.iter().any(|p| view.on_screen(p.x, p.y, 400.0)) {
+                    continue;
+                }
+                let line = |off: f64, width: f64, c: Color32| {
+                    let pts: Vec<egui::Pos2> = road.iter().map(|p| view.to_screen(p.x + off, p.y)).collect();
+                    painter.add(egui::Shape::line(pts, egui::Stroke::new((width * view.zoom).max(0.5) as f32, c)));
+                };
+                line(0.0, 38.0, crate::paint::col("#827761"));
+                line(0.0, 33.0, crate::paint::col("#a89b7e"));
+                line(-7.0, 0.8, crate::paint::col("#8d78493d"));
+                line(7.0, 0.8, crate::paint::col("#8d78493d"));
+            }
             if let Some(rk) = &self.rocks {
                 painter.image(rk.id(), Rect::from_min_max(tl, br), Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)), Color32::WHITE);
             }
-            if let Some(wt) = &self.water {
-                painter.image(wt.id(), Rect::from_min_max(tl, br), Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)), Color32::WHITE);
+            if !under_tile {
+                if let Some(wt) = &self.water {
+                    painter.image(wt.id(), Rect::from_min_max(tl, br), Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)), Color32::WHITE);
+                }
             }
             if view.zoom >= ANIM_SCALE {
                 self.draw_water_motion(&painter, &view);
@@ -861,7 +885,7 @@ impl App {
                 let depth = b.y + b.h * 0.3 + 0.5;
                 let mut shapes: Vec<egui::Shape> = Vec::new();
                 let wood = col("#8a6a3c");
-                let dirt = Color32::from_rgba_unmultiplied(120, 100, 70, 90);
+                let dirt = crate::paint::rgba(120, 100, 70, 90);
                 shapes.push(crate::paint::ellipse_shape(&view, b.x, b.y, hx + 6.0, (hy + 6.0) * 0.72, dirt, Stroke::NONE));
                 for (cx, cy) in [(-hx, -hy), (hx, -hy), (-hx, hy), (hx, hy)] {
                     let base = view.to_screen(b.x + cx, b.y + cy * 0.72);

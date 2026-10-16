@@ -1,6 +1,7 @@
 //! Look of the original interface: fonts, palette, gradients, ridged frames
 //! and the hand-painted buttons the web version styled with CSS.
 
+use crate::paint::Straight;
 use crate::paint::col;
 use eframe::egui::{self, epaint, Align2, Color32, FontData, FontDefinitions, FontFamily, FontId, Mesh, Pos2, Rect, Response, Sense, Shape, Stroke, TextureHandle, Vec2};
 use std::collections::HashMap;
@@ -78,8 +79,8 @@ pub fn gradient_h(painter: &egui::Painter, rect: Rect, left: Color32, right: Col
 
 /// `border: Npx ridge`: light outer half, dark inner half.
 pub fn ridge(painter: &egui::Painter, rect: Rect, width: f32, color: Color32) {
-    let [r, g, b, a] = color.to_srgba_unmultiplied();
-    let dark = |f: f32| Color32::from_rgba_unmultiplied((r as f32 * f) as u8, (g as f32 * f) as u8, (b as f32 * f) as u8, a);
+    let [r, g, b, a] = color.straight();
+    let dark = |f: f32| crate::paint::rgba((r as f32 * f) as u8, (g as f32 * f) as u8, (b as f32 * f) as u8, a);
     let h = width / 2.0;
     painter.rect_stroke(rect.shrink(h / 2.0), 0.0, Stroke::new(h, dark(1.12)));
     painter.rect_stroke(rect.shrink(h * 1.5), 0.0, Stroke::new(h, dark(0.62)));
@@ -197,7 +198,7 @@ fn render_svg(svg: &str, px: u32) -> Option<egui::ColorImage> {
         .iter()
         .map(|p| {
             let c = p.demultiply();
-            Color32::from_rgba_unmultiplied(c.red(), c.green(), c.blue(), c.alpha())
+            crate::paint::rgba(c.red(), c.green(), c.blue(), c.alpha())
         })
         .collect();
     Some(egui::ColorImage { size: [px as usize, px as usize], pixels })
@@ -210,7 +211,7 @@ fn render_svg_wh(svg: &str, w: u32, h: u32) -> Option<egui::ColorImage> {
     resvg::render(&tree, resvg::tiny_skia::Transform::from_scale(w as f32 / s.width(), h as f32 / s.height()), &mut pm.as_mut());
     let pixels = pm.pixels().iter().map(|p| {
         let c = p.demultiply();
-        Color32::from_rgba_unmultiplied(c.red(), c.green(), c.blue(), c.alpha())
+        crate::paint::rgba(c.red(), c.green(), c.blue(), c.alpha())
     }).collect();
     Some(egui::ColorImage { size: [w as usize, h as usize], pixels })
 }
@@ -252,14 +253,14 @@ impl Icons {
 
 /// Soft radial glow (`radial-gradient(color, transparent)`).
 pub fn radial_glow(painter: &egui::Painter, center: Pos2, radius: f32, color: Color32) {
-    let [r, g, b, a] = color.to_srgba_unmultiplied();
+    let [r, g, b, a] = color.straight();
     let mut m = Mesh::default();
     let v = |p: Pos2, c: Color32| epaint::Vertex { pos: p, uv: epaint::WHITE_UV, color: c };
-    m.vertices.push(v(center, Color32::from_rgba_unmultiplied(r, g, b, a)));
+    m.vertices.push(v(center, crate::paint::rgba(r, g, b, a)));
     let n = 64;
     for i in 0..n {
         let t = i as f32 / n as f32 * std::f32::consts::TAU;
-        m.vertices.push(v(center + Vec2::new(t.cos(), t.sin()) * radius, Color32::from_rgba_unmultiplied(r, g, b, 0)));
+        m.vertices.push(v(center + Vec2::new(t.cos(), t.sin()) * radius, crate::paint::rgba(r, g, b, 0)));
     }
     for i in 0..n {
         m.indices.extend_from_slice(&[0, 1 + i as u32, 1 + ((i + 1) % n) as u32]);

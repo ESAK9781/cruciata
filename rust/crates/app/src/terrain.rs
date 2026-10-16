@@ -2,6 +2,7 @@
 //! (`Art.terrain` plus the static parts of `terrainDetails`), drawn once with
 //! tiny-skia and uploaded as one texture.
 
+use crate::paint::Straight;
 use crate::paint::col;
 use cruciata_core::js::{cos, sin, Seeded};
 use cruciata_core::model::State;
@@ -15,7 +16,7 @@ struct Cv {
 }
 
 fn color(c: &str) -> Color {
-    let [r, g, b, a] = col(c).to_srgba_unmultiplied();
+    let [r, g, b, a] = col(c).straight();
     Color::from_rgba8(r, g, b, a)
 }
 
@@ -159,7 +160,7 @@ pub fn bake(state: &State, w: f64, h: f64, level: i32, coast: bool) -> (ColorIma
             .iter()
             .map(|p| {
                 let c = p.demultiply();
-                eframe::egui::Color32::from_rgba_unmultiplied(c.red(), c.green(), c.blue(), c.alpha())
+                crate::paint::rgba(c.red(), c.green(), c.blue(), c.alpha())
             })
             .collect();
         ColorImage { size: [pw as usize, ph as usize], pixels: px }
@@ -202,17 +203,6 @@ pub fn bake_rocks(state: &State, w: f64, h: f64) -> ColorImage {
     let (pw, ph) = ((w * scale).ceil() as u32, (h * scale).ceil() as u32);
     let mut cv = Cv { pm: Pixmap::new(pw.max(1), ph.max(1)).unwrap(), s: scale as f32 };
     let sk = Transform::from_scale(scale as f32, scale as f32);
-    for road in &state.roads {
-        let pts: Vec<(f64, f64)> = road.iter().map(|p| (p.x, p.y)).collect();
-        if pts.len() < 2 {
-            continue;
-        }
-        cv.line(&pts, 38.0, "#827761");
-        cv.line(&pts, 33.0, "#a89b7e");
-        for off in [-7.0, 7.0] {
-            cv.line(&pts.iter().map(|&(x, y)| (x + off, y)).collect::<Vec<_>>(), 0.8, "#8d78493d");
-        }
-    }
     for f in state.terrain_features.iter().filter(|f| f.kind == "rockmass" && f.forest != Some(true)) {
         let Some(path) = rock_path(&f.contours) else { continue };
         let rim = match f.biome as i32 {
@@ -232,7 +222,7 @@ pub fn bake_rocks(state: &State, w: f64, h: f64) -> ColorImage {
     }
     let px: Vec<eframe::egui::Color32> = cv.pm.pixels().iter().map(|p| {
         let c = p.demultiply();
-        eframe::egui::Color32::from_rgba_unmultiplied(c.red(), c.green(), c.blue(), c.alpha())
+        crate::paint::rgba(c.red(), c.green(), c.blue(), c.alpha())
     }).collect();
     ColorImage { size: [pw as usize, ph as usize], pixels: px }
 }
@@ -259,12 +249,8 @@ pub fn ground_tile(level: i32) -> ColorImage {
                 }
             }
         };
-        let [rr, gg, bb, aa] = col(shade).to_srgba_unmultiplied();
-        // Radial fade as concentric rings.
-        for k in 0..6 {
-            let f = 1.0 - k as f64 / 6.0;
-            cv.ellipse(x, y, r * f, r * f, &format!("#{:02x}{:02x}{:02x}{:02x}", rr, gg, bb, (aa as f64 / 6.0).max(1.0) as u8));
-        }
+        let [rr, gg, bb, aa] = col(shade).straight();
+        fade(&mut cv, x, y, r, [rr, gg, bb], aa as f64 / 255.0);
         for _ in 0..18 {
             let a = rand() * std::f64::consts::TAU;
             let d = rand() * r;
@@ -293,7 +279,29 @@ pub fn ground_tile(level: i32) -> ColorImage {
     }
     let px: Vec<eframe::egui::Color32> = cv.pm.pixels().iter().map(|p| {
         let c = p.demultiply();
-        eframe::egui::Color32::from_rgba_unmultiplied(c.red(), c.green(), c.blue(), c.alpha())
+        crate::paint::rgba(c.red(), c.green(), c.blue(), c.alpha())
     }).collect();
     ColorImage { size: [512, 512], pixels: px }
+}
+
+/// Radial gradient from `a0` at the centre to nothing at `r`, built from
+/// concentric ellipses whose alphas composite to the linear profile.
+fn fade(cv: &mut Cv, x: f64, y: f64, r: f64, rgb: [u8; 3], a0: f64) {
+    profile(cv, x, y, r, r, rgb, |f| a0 * (1.0 - f));
+}
+
+pub fn profile(cv: &mut Cv, x: f64, y: f64, rx: f64, ry: f64, rgb: [u8; 3], target: impl Fn(f64) -> f64) {
+    const N: usize = 16;
+    let mut prev = 0.0f64;
+    for k in 0..N {
+        let f = 1.0 - k as f64 / N as f64;
+        let want = target(f - 0.5 / N as f64).clamp(0.0, 0.99);
+        let a = (1.0 - (1.0 - want) / (1.0 - prev)).clamp(0.0, 1.0);
+        prev = want.max(prev);
+        let al = (a * 255.0).round() as u8;
+        if al == 0 {
+            continue;
+        }
+        cv.ellipse(x, y, rx * f, ry * f, &format!("#{:02x}{:02x}{:02x}{:02x}", rgb[0], rgb[1], rgb[2], al));
+    }
 }

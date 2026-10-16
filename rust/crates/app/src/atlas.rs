@@ -67,7 +67,7 @@ impl Atlas {
                 if let Ok(img) = image::open(&path) {
                     let rgba = img.to_rgba8();
                     let size = [rgba.width() as usize, rgba.height() as usize];
-                    let _ = done_tx.send((page, ColorImage::from_rgba_unmultiplied(size, rgba.as_raw())));
+                    let _ = done_tx.send((page, crate::paint::image_from_straight(size, rgba.as_raw())));
                 }
             });
         }

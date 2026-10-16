@@ -209,7 +209,7 @@ impl Menu {
             p.rect_filled(r, 0.0, col("#0c171c"));
             // Warm glow at 80% / 35% fading out by 55% of the width.
             let glow = Pos2::new(r.min.x + r.width() * 0.8, r.min.y + r.height() * 0.35);
-            radial_glow(&p, glow, r.width() * 0.55, Color32::from_rgba_unmultiplied(134, 92, 41, 48));
+            radial_glow(&p, glow, r.width() * 0.55, crate::paint::rgba(134, 92, 41, 48));
             let left = (((r.width() - 1300.0).max(0.0)) / 2.0 + 75.0).max(40.0);
             let x0 = r.min.x + left;
             icons.draw(&p, "cross-gold", Rect::from_min_size(Pos2::new(x0, r.min.y + 40.0), Vec2::splat(65.0)));

@@ -32,7 +32,7 @@ impl FogTex {
         let mut px = Vec::with_capacity(n);
         for i in 0..n {
             let a = if fog.visible[i] != 0 { 0 } else if fog.explored[i] != 0 { 155 } else { 255 };
-            px.push(Color32::from_rgba_unmultiplied(8, 16, 23, a));
+            px.push(crate::paint::rgba(8, 16, 23, a));
         }
         let img = ColorImage { size: [fog.cols as usize, fog.rows as usize], pixels: px };
         match &mut self.tex {
