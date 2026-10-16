@@ -252,7 +252,7 @@ fn build() -> Data {
         great.damage = Some(650.0);
         great.description = Some("Massive permanent counterweight engine. Villagers build it on site. Range 320-2200; huge blasts also hit nearby friendly troops.");
         b.push((BKind::Greatengine, great));
-        let mut col = bs("Colossal siege engine", c(&[(Wood, 6000.0), (Stone, 3500.0), (Gold, 2500.0)]), 400.0, 345.0, 1300.0, 2400.0);
+        let mut col = bs("Colossal siege engine", c(&[(Wood, 10000.0), (Stone, 6000.0), (Gold, 4500.0)]), 400.0, 345.0, 1300.0, 3600.0);
         col.damage = Some(650.0);
         col.reload = Some(18.0);
         col.description = Some("Only one per side. Unlimited range beyond a 700-unit minimum: shots scatter further the farther they fly. Never fires on its own. The enemy is told the moment it is begun.");
@@ -340,8 +340,8 @@ fn build() -> Data {
         ty: None,
         rank: 0,
         producer: BKind::Siegeworkshop,
-        cost: Cost::of(&[(Wood, 1000.0), (Stone, 800.0), (Gold, 1100.0)]),
-        time: 150.0,
+        cost: Cost::of(&[(Wood, 2200.0), (Stone, 1600.0), (Gold, 2400.0)]),
+        time: 300.0,
         desc: "Requires Great engines. Unlocks the Colossal siege engine: unlimited range, one per side.".into(),
         unlock: Some(BKind::Colossus),
         requires: Some("engineworks"),

@@ -435,7 +435,7 @@ impl Sim {
                 let c = &sim.state.buildings[ci];
                 (c.id, c.x, c.y, c.fortress_shape.clone())
             };
-            let plots = sim.defensive_plots(cid, cx, cy, shape.as_ref(), 896.0);
+            let plots = sim.defensive_plots(cid, cx, cy, shape.as_ref(), 896.0, false);
             for p in &plots {
                 let mut b = sim.make_from_plot(p, 1, 1.0);
                 b.defence = Some(true);
@@ -644,7 +644,7 @@ impl Sim {
             b.city = Some(id);
             self.state.buildings.push(b);
         }
-        let plots = self.defensive_plots(city.id, city.x, city.y, None, 960.0);
+        let plots = self.defensive_plots(city.id, city.x, city.y, None, 960.0, false);
         let sel: Vec<Plot> = plots.into_iter().filter(|p| !self.near_bridge(Pt::new(p.b.x, p.b.y), 200.0)).collect();
         for p in &sel {
             let mut b = self.make_from_plot(p, 3, 1.0);
@@ -1356,9 +1356,19 @@ impl Sim {
                 out.push(n);
             }
         }
+        let mut placed: Vec<usize> = Vec::new();
         for n in out {
             if !self.state.nodes.iter().any(|m| dist(Pt::new(m.x, m.y), Pt::new(n.x, n.y)) < 40.0) {
                 self.state.nodes.push(n);
+                placed.push(self.state.nodes.len() - 1);
+            }
+        }
+        // Trees deeper inside the forest are harvested through the rim: a dry rim
+        // deposit refills from the trees behind it, so every tree can be cut.
+        if !placed.is_empty() {
+            let share = ((mass.tiles.len() as f64 * 660.0 - placed.len() as f64 * 660.0).max(0.0) / placed.len() as f64).floor();
+            for i in placed {
+                self.state.nodes[i].extra.insert("reserve".into(), serde_json::json!(share));
             }
         }
     }

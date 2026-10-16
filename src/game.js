@@ -319,11 +319,11 @@
   // map. Only one per side; it fires only where ordered.
   BUILDINGS.colossus = {
     name: "Colossal siege engine",
-    cost: { wood: 6000, stone: 3500, gold: 2500 },
+    cost: { wood: 10000, stone: 6000, gold: 4500 },
     w: 400,
     h: 345,
     hp: 1300,
-    time: 2400,
+    time: 3600,
     damage: 650,
     reload: 18,
     description:
@@ -387,8 +387,8 @@
     unlock: "colossus",
     requires: "engineworks",
     producer: "siegeworkshop",
-    cost: { wood: 1000, stone: 800, gold: 1100 },
-    time: 150,
+    cost: { wood: 2200, stone: 1600, gold: 2400 },
+    time: 300,
     desc: "Requires Great engines. Unlocks the Colossal siege engine: unlimited range, one per side.",
   };
   const UNLOCKS = { greatengine: "engineworks", colossus: "colossal" };
@@ -1249,8 +1249,22 @@
         out.push(n);
       }
     // Keep the rim loose enough to walk beside: skip neighbours closer than 40.
+    const placed = [];
     for (const n of out)
-      if (!state.nodes.some((m) => distance(m, n) < 40)) state.nodes.push(n);
+      if (!state.nodes.some((m) => distance(m, n) < 40)) {
+        state.nodes.push(n);
+        placed.push(n);
+      }
+    // Trees deeper inside the forest are harvested through the rim: when a
+    // rim deposit runs dry it refills from the trees standing behind it, so
+    // every tree of the forest can be cut.
+    if (placed.length) {
+      const share = Math.floor(
+        Math.max(0, mass.tiles.length * 660 - placed.length * 660) /
+          placed.length,
+      );
+      for (const n of placed) n.reserve = share;
+    }
   }
   function makeRockClusters(random) {
     const cell = 64,
@@ -6632,8 +6646,29 @@
               if (groundFree(p.x, p.y, 6)) candidates.push(p);
             }
           }
-          candidates.sort((a, c) => distance(u, a) - distance(u, c));
-          const point = candidates.find((p) => routePossible(u, p));
+          // Spread the crew evenly around the work: each builder takes its own
+          // share of the perimeter instead of all queueing at the nearest side.
+          const bearing = (q) => Math.atan2(q.y - b.y, q.x - b.x);
+          candidates.sort((a, c) => bearing(a) - bearing(c));
+          const crew = state.units
+              .filter(
+                (w) =>
+                  w.team === u.team &&
+                  w.hp > 0 &&
+                  w.job?.kind === job.kind &&
+                  w.job.target === b.id,
+              )
+              .sort((a, c) => a.id - c.id),
+            slot = Math.max(
+              0,
+              crew.findIndex((w) => w.id === u.id),
+            ),
+            first = Math.floor((slot * candidates.length) / (crew.length || 1));
+          let point = null;
+          for (let k = 0; k < candidates.length && !point; k++) {
+            const q = candidates[(first + k) % candidates.length];
+            if (routePossible(u, q)) point = q;
+          }
           contact = u.buildContact = point
             ? {
                 ...point,
@@ -6884,7 +6919,12 @@
       job.phase = "harvest";
       {
         target.remaining = Math.max(0, target.remaining - amount);
-        if (!target.remaining && target.kind !== "food") state.navDirty = true;
+        if (!target.remaining && target.reserve > 0) {
+          const refill = Math.min(target.max || 660, target.reserve);
+          target.remaining = refill;
+          target.reserve -= refill;
+        } else if (!target.remaining && target.kind !== "food")
+          state.navDirty = true;
       }
       if (u.carry >= capacity - 0.001 || target.remaining === 0) {
         job.phase = "deliver";
@@ -7704,7 +7744,10 @@
       grace: 180,
     },
   };
-  function defensivePlots(base, radius = 640) {
+  // With `adaptive`, the ring follows the land: it swells to enclose nearby
+  // resource patches the enemy has seen, shrinks inland from water and rock,
+  // and leaves out stretches where the terrain already forms the barrier.
+  function defensivePlots(base, radius = 640, adaptive = false) {
     const plots = [],
       seen = new Set(),
       snap = (n) => Math.round(n / 32) * 32;
@@ -7718,6 +7761,33 @@
       const ring = Array.from({ length: 16 }, (_, i) => {
         const angle = (i * Math.PI) / 8 + phase,
           bulge = i % 4 === 0 ? 1.13 : i % 2 ? 0.94 : 1.04;
+        if (adaptive) {
+          const r0 = radius * scale * bulge;
+          let r = r0;
+          for (const n of state.nodes) {
+            if (!(n.remaining > 0) || !enemyFog.remembers(n)) continue;
+            const d = distance(base, n),
+              turn = Math.atan2(n.y - base.y, n.x - base.x) - angle;
+            if (
+              d > r0 * 0.7 &&
+              d < r0 * 1.45 &&
+              Math.abs(Math.atan2(Math.sin(turn), Math.cos(turn))) < 0.35
+            )
+              r = Math.max(r, Math.min(d + 150, r0 * 1.5));
+          }
+          const reach = (q) =>
+            landFree(
+              clamp(base.x + Math.cos(angle) * q, 128, W - 128),
+              clamp(base.y + Math.sin(angle) * q, 128, H - 128),
+              24,
+            );
+          while (r > r0 * 0.55 && !reach(r)) r -= 48;
+          return {
+            x: snap(clamp(base.x + Math.cos(angle) * r, 128, W - 128)),
+            y: snap(clamp(base.y + Math.sin(angle) * r, 128, H - 128)),
+            blocked: !reach(r),
+          };
+        }
         return {
           x: snap(
             clamp(
@@ -7747,8 +7817,9 @@
       });
       for (let edge = 0; edge < ring.length; edge++) {
         const a = ring[edge],
-          b = ring[(edge + 1) % ring.length],
-          points = wallLine(a, b),
+          b = ring[(edge + 1) % ring.length];
+        if (a.blocked && b.blocked) continue;
+        const points = wallLine(a, b),
           angle = Math.atan2(b.y - a.y, b.x - a.x),
           middle = Math.floor(points.length / 2);
         for (let i = 0; i < points.length; i++) {
@@ -7825,6 +7896,8 @@
         state.mode !== "quickmatch" && base.id === state.capitals?.enemy
           ? 896
           : 640,
+        // The starting fortress already stands; later bases follow the land.
+        base.id !== (state.capitals?.enemy ?? state.buildings[1]?.id),
       ),
     };
     const fortification = ai.fortifications[base.id];
@@ -7850,6 +7923,13 @@
       )
         continue;
       if (!afford(BUILDINGS[p.kind].cost, 1)) continue;
+      if (
+        ai.savingGoal &&
+        !Object.entries(BUILDINGS[p.kind].cost).every(
+          ([r, n]) => stock(1)[r] - n >= (ai.savingGoal[r] || 0),
+        )
+      )
+        continue;
       const spec = BUILDINGS[p.kind];
       if (
         !validSite(
@@ -7913,6 +7993,17 @@
       (b) => b.team === 0 && b.hp > 0,
     );
     ai.discovered = known.length > 0;
+    // The goal the treasury is being kept for (siege research, great engines,
+    // the Colossus); ordinary spending may only use what exceeds it.
+    let saving = null;
+    function spendable(cost) {
+      return (
+        !saving ||
+        Object.entries(cost || {}).every(
+          ([r, n]) => stock(1)[r] - n >= (saving[r] || 0),
+        )
+      );
+    }
     function train(type) {
       const b = completeBuildings(TYPES[type].producer, 1).sort(
         (a, b) => a.queue.length - b.queue.length,
@@ -7921,7 +8012,8 @@
         !b ||
         b.queue.length >= 3 ||
         pop.used + pop.queued >= pop.cap ||
-        !afford(TYPES[type].cost, 1)
+        !afford(TYPES[type].cost, 1) ||
+        (type !== "worker" && !spendable(TYPES[type].cost))
       )
         return false;
       pay(TYPES[type].cost, 1, 1);
@@ -7939,6 +8031,10 @@
     function build(kind, settlement = base) {
       if (
         !afford(BUILDINGS[kind].cost, 1) ||
+        (!["house", "farm", "lumbercamp", "miningcamp", "mill"].includes(
+          kind,
+        ) &&
+          !spendable(BUILDINGS[kind].cost)) ||
         state.buildings.some(
           (b) => b.team === 1 && b.kind === kind && b.progress < 1 && b.hp > 0,
         )
@@ -8035,38 +8131,50 @@
       front = known
         .filter((k) => !["wall", "gate"].includes(k.kind))
         .sort((a, b) => distance(a, base) - distance(b, base))[0];
+    // Expand whenever a seen resource patch lies beyond the reach of every
+    // town centre: richer clusters win, and the new base sits on their centre.
     if (
-      (state.time > 180 || (state.time > 100 && exhausted >= 3)) &&
-      completeBuildings("towncenter", 1).length < 4 &&
+      (state.time > 120 || (state.time > 70 && exhausted >= 3)) &&
+      completeBuildings("towncenter", 1).length < 6 &&
       !state.buildings.some(
         (b) => b.team === 1 && b.kind === "towncenter" && b.progress < 1,
       ) &&
       ws.length >= 8
     ) {
-      const resource = state.nodes
-        .filter(
-          (n) =>
-            n.remaining > 0 &&
-            enemyFog.remembers(n) &&
-            completeBuildings("towncenter", 1).every(
-              (b) => distance(b, n) > 1500,
-            ),
-        )
-        // Later expansions lean toward the enemy: a forward base shortens
-        // the march and gives the siege engines a safe place to stand.
-        .sort(
-          (a, b) =>
-            distance(a, base) +
-            (front && state.time > 420 ? distance(a, front) * 0.7 : 0) -
-            (distance(b, base) +
-              (front && state.time > 420 ? distance(b, front) * 0.7 : 0)),
-        )[0];
+      const seenNodes = state.nodes.filter(
+          (n) => n.remaining > 0 && enemyFog.remembers(n),
+        ),
+        patch = (n) => seenNodes.filter((m) => distance(m, n) < 450),
+        richness = (n) => Math.min(12, patch(n).length),
+        resource = seenNodes
+          .filter(
+            (n) =>
+              richness(n) >= 3 &&
+              completeBuildings("towncenter", 1).every(
+                (b) => distance(b, n) > 1100,
+              ),
+          )
+          // Later expansions lean toward the enemy: a forward base shortens
+          // the march and gives the siege engines a safe place to stand.
+          .sort((a, b) => {
+            const score = (n) =>
+              distance(n, base) -
+              90 * richness(n) +
+              (front && state.time > 420 ? distance(n, front) * 0.7 : 0);
+            return score(a) - score(b);
+          })[0];
       if (resource && afford(BUILDINGS.towncenter.cost, 1)) {
-        for (let i = 0; i < 32; i++) {
-          const p = {
-            x: resource.x + Math.cos(i * 2.399) * 300,
-            y: resource.y + Math.sin(i * 2.399) * 300,
+        const group = patch(resource),
+          centre = {
+            x: group.reduce((t, n) => t + n.x, 0) / group.length,
+            y: group.reduce((t, n) => t + n.y, 0) / group.length,
           };
+        for (let i = 0; i < 48; i++) {
+          const r = 140 + Math.floor(i / 8) * 45,
+            p = {
+              x: centre.x + Math.cos(i * 2.399) * r,
+              y: centre.y + Math.sin(i * 2.399) * r,
+            };
           if (!validSite("towncenter", p, 1)) continue;
           pay(BUILDINGS.towncenter.cost, 1, 1);
           const outpost = makeBuilding("towncenter", 1, p.x, p.y, 0);
@@ -8297,6 +8405,90 @@
           );
           return;
         }
+      // Nowhere explored ahead of the target: build beside one of its own
+      // towns instead, if that already puts a known structure in range.
+      for (const centre of completeBuildings("towncenter", 1))
+        for (const radius of [520, 720, 920])
+          for (let i = 0; i < 12; i++) {
+            const p = {
+              x: centre.x + Math.cos(i * 0.52 + radius) * radius,
+              y: centre.y + Math.sin(i * 0.52 + radius) * radius,
+            };
+            if (
+              !targets.some(
+                (t) =>
+                  distance(t, p) >= spec.minRange + 20 &&
+                  distance(t, p) <= spec.range - 30,
+              ) ||
+              !validSite("greatengine", p, 1)
+            )
+              continue;
+            pay(spec.cost, 1, 1);
+            const b = makeBuilding("greatengine", 1, p.x, p.y, 0);
+            state.buildings.push(b);
+            state.navDirty = true;
+            queueConstruction(
+              ws.filter((u) => u.job?.kind !== "build").slice(0, 6),
+              [b.id],
+              false,
+            );
+            return;
+          }
+    }
+    {
+      const hard = state.difficulty === "hard",
+        easy = state.difficulty === "easy",
+        queued = (key) =>
+          state.buildings.some(
+            (b) => b.team === 1 && b.queue.some((q) => q.tech === key),
+          ),
+        threatened = state.units.some(
+          (u) =>
+            u.team === 0 &&
+            u.hp > 0 &&
+            enemyFog.sees(u) &&
+            distance(u, base) < 900,
+        ),
+        scale = hard ? 0.8 : 1;
+      let goal = null;
+      if (
+        completeBuildings("siegeworkshop", 1).length &&
+        army.length >= (easy ? 20 : 30) &&
+        !threatened
+      ) {
+        if (
+          !hasTech("engineworks", 1) &&
+          !queued("engineworks") &&
+          state.time >= 300 * scale
+        )
+          goal = TECHS.engineworks.cost;
+        else if (
+          hasTech("engineworks", 1) &&
+          known.length &&
+          !state.buildings.some(
+            (b) => b.team === 1 && b.kind === "greatengine" && b.hp > 0,
+          ) &&
+          state.time >= 420
+        )
+          goal = BUILDINGS.greatengine.cost;
+        else if (
+          hasTech("engineworks", 1) &&
+          !easy &&
+          !hasTech("colossal", 1) &&
+          !queued("colossal") &&
+          state.time >= 600 * scale
+        )
+          goal = TECHS.colossal.cost;
+        else if (
+          hasTech("colossal", 1) &&
+          !colossusOf(1) &&
+          !easy &&
+          state.time >= 780
+        )
+          goal = BUILDINGS.colossus.cost;
+      }
+      saving = goal;
+      ai.savingGoal = goal ? { ...goal } : null;
     }
     techAI();
     batteryAI();
@@ -8382,7 +8574,11 @@
     const stockpile = state.enemy.resources,
       need = {};
     for (const r of ["food", "wood", "gold", "stone"])
-      need[r] = clamp(1 - (stockpile[r] || 0) / 900, 0.05, 1);
+      need[r] = clamp(
+        1 - (stockpile[r] || 0) / Math.max(900, (saving?.[r] || 0) * 1.1),
+        0.05,
+        1,
+      );
     const needTotal = Object.values(need).reduce((a, b) => a + b, 0),
       desired = {},
       assignments = { food: 0, wood: 0, gold: 0, stone: 0 };
@@ -9305,6 +9501,24 @@
     phases[key] = (phases[key] || 0) + (now - phaseClock);
     phaseClock = now;
   };
+  // Soldiers (not villagers, caravans or engines) standing on a ruined capital.
+  function holdsRuins(team, ruin) {
+    return state.units.some(
+      (u) =>
+        u.team === team &&
+        u.hp > 0 &&
+        ![
+          "worker",
+          "civilian",
+          "pilgrim",
+          "merchant",
+          "ram",
+          "ballista",
+          "trebuchet",
+        ].includes(u.type) &&
+        distance(u, ruin) < 110,
+    );
+  }
   function update(dt) {
     if (!playable()) return;
     if (TEST) phaseClock = performance.now();
@@ -9318,15 +9532,28 @@
       finish(false);
       return;
     }
-    if (
-      enemyCapital?.hp <= 0 ||
-      (state.mode !== "quickmatch" &&
-        !state.campaignRules &&
-        !state.buildings[1]?.outpost &&
-        state.buildings[1]?.hp <= 0)
-    ) {
-      finish(true);
-      return;
+    // A fallen capital is not enough: footsoldiers must stand on its ruins, so
+    // long-range engines alone can never end the game.
+    const fallen =
+      enemyCapital?.hp <= 0
+        ? enemyCapital
+        : state.mode !== "quickmatch" &&
+            !state.campaignRules &&
+            !state.buildings[1]?.outpost &&
+            state.buildings[1]?.hp <= 0
+          ? state.buildings[1]
+          : null;
+    if (fallen) {
+      if (!state.capitalFallen) {
+        state.capitalFallen = true;
+        toast(
+          "The enemy capital has fallen. Bring troops to its ruins to claim victory.",
+        );
+      }
+      if (holdsRuins(0, fallen)) {
+        finish(true);
+        return;
+      }
     }
     if (DEBUG_MODE && state.cheats?.instant) {
       for (const b of state.buildings)

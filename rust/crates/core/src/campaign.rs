@@ -36,7 +36,7 @@ impl Sim {
                 }
             }
             let (cid, cx, cy) = (self.state.buildings[camp].id, self.state.buildings[camp].x, self.state.buildings[camp].y);
-            let plots: Vec<Plot> = self.defensive_plots(cid, cx, cy, self.state.buildings[camp].fortress_shape.clone().as_ref(), 720.0);
+            let plots: Vec<Plot> = self.defensive_plots(cid, cx, cy, self.state.buildings[camp].fortress_shape.clone().as_ref(), 720.0, false);
             for p in &plots {
                 let mut b = self.make_from_plot(p, 0, 1.0);
                 b.closed = Some(false);

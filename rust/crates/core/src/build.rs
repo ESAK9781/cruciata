@@ -259,7 +259,7 @@ impl Sim {
     }
 
     /// `defensivePlots(base, radius)`; `base_id`/position/shape describe the base.
-    pub fn defensive_plots(&self, base_id: u32, bx: f64, by: f64, fortress: Option<&serde_json::Value>, radius: f64) -> Vec<Plot> {
+    pub fn defensive_plots(&self, base_id: u32, bx: f64, by: f64, fortress: Option<&serde_json::Value>, radius: f64, adaptive: bool) -> Vec<Plot> {
         let (w, h) = (self.geo.w, self.geo.h);
         let mut plots: Vec<Plot> = Vec::new();
         let mut seen: HashSet<(i64, i64)> = HashSet::new();
@@ -276,10 +276,34 @@ impl Sim {
         let fx = fortress.and_then(|f| f.get("x")).and_then(|v| v.as_f64()).filter(|v| *v != 0.0).unwrap_or(1.0);
         let fy = fortress.and_then(|f| f.get("y")).and_then(|v| v.as_f64()).filter(|v| *v != 0.0).unwrap_or(1.0);
         for (layer, scale) in scales.iter().enumerate() {
+            let mut blocked: Vec<bool> = Vec::new();
             let ring: Vec<Pt> = (0..16)
                 .map(|i| {
                     let angle = (i as f64 * std::f64::consts::PI) / 8.0 + phase;
                     let bulge = if i % 4 == 0 { 1.13 } else if i % 2 == 1 { 0.94 } else { 1.04 };
+                    if adaptive {
+                        // The ring follows the land: it swells to enclose seen resource
+                        // patches, shrinks inland from water and rock, and is left out
+                        // where the terrain already forms the barrier.
+                        let r0 = radius * scale * bulge;
+                        let mut r = r0;
+                        for n in &self.state.nodes {
+                            if !(n.remaining > 0.0) || !self.enemy_fog.remembers(n.x, n.y) {
+                                continue;
+                            }
+                            let d = ((n.x - bx).powi(2) + (n.y - by).powi(2)).sqrt();
+                            let turn = crate::js::atan2(n.y - by, n.x - bx) - angle;
+                            if d > r0 * 0.7 && d < r0 * 1.45 && crate::js::atan2(sin(turn), cos(turn)).abs() < 0.35 {
+                                r = r.max((d + 150.0).min(r0 * 1.5));
+                            }
+                        }
+                        let reach = |q: f64| self.land_free(clamp(bx + cos(angle) * q, 128.0, w - 128.0), clamp(by + sin(angle) * q, 128.0, h - 128.0), 24.0, true);
+                        while r > r0 * 0.55 && !reach(r) {
+                            r -= 48.0;
+                        }
+                        blocked.push(!reach(r));
+                        return Pt::new(snap(clamp(bx + cos(angle) * r, 128.0, w - 128.0)), snap(clamp(by + sin(angle) * r, 128.0, h - 128.0)));
+                    }
                     Pt::new(
                         snap(clamp(bx + cos(angle) * radius * scale * bulge * fx, 128.0, w - 128.0)),
                         snap(clamp(by + sin(angle) * radius * scale * bulge * fy, 128.0, h - 128.0)),
@@ -287,6 +311,9 @@ impl Sim {
                 })
                 .collect();
             for edge in 0..ring.len() {
+                if adaptive && blocked[edge] && blocked[(edge + 1) % ring.len()] {
+                    continue;
+                }
                 let a = ring[edge];
                 let b = ring[(edge + 1) % ring.len()];
                 let points = self.wall_line(a, b);

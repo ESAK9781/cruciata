@@ -793,6 +793,13 @@ impl Sim {
 
     // ---- the step ------------------------------------------------------------------
 
+    /// Soldiers (not villagers, caravans or engines) standing on a ruined capital.
+    fn holds_ruins(&self, team: i32, ruin: Pt) -> bool {
+        self.state.units.iter().any(|u| {
+            u.team == team && u.hp > 0.0 && !matches!(u.ty, UType::Worker | UType::Civilian | UType::Pilgrim | UType::Merchant | UType::Ram | UType::Ballista | UType::Trebuchet) && crate::movement::dist(Pt::new(u.x, u.y), ruin) < 110.0
+        })
+    }
+
     pub fn update(&mut self, dt: f64) {
         if !self.playable() {
             return;
@@ -813,15 +820,33 @@ impl Sim {
             .or_else(|| self.state.buildings.iter().find(|b| b.team == 1 && b.kind == BKind::Towncenter))
             .map(|b| b.hp);
         if own_capital.map(|h| h <= 0.0).unwrap_or(false) {
-            self.finish(false);
-            return;
+            // Versus a human opponent the same rule applies to us: they must stand on the ruins.
+            let ruin = self.state.buildings.iter().find(|b| Some(b.id) == self.state.capitals.player).map(|b| Pt::new(b.x, b.y));
+            if !self.settings.pvp || ruin.map(|r| self.holds_ruins(1, r)).unwrap_or(true) {
+                self.finish(false);
+                return;
+            }
         }
         let outpost = self.state.buildings.get(1).and_then(|b| b.outpost).unwrap_or(false);
-        if enemy_capital.map(|h| h <= 0.0).unwrap_or(false)
-            || (self.state.mode != "quickmatch" && self.state.campaign_rules.is_none() && !outpost && self.state.buildings.get(1).map(|b| b.hp <= 0.0).unwrap_or(false))
-        {
-            self.finish(true);
-            return;
+        // A fallen capital is not enough: footsoldiers must stand on its ruins, so
+        // long-range engines alone can never end the game.
+        let fallen: Option<usize> = if enemy_capital.map(|h| h <= 0.0).unwrap_or(false) {
+            self.state.buildings.iter().position(|b| Some(b.id) == self.state.capitals.enemy).or_else(|| self.state.buildings.iter().position(|b| b.team == 1 && b.kind == BKind::Towncenter))
+        } else if self.state.mode != "quickmatch" && self.state.campaign_rules.is_none() && !outpost && self.state.buildings.get(1).map(|b| b.hp <= 0.0).unwrap_or(false) {
+            Some(1)
+        } else {
+            None
+        };
+        if let Some(fi) = fallen {
+            if self.state.extra.get("capitalFallen").and_then(|v| v.as_bool()) != Some(true) {
+                self.state.extra.insert("capitalFallen".into(), serde_json::json!(true));
+                self.toast("The enemy capital has fallen. Bring troops to its ruins to claim victory.");
+            }
+            let ruin = Pt::new(self.state.buildings[fi].x, self.state.buildings[fi].y);
+            if self.holds_ruins(0, ruin) {
+                self.finish(true);
+                return;
+            }
         }
         if self.cheat_flag("instant") {
             for b in self.state.buildings.iter_mut() {

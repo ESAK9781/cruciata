@@ -152,7 +152,7 @@ impl Sim {
         c.sort_by(|&a, &b| self.state.buildings[a].queue.len().cmp(&self.state.buildings[b].queue.len()));
         let Some(&bi) = c.first() else { return false };
         let cost = d.ty(ty).cost.clone().unwrap_or_default();
-        if self.state.buildings[bi].queue.len() >= 3 || ctx.used + ctx.queued >= ctx.cap || !self.afford(&cost, 1) {
+        if self.state.buildings[bi].queue.len() >= 3 || ctx.used + ctx.queued >= ctx.cap || !self.afford(&cost, 1) || (ty != UType::Worker && !self.spendable(&cost)) {
             return false;
         }
         self.pay(&cost, 1.0, 1);
@@ -160,6 +160,16 @@ impl Sim {
         self.state.buildings[bi].queue.push(QueueItem { kind: "unit".into(), ty: Some(ty), tech: None, time: 0.0, duration: d.ty(ty).train, cost: Some(cost_json(&cost)), extra: Default::default() });
         ctx.queued += 1.0;
         true
+    }
+
+    /// Ordinary spending may only use what exceeds the goal the treasury is kept for.
+    fn spendable(&self, cost: &Cost) -> bool {
+        let Some(goal) = self.state.enemy.extra.get("savingGoal").and_then(|v| v.as_object()) else { return true };
+        cost.0.iter().all(|(r, n)| self.stock(1).get(*r) - n >= goal.get(res_name(*r)).and_then(|v| v.as_f64()).unwrap_or(0.0))
+    }
+
+    fn saving_for(&self, r: Res) -> f64 {
+        self.state.enemy.extra.get("savingGoal").and_then(|v| v.as_object()).and_then(|g| g.get(res_name(r))).and_then(|v| v.as_f64()).unwrap_or(0.0)
     }
 
     fn busy_foundation(&self, kind: BKind) -> bool {
@@ -182,7 +192,7 @@ impl Sim {
     fn ai_build(&mut self, ctx: &Ctx, kind: BKind, settlement: Pt) -> bool {
         let d = data();
         let cost = d.bld(kind).cost.clone().unwrap_or_default();
-        if !self.afford(&cost, 1) || self.busy_foundation(kind) {
+        if !self.afford(&cost, 1) || (!matches!(kind, BKind::House | BKind::Farm | BKind::Lumbercamp | BKind::Miningcamp | BKind::Mill) && !self.spendable(&cost)) || self.busy_foundation(kind) {
             return false;
         }
         let builders = self.idle_builders(ctx, 2);
@@ -283,7 +293,7 @@ impl Sim {
         };
         if !self.fortifications.contains_key(&bid) {
             let radius = if self.state.mode != "quickmatch" && Some(bid) == self.state.capitals.enemy { 896.0 } else { 640.0 };
-            let plots = self.defensive_plots(bid, bpos.x, bpos.y, fortress.as_ref(), radius);
+            let plots = self.defensive_plots(bid, bpos.x, bpos.y, fortress.as_ref(), radius, Some(bid) != self.state.capitals.enemy);
             self.fortifications.insert(bid, plots);
         }
         let plots = self.fortifications.get(&bid).unwrap().clone();
@@ -314,7 +324,7 @@ impl Sim {
             }
             let spec = data().bld(p.b.kind);
             let cost = spec.cost.clone().unwrap_or_default();
-            if !self.afford(&cost, 1) {
+            if !self.afford(&cost, 1) || !self.spendable(&cost) {
                 continue;
             }
             let (vk, fp) = (if p.b.wall_attachment.is_some() { BKind::Wall } else { p.b.kind }, if p.b.w != 0.0 { Some((p.b.w, p.b.h)) } else { None });
@@ -567,6 +577,31 @@ impl Sim {
                 return;
             }
         }
+        // Nowhere explored ahead of the target: build beside one of its own
+        // towns instead, if that already puts a known structure in range.
+        for centre in self.complete_buildings(Some(BKind::Towncenter), 1) {
+            let cp = Self::bpt(&self.state.buildings[centre]);
+            for radius in [520.0, 720.0, 920.0] {
+                for i in 0..12 {
+                    let p = Pt::new(cp.x + cos(i as f64 * 0.52 + radius) * radius, cp.y + sin(i as f64 * 0.52 + radius) * radius);
+                    if !targets.iter().any(|&t| {
+                        let dd = dist(Self::bpt(&self.state.buildings[t]), p);
+                        dd >= min_range + 20.0 && dd <= range - 30.0
+                    }) || !self.valid_site(BKind::Greatengine, p, 1, 0.0, None)
+                    {
+                        continue;
+                    }
+                    self.pay(&cost, 1.0, 1);
+                    let b = self.make_building(BKind::Greatengine, 1, p.x, p.y, 0.0);
+                    let id = b.id;
+                    self.state.buildings.push(b);
+                    self.state.nav_dirty = true;
+                    let builders = self.idle_builders(ctx, 6);
+                    self.queue_construction(&builders, &[id], false);
+                    return;
+                }
+            }
+        }
     }
 
     fn target_weight(&self, b: &Building, from: Pt, base: Pt) -> f64 {
@@ -658,31 +693,39 @@ impl Sim {
         let mut front_sorted: Vec<&Building> = ctx.known.iter().filter(|k| !matches!(k.kind, BKind::Wall | BKind::Gate)).collect();
         front_sorted.sort_by(|a, b| cmp(dist(Self::bpt(a), base_pt), dist(Self::bpt(b), base_pt)));
         let front: Option<Pt> = front_sorted.first().map(|b| Self::bpt(b));
-        if (now > 180.0 || (now > 100.0 && exhausted >= 3))
-            && self.complete_buildings(Some(BKind::Towncenter), 1).len() < 4
+        // Expand whenever a seen resource patch lies beyond the reach of every
+        // town centre: richer clusters win, and the new base sits on their centre.
+        if (now > 120.0 || (now > 70.0 && exhausted >= 3))
+            && self.complete_buildings(Some(BKind::Towncenter), 1).len() < 6
             && !self.state.buildings.iter().any(|b| b.team == 1 && b.kind == BKind::Towncenter && b.progress < 1.0)
             && ctx.ws.len() >= 8
         {
             let tcs = self.complete_buildings(Some(BKind::Towncenter), 1);
-            let mut res: Vec<usize> = self
-                .state
-                .nodes
+            let seen_nodes: Vec<usize> = (0..self.state.nodes.len()).filter(|&i| self.state.nodes[i].remaining > 0.0 && self.enemy_fog.remembers(self.state.nodes[i].x, self.state.nodes[i].y)).collect();
+            let patch = |s: &Sim, n: usize| -> Vec<usize> {
+                let np = Pt::new(s.state.nodes[n].x, s.state.nodes[n].y);
+                seen_nodes.iter().copied().filter(|&m| dist(Pt::new(s.state.nodes[m].x, s.state.nodes[m].y), np) < 450.0).collect()
+            };
+            let richness = |s: &Sim, n: usize| -> f64 { (patch(s, n).len() as f64).min(12.0) };
+            let mut res: Vec<usize> = seen_nodes
                 .iter()
-                .enumerate()
-                .filter(|(_, n)| n.remaining > 0.0 && self.enemy_fog.remembers(n.x, n.y) && tcs.iter().all(|&b| dist(Self::bpt(&self.state.buildings[b]), Pt::new(n.x, n.y)) > 1500.0))
-                .map(|(i, _)| i)
+                .copied()
+                .filter(|&n| richness(self, n) >= 3.0 && tcs.iter().all(|&b| dist(Self::bpt(&self.state.buildings[b]), Pt::new(self.state.nodes[n].x, self.state.nodes[n].y)) > 1100.0))
                 .collect();
             let score = |s: &Sim, n: usize| -> f64 {
                 let np = Pt::new(s.state.nodes[n].x, s.state.nodes[n].y);
-                dist(np, base_pt) + if front.is_some() && now > 420.0 { dist(np, front.unwrap()) * 0.7 } else { 0.0 }
+                dist(np, base_pt) - 90.0 * richness(s, n) + if front.is_some() && now > 420.0 { dist(np, front.unwrap()) * 0.7 } else { 0.0 }
             };
             res.sort_by(|&a, &b| cmp(score(self, a), score(self, b)));
             if let Some(&r) = res.first() {
                 let tc_cost = d.bld(BKind::Towncenter).cost.clone().unwrap();
                 if self.afford(&tc_cost, 1) {
-                    let rp = Pt::new(self.state.nodes[r].x, self.state.nodes[r].y);
-                    for i in 0..32 {
-                        let p = Pt::new(rp.x + cos(i as f64 * 2.399) * 300.0, rp.y + sin(i as f64 * 2.399) * 300.0);
+                    let group = patch(self, r);
+                    let n = group.len() as f64;
+                    let centre = Pt::new(group.iter().map(|&m| self.state.nodes[m].x).sum::<f64>() / n, group.iter().map(|&m| self.state.nodes[m].y).sum::<f64>() / n);
+                    for i in 0..48 {
+                        let rad = 140.0 + (i as f64 / 8.0).floor() * 45.0;
+                        let p = Pt::new(centre.x + cos(i as f64 * 2.399) * rad, centre.y + sin(i as f64 * 2.399) * rad);
                         if !self.valid_site(BKind::Towncenter, p, 1, 0.0, None) {
                             continue;
                         }
@@ -699,6 +742,33 @@ impl Sim {
             }
         }
         // (expandDepots runs after labour planning below, matching the JS order.)
+        {
+            let hard = self.state.difficulty == "hard";
+            let easy = self.state.difficulty == "easy";
+            let scale = if hard { 0.8 } else { 1.0 };
+            let queued = |s: &Sim, key: &str| s.state.buildings.iter().any(|b| b.team == 1 && b.queue.iter().any(|q| q.tech.as_deref() == Some(key)));
+            let threatened = self.state.units.iter().any(|u| u.team == 0 && u.hp > 0.0 && self.enemy_fog.sees(u.x, u.y) && dist(Pt::new(u.x, u.y), base_pt) < 900.0);
+            let mut goal: Option<Cost> = None;
+            if !self.complete_buildings(Some(BKind::Siegeworkshop), 1).is_empty() && ctx.army.len() >= if easy { 20 } else { 30 } && !threatened {
+                if !self.has_tech("engineworks", 1) && !queued(self, "engineworks") && now >= 300.0 * scale {
+                    goal = d.tech("engineworks").map(|t| t.cost.clone());
+                } else if self.has_tech("engineworks", 1) && !ctx.known.is_empty() && !self.state.buildings.iter().any(|b| b.team == 1 && b.kind == BKind::Greatengine && b.hp > 0.0) && now >= 420.0 {
+                    goal = d.bld(BKind::Greatengine).cost.clone();
+                } else if self.has_tech("engineworks", 1) && !easy && !self.has_tech("colossal", 1) && !queued(self, "colossal") && now >= 600.0 * scale {
+                    goal = d.tech("colossal").map(|t| t.cost.clone());
+                } else if self.has_tech("colossal", 1) && self.colossus_of(1).is_none() && !easy && now >= 780.0 {
+                    goal = d.bld(BKind::Colossus).cost.clone();
+                }
+            }
+            match goal {
+                Some(g) => {
+                    self.state.enemy.extra.insert("savingGoal".into(), cost_json(&g));
+                }
+                None => {
+                    self.state.enemy.extra.insert("savingGoal".into(), serde_json::Value::Null);
+                }
+            }
+        }
         self.tech_ai();
         self.battery_ai(&ctx);
         self.colossus_ai(&ctx);
@@ -797,7 +867,7 @@ impl Sim {
         // Labour follows scarcity.
         let res_order = [Res::Food, Res::Wood, Res::Gold, Res::Stone];
         let stockpile = self.state.enemy.resources;
-        let mut need: Vec<(Res, f64)> = res_order.iter().map(|&r| (r, clamp(1.0 - stockpile.get(r) / 900.0, 0.05, 1.0))).collect();
+        let mut need: Vec<(Res, f64)> = res_order.iter().map(|&r| (r, clamp(1.0 - stockpile.get(r) / 900f64.max(self.saving_for(r) * 1.1), 0.05, 1.0))).collect();
         let need_total: f64 = need.iter().map(|(_, v)| *v).sum();
         let mut desired: Vec<(Res, f64)> = need.iter().map(|&(r, n)| (r, 0.06 + (0.76 * n) / need_total)).collect();
         let mut assignments: Vec<(Res, f64)> = res_order.iter().map(|&r| (r, 0.0)).collect();

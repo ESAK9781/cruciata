@@ -518,10 +518,27 @@ impl Sim {
                     }
                 }
             }
-            let upt = self.unit_pt(ui);
-            candidates.sort_by(|a, c| cmp(dist(upt, *a), dist(upt, *c)));
+            // Spread the crew evenly around the work: each builder takes its own
+            // share of the perimeter instead of all queueing at the nearest side.
+            candidates.sort_by(|a, c| cmp(atan2(a.y - by, a.x - bx), atan2(c.y - by, c.x - bx)));
+            let (my_team, my_id, my_kind) = {
+                let u = &self.state.units[ui];
+                (u.team, u.id, u.job.as_ref().map(|j| j.kind.clone()).unwrap_or_default())
+            };
+            let mut crew: Vec<u32> = self
+                .state
+                .units
+                .iter()
+                .filter(|w| w.team == my_team && w.hp > 0.0 && w.job.as_ref().map(|j| j.kind == my_kind && j.target == Some(b_id)).unwrap_or(false))
+                .map(|w| w.id)
+                .collect();
+            crew.sort();
+            let slot = crew.iter().position(|&id| id == my_id).unwrap_or(0);
+            let n = candidates.len();
+            let first = if n == 0 { 0 } else { (slot * n) / crew.len().max(1) };
             let mut point: Option<Pt> = None;
-            for c in candidates {
+            for k in 0..n {
+                let c = candidates[(first + k) % n];
                 if self.route_possible(ui, c) {
                     point = Some(c);
                     break;
@@ -760,7 +777,12 @@ impl Sim {
         match gt {
             Gt::Node(i) => {
                 self.state.nodes[i].remaining = new_remaining;
-                if new_remaining == 0.0 && self.state.nodes[i].kind != Res::Food {
+                let reserve = self.state.nodes[i].extra.get("reserve").and_then(|v| v.as_f64()).unwrap_or(0.0);
+                if new_remaining == 0.0 && reserve > 0.0 {
+                    let refill = reserve.min(if self.state.nodes[i].max != 0.0 { self.state.nodes[i].max } else { 660.0 });
+                    self.state.nodes[i].remaining = refill;
+                    self.state.nodes[i].extra.insert("reserve".into(), serde_json::json!(reserve - refill));
+                } else if new_remaining == 0.0 && self.state.nodes[i].kind != Res::Food {
                     self.state.nav_dirty = true;
                 }
             }
@@ -769,7 +791,11 @@ impl Sim {
             }
         }
         let _ = target;
-        if self.state.units[ui].carry >= capacity - 0.001 || new_remaining == 0.0 {
+        let now_remaining = match gt {
+            Gt::Node(i) => self.state.nodes[i].remaining,
+            Gt::Farm(_) => new_remaining,
+        };
+        if self.state.units[ui].carry >= capacity - 0.001 || now_remaining == 0.0 {
             if let Some(j) = self.state.units[ui].job.as_mut() {
                 j.phase = Some("deliver".into());
             }
