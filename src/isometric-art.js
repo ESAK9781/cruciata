@@ -2407,6 +2407,7 @@
     miningcamp: [-42, 42, -56, 38],
     lumbercamp: [-42, 42, -56, 38],
     colossus: [-175, 175, -420, 150],
+    greatengine: [-90, 90, -215, 76],
   };
   // Soldiers and villagers are drawn as small clusters, so their pick area
   // grows by the cluster's spread.

@@ -53,6 +53,7 @@ fn building_box(k: BKind) -> Option<BoxT> {
         BKind::Mill => [-36.0, 43.0, -60.0, 34.0],
         BKind::Miningcamp | BKind::Lumbercamp => [-42.0, 42.0, -56.0, 38.0],
         BKind::Colossus => [-175.0, 175.0, -420.0, 150.0],
+        BKind::Greatengine => [-90.0, 90.0, -215.0, 76.0],
         _ => return None,
     })
 }
@@ -69,7 +70,7 @@ pub fn hit_structure(b: &Building, p: Pt, margin: f64) -> bool {
     if let Some(bx) = bx {
         return x >= bx[0] - margin && x <= bx[2 - 1] + margin && y >= bx[2] - margin && y <= bx[3] + margin;
     }
-    !(x > b.w / 2.0 + 60.0 || y > 0.0 || y < -b.h / 2.0 - visual_height(b) - 30.0)
+    !(x.abs() > b.w / 2.0 + 60.0 || y > b.h / 2.0 + 20.0 || y < -b.h / 2.0 - visual_height(b) - 30.0)
 }
 
 pub fn hit_resource(n: &Node, p: Pt) -> bool {
