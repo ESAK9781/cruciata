@@ -62,6 +62,12 @@ const fs = require("node:fs"),
           result[[b.kind, b.w, b.h].join(":")] = [b.kind, b.w, b.h];
         }
       }
+      // Camps may not exist in any starting scene but are always buildable.
+      for (const [kind, w, h] of [
+        ["lumbercamp", 61, 56],
+        ["miningcamp", 62, 59],
+      ])
+        result[[kind, w, h].join(":")] = [kind, w, h];
       return {
         sizes: Object.values(result),
         curtains: Object.values(curtains),
@@ -308,6 +314,26 @@ const fs = require("node:fs"),
                 );
             }
         for (const b of curtains) A.structure(g, b, 0);
+        // Build-card previews of the curtain and bastion walls (drawn live on the web).
+        for (const fortified of [false, true])
+          CruciataBakeSprite(
+            fortified ? "card:bastionwall" : "card:wall",
+            160,
+            160,
+            80,
+            80,
+            (q) => {
+              // Nested curtain sprites must draw into this card, not bake separately.
+              const hook = window.CruciataBakeSprite;
+              window.CruciataBakeSprite = undefined;
+              A.structure(
+                q,
+                { kind: "wall", w: 32, h: 32, x: 0, y: 0, hp: 100, maxHp: 100, progress: 1, team: 0, fortified },
+                0,
+              );
+              window.CruciataBakeSprite = hook;
+            },
+          );
         for (const kind of ["watchtower", "tower"])
           for (const team of [0, 1])
             for (const fortified of [false, true]) {

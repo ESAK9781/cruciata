@@ -87,15 +87,21 @@ pub fn portrait_building(painter: &egui::Painter, atlas: &mut Atlas, kind: BKind
     let (k, fort) = if kind == BKind::Bastionwall { (BKind::Wall, true) } else { (kind, false) };
     let b = Building { kind: k, fortified: fort, team: 0, w: spec.w, h: spec.h, hp: spec.hp, max_hp: spec.hp, progress: 1.0, ..Default::default() };
     if matches!(k, BKind::Wall) {
-        let c = rect.center();
-        painter.rect_filled(Rect::from_center_size(c, Vec2::new(26.0, 12.0)), 2.0, col(if fort { "#6d6a63" } else { "#a09a89" }));
+        // The web card scales the 90x80 canvas down to 29x24 and draws the wall at 65/58 of its footprint.
+        let s = (65.0 / spec.w).min(58.0 / spec.h) as f32 * 0.322;
+        paint_frame(painter, atlas, if fort { "card:bastionwall" } else { "card:wall" }, 80.0, 80.0, rect.center(), s, Color32::WHITE);
         return;
     }
     if matches!(k, BKind::Greatengine | BKind::Colossus) {
-        paint_frame(painter, atlas, &great_engine_key(&Building { aim_angle: Some(-std::f64::consts::FRAC_PI_2), ..b.clone() }, 0.0), 150.0, 240.0, rect.center() + Vec2::new(0.0, 8.0), 0.18, Color32::WHITE);
+        let big = k == BKind::Colossus;
+        let eng = Building { aim_angle: Some(-std::f64::consts::FRAC_PI_2), ..b.clone() };
+        let key = if big { crate::keys::colossus_key(&eng, 0.0) } else { great_engine_key(&eng, 0.0) };
+        let (ox, oy) = if big { (210.0, 500.0) } else { (150.0, 240.0) };
+        let s = ((65.0 / spec.w).min(58.0 / spec.h) * 0.322) as f32;
+        paint_frame(painter, atlas, &key, ox, oy, rect.center(), s, Color32::WHITE);
         return;
     }
-    let s = (max.0 as f64 / spec.w).min(max.1 as f64 / spec.h) as f32;
+    let s = ((65.0 / spec.w).min(58.0 / spec.h) * 0.322) as f32;
     let (width, _h, oy) = building_canvas(&b);
     paint_frame(painter, atlas, &building_key(&b), width / 2.0, oy, rect.center(), s, Color32::WHITE);
 }
