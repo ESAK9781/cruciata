@@ -19,3 +19,4 @@ pub mod unitmove;
 pub mod movement;
 pub mod fog;
 pub mod quadtree;
+pub mod commands;
