@@ -508,6 +508,13 @@ impl App {
         let white = Color32::WHITE;
         let full_uv = Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0));
 
+        if cruciata_core::world::is_river_map(&sim.state) {
+            let by = cruciata_core::world::bridge_y(&sim.state, sim.geo.h);
+            let bx = cruciata_core::world::river_x(&sim.state, sim.geo.w, by);
+            if view.on_screen(bx, by, 200.0) {
+                batch.frame(atlas, &view, "bridge", 105.0, 80.0, bx, by, 1.0, -1.0e9, white);
+            }
+        }
         // ---- decorations ----
         for d in &sim.geo.decorations {
             if !view.on_screen(d.x, d.y, 120.0) {
