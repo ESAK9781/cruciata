@@ -162,7 +162,7 @@ impl Sim {
             }
             None => alerts.push(serde_json::json!({"x": x, "y": y, "t": 0})),
         }
-        self.events.push(Event::Alert { x, y, kind });
+        self.events.push(Event::Alert { x, y, kind, team: 0 });
     }
 
     /// `damage(target, amount, source, siege)`.
@@ -218,6 +218,14 @@ impl Sim {
                 if s.team != 0 && s.team != 2 && amount > 0.0 {
                     let k = if let Obj::Building(bi) = target { Some(self.state.buildings[bi].kind) } else { None };
                     self.raise_alert(tpos.x, tpos.y, k);
+                }
+            }
+        }
+        if team == 1 && self.settings.pvp {
+            if let Some(s) = source {
+                if s.team == 0 && amount > 0.0 {
+                    let k = if let Obj::Building(bi) = target { Some(self.state.buildings[bi].kind) } else { None };
+                    self.events.push(Event::Alert { x: tpos.x, y: tpos.y, kind: k, team: 1 });
                 }
             }
         }

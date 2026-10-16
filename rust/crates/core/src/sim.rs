@@ -19,7 +19,7 @@ pub enum Event {
     Toast(String),
     Sound { kind: String, x: Option<f64>, y: Option<f64>, team: Option<i32> },
     /// A player unit or structure was attacked (front ends decide whether to ping).
-    Alert { x: f64, y: f64, kind: Option<BKind> },
+    Alert { x: f64, y: f64, kind: Option<BKind>, team: i32 },
     /// The game ended (`true` when the player won).
     Finished(bool),
     /// Time to write an autosave.

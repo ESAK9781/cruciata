@@ -84,6 +84,22 @@ impl Batch {
         true
     }
 
+    /// Like `frame`, rotated by `angle` radians about the sprite origin.
+    #[allow(clippy::too_many_arguments)]
+    pub fn frame_rot(&mut self, atlas: &mut Atlas, view: &View, key: &str, ox: f64, oy: f64, wx: f64, wy: f64, scale: f64, depth: f64, angle: f64, tint: Color32) -> bool {
+        let Some((f, tex)) = atlas.lookup(key) else { return false };
+        let Some(tex) = tex else { return true };
+        let s = atlas.scale as f64;
+        let tl = view.to_screen(wx + (f.dx as f64 - ox) * scale, wy + (f.dy as f64 - oy) * scale);
+        let size = egui::vec2((f.w as f64 / s * scale * view.zoom) as f32, (f.h as f64 / s * scale * view.zoom) as f32);
+        let uv = Rect::from_min_max(Pos2::new(f.x / PAGE, f.y / PAGE), Pos2::new((f.x + f.w) / PAGE, (f.y + f.h) / PAGE));
+        let mut mesh = Mesh::with_texture(tex);
+        mesh.add_rect_with_uv(Rect::from_min_size(tl, size), uv, tint);
+        mesh.rotate(egui::emath::Rot2::from_angle(angle as f32), view.to_screen(wx, wy));
+        self.shape(depth, Shape::mesh(mesh));
+        true
+    }
+
     pub fn quad(&mut self, tex: TextureId, rect: Rect, uv: Rect, depth: f64, tint: Color32) {
         let n = self.items.len() as u32;
         self.items.push((depth as f32, n, Item::Quad { tex, rect, uv, tint }));

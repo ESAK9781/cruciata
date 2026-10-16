@@ -125,9 +125,9 @@ pub fn minimap(ctx: &egui::Context, rect: Rect, g: &Game, ui_state: &mut UiState
                 let m = at(b.x, b.y);
                 p.add(egui::Shape::convex_polygon(vec![m + Vec2::new(0.0, -5.0), m + Vec2::new(5.0, 0.0), m + Vec2::new(0.0, 5.0), m + Vec2::new(-5.0, 0.0)], c, Stroke::NONE));
             }
-            if let Some(alerts) = &g.sim.state.alerts {
-                for a in alerts {
-                    let (x, y, t) = (a["x"].as_f64().unwrap_or(0.0), a["y"].as_f64().unwrap_or(0.0), a["t"].as_f64().unwrap_or(0.0));
+            for &(x, y, at_t) in &ui_state.alerts {
+                let t = ui_state.clock - at_t;
+                if t < 8.0 {
                     p.circle_stroke(at(x, y), (5.0 + (t * 12.0) % 14.0) as f32, Stroke::new(2.0, col("#ff6a4a").gamma_multiply(((1.0 - t / 8.0) as f32).max(0.2))));
                 }
             }

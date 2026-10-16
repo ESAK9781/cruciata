@@ -414,8 +414,15 @@ impl App {
         for e in events {
             match e {
                 Event::Toast(t) => self.ui.toast(t),
-                Event::Alert { x, y, .. } => {
-                    self.ui.alert = Some((x, y, self.ui.clock));
+                Event::Alert { x, y, team, .. } => {
+                    if team == self.game.me {
+                        self.ui.alert = Some((x, y, self.ui.clock));
+                        if let Some(a) = self.ui.alerts.iter_mut().find(|a| ((a.0 - x).powi(2) + (a.1 - y).powi(2)).sqrt() < 500.0) {
+                            *a = (x, y, self.ui.clock);
+                        } else {
+                            self.ui.alerts.push((x, y, self.ui.clock));
+                        }
+                    }
                 }
                 Event::Sound { kind, x, y, team } => {
                     let Some(a) = self.audio.as_mut() else { continue };
@@ -525,6 +532,34 @@ impl App {
                 let tl = view.to_screen(n.x + 7.0 - 28.0, n.y + 7.0 - 18.0);
                 batch.quad(shadow_id, Rect::from_min_size(tl, egui::vec2((56.0 * view.zoom) as f32, (36.0 * view.zoom) as f32)), full_uv, n.y, white);
                 batch.frame(atlas, &view, &resource_key(n), 55.0, 80.0, n.x, n.y, 1.0, n.y, white);
+            }
+        }
+        // ---- scorch, gore and the fallen ----
+        for m in &sim.state.marks {
+            let (x, y) = (m["x"].as_f64().unwrap_or(0.0), m["y"].as_f64().unwrap_or(0.0));
+            if !view.on_screen(x, y, 60.0) {
+                continue;
+            }
+            let (r, t) = (m["r"].as_f64().unwrap_or(10.0), m["t"].as_f64().unwrap_or(0.0));
+            if m["kind"].as_str() == Some("scorch") {
+                let grow = 0.5 + (t * 3.0).min(1.0) * 0.5;
+                cv.ellipse(x, y, r * grow, r * 0.72 * grow, with_alpha(col("#2c2722"), 0.34));
+                cv.ellipse(x, y, r * 0.55 * grow, r * 0.4 * grow, with_alpha(col("#14110f"), 0.28));
+            } else if self.settings.gore {
+                let grow = 0.4 + t.min(1.0) * 0.6;
+                cv.ellipse(x, y, r * grow, r * 0.7 * grow, with_alpha(col("#68151c"), 0.7));
+            }
+        }
+        if self.settings.gore {
+            for c in &sim.state.corpses {
+                let (x, y) = (c["x"].as_f64().unwrap_or(0.0), c["y"].as_f64().unwrap_or(0.0));
+                if !view.on_screen(x, y, 60.0) {
+                    continue;
+                }
+                let ty = c["type"].as_str().unwrap_or("sword");
+                let team = c["team"].as_i64().unwrap_or(0);
+                let angle = c["angle"].as_f64().unwrap_or(0.0) + std::f64::consts::FRAC_PI_2;
+                batch.frame_rot(atlas, &view, &format!("corpse:{ty}:{team}"), 50.0, 50.0, x, y, 0.72, y - 40.0, angle, white);
             }
         }
         // ---- structures ----
