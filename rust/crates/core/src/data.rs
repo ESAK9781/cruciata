@@ -246,13 +246,13 @@ fn build() -> Data {
         let mut bgate = bs("Bastion gatehouse", c(&[(Stone, 260.0), (Wood, 120.0)]), 74.0, 42.0, 18000.0, 40.0);
         bgate.passable = true;
         b.push((BKind::Bastiongate, bgate));
-        let mut great = bs("Great siege engine", c(&[(Wood, 1200.0), (Stone, 650.0), (Gold, 500.0)]), 203.0, 175.0, 6000.0, 180.0);
+        let mut great = bs("Great siege engine", c(&[(Wood, 1200.0), (Stone, 650.0), (Gold, 500.0)]), 203.0, 175.0, 1100.0, 180.0);
         great.range = Some(2200.0);
         great.min_range = Some(320.0);
         great.damage = Some(650.0);
         great.description = Some("Massive permanent counterweight engine. Villagers build it on site. Range 320-2200; huge blasts also hit nearby friendly troops.");
         b.push((BKind::Greatengine, great));
-        let mut col = bs("Colossal siege engine", c(&[(Wood, 6000.0), (Stone, 3500.0), (Gold, 2500.0)]), 400.0, 345.0, 16000.0, 2400.0);
+        let mut col = bs("Colossal siege engine", c(&[(Wood, 6000.0), (Stone, 3500.0), (Gold, 2500.0)]), 400.0, 345.0, 1300.0, 2400.0);
         col.damage = Some(650.0);
         col.reload = Some(18.0);
         col.description = Some("Only one per side. Unlimited range beyond a 700-unit minimum: shots scatter further the farther they fly. Never fires on its own. The enemy is told the moment it is begun.");

@@ -211,6 +211,14 @@ impl App {
                         if focus.is_none() { focus = Some((tc.0 + n[2], tc.1 + n[3])); }
                     }
                 }
+                "ruingate" => {
+                    for b in game.sim.state.buildings.iter_mut().filter(|b| matches!(b.kind, BKind::Gate | BKind::Bastiongate)) {
+                        if focus.is_none() {
+                            focus = Some((b.x, b.y));
+                        }
+                        b.hp = 0.0;
+                    }
+                }
                 "ruinwall" => {
                     for (i, b) in game.sim.state.buildings.iter_mut().filter(|b| b.team == 0 && b.kind == BKind::Wall).enumerate() {
                         if i % 3 == 1 {
@@ -1111,6 +1119,21 @@ impl App {
                         wall_shape(&mut batch, &view, walls.get(&wb), att.x, att.y, depth - 0.01, 1.0);
                     }
                     let (width, _h, oy) = building_canvas(b);
+                    // Destroyed gates: the baked rubble heap, which ignores heading and links.
+                    let rubble;
+                    let b: &Building = if b.hp <= 0.0 && matches!(b.kind, BKind::Gate | BKind::Bastiongate) {
+                        let mut p = (*b).clone();
+                        p.links = None;
+                        p.wall_angle = None;
+                        p.gate_angle = None;
+                        p.rotation = None;
+                        p.closed = None;
+                        p.bastion_gate = None;
+                        rubble = p;
+                        &rubble
+                    } else {
+                        b
+                    };
                     // Attached towers bake once per size/team; real keys also carry link
                     // coordinates, so fall back to the generic baked frame.
                     let plain;
