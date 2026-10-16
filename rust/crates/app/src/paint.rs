@@ -58,7 +58,7 @@ impl Batch {
     pub fn frame(&mut self, atlas: &mut Atlas, view: &View, key: &str, ox: f64, oy: f64, wx: f64, wy: f64, scale: f64, depth: f64, tint: Color32) -> bool {
         let Some((f, tex)) = atlas.lookup(key) else { return false };
         let Some(tex) = tex else { return true };
-        let s = atlas.scale as f64;
+        let s = f.res as f64;
         let tl = view.to_screen(wx + (f.dx as f64 - ox) * scale, wy + (f.dy as f64 - oy) * scale);
         let size = egui::vec2((f.w as f64 / s * scale * view.zoom) as f32, (f.h as f64 / s * scale * view.zoom) as f32);
         let uv = Rect::from_min_max(Pos2::new(f.x / PAGE, f.y / PAGE), Pos2::new((f.x + f.w) / PAGE, (f.y + f.h) / PAGE));
@@ -72,11 +72,11 @@ impl Batch {
     pub fn frame_partial(&mut self, atlas: &mut Atlas, view: &View, key: &str, ox: f64, oy: f64, wx: f64, wy: f64, scale: f64, depth: f64, fraction: f64, tint: Color32) -> bool {
         let Some((f, tex)) = atlas.lookup(key) else { return false };
         let Some(tex) = tex else { return true };
-        let s = atlas.scale as f64;
+        let s = f.res as f64;
         let keep = fraction.clamp(0.0, 1.0) as f32;
         let h = f.h * keep;
         let top = f.h - h;
-        let tl = view.to_screen(wx + (f.dx as f64 - ox) * scale, wy + ((f.dy + top / atlas.scale) as f64 - oy) * scale);
+        let tl = view.to_screen(wx + (f.dx as f64 - ox) * scale, wy + ((f.dy + top / f.res) as f64 - oy) * scale);
         let size = egui::vec2((f.w as f64 / s * scale * view.zoom) as f32, (h as f64 / s * scale * view.zoom) as f32);
         let uv = Rect::from_min_max(Pos2::new(f.x / PAGE, (f.y + top) / PAGE), Pos2::new((f.x + f.w) / PAGE, (f.y + f.h) / PAGE));
         let n = self.items.len() as u32;
@@ -89,7 +89,7 @@ impl Batch {
     pub fn frame_rot(&mut self, atlas: &mut Atlas, view: &View, key: &str, ox: f64, oy: f64, wx: f64, wy: f64, scale: f64, depth: f64, angle: f64, tint: Color32) -> bool {
         let Some((f, tex)) = atlas.lookup(key) else { return false };
         let Some(tex) = tex else { return true };
-        let s = atlas.scale as f64;
+        let s = f.res as f64;
         let tl = view.to_screen(wx + (f.dx as f64 - ox) * scale, wy + (f.dy as f64 - oy) * scale);
         let size = egui::vec2((f.w as f64 / s * scale * view.zoom) as f32, (f.h as f64 / s * scale * view.zoom) as f32);
         let uv = Rect::from_min_max(Pos2::new(f.x / PAGE, f.y / PAGE), Pos2::new((f.x + f.w) / PAGE, (f.y + f.h) / PAGE));

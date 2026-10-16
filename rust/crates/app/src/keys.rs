@@ -277,6 +277,23 @@ pub fn great_engine_key(b: &Building, time: f64) -> String {
     format!("siege:{}{}:{}:{}", if big { "colossus:" } else { "" }, b.team, jsn(round((aim * 180.0) / PI)), pose)
 }
 
+/// Key of the baked Colossus frame closest to the pose it is in. The native atlas keeps
+/// a reduced set of poses (`scripts/bake-colossus.js`): fire 0/4/8, reload 1/4/8/12, ready.
+pub fn colossus_key(b: &Building, time: f64) -> String {
+    let full = great_engine_key(b, time);
+    let Some(i) = full.rfind(':') else { return full };
+    let (head, pose) = (&full[..i], &full[i + 1..]);
+    let nearest = |n: i64, set: &[i64]| *set.iter().min_by_key(|s| (**s - n).abs()).unwrap_or(&0);
+    let pose = if let Some(n) = pose.strip_prefix("fire-").and_then(|n| n.parse::<i64>().ok()) {
+        format!("fire-{}", nearest(n, &[0, 4, 8]))
+    } else if let Some(n) = pose.strip_prefix("reload-").and_then(|n| n.parse::<i64>().ok()) {
+        format!("reload-{}", nearest(n, &[1, 4, 8, 12]))
+    } else {
+        pose.to_string()
+    };
+    format!("{head}:{pose}")
+}
+
 pub fn standard_key(u: &Unit, pose: i64, moving: bool) -> String {
     let heading = round((atan2(sin(u.angle), cos(u.angle)) * 4.0) / PI);
     format!("standard2:{}:{}:{}:{}", u.team, jsn(heading), if moving { "move" } else { "rest" }, pose)

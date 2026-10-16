@@ -51,7 +51,7 @@ pub fn eyebrow(ui: &mut egui::Ui, text: &str) {
 pub fn paint_frame(painter: &egui::Painter, atlas: &mut Atlas, key: &str, ox: f64, oy: f64, c: Pos2, s: f32, tint: Color32) -> bool {
     let Some((f, tex)) = atlas.lookup(key) else { return false };
     let Some(tex) = tex else { return true };
-    let a = atlas.scale;
+    let a = f.res;
     let tl = Pos2::new(c.x + (f.dx - ox as f32) * s, c.y + (f.dy - oy as f32) * s);
     let size = Vec2::new(f.w / a * s, f.h / a * s);
     let uv = Rect::from_min_max(Pos2::new(f.x / 1024.0, f.y / 1024.0), Pos2::new((f.x + f.w) / 1024.0, (f.y + f.h) / 1024.0));

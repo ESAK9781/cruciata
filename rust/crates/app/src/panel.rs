@@ -641,7 +641,7 @@ fn research_cards(ui: &mut egui::Ui, f: &mut Frame) {
             let (ty, unlock) = (t.ty, t.unlock);
             let me = f.g.me;
             let c = Card { name: t.name.to_string(), cost: Some(&t.cost), tip: t.desc.clone(), enabled, active: false, done: has, badge: None, lock: None };
-            if card(ui, f, &c, Vec2::new(129.0, 93.0), fell(12.0), &|p, a, r| {
+            if card(ui, f, &c, Vec2::new(129.0, 125.0), fell(12.0), &|p, a, r| {
                 if let Some(k) = unlock {
                     portrait_building(p, a, k, r, (60.0, 40.0));
                 } else if let Some(ty) = ty {

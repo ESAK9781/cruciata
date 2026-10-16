@@ -57,6 +57,7 @@ pub struct App {
     /// Rock layer tiles keyed by (tile x, tile y, resolution level); None marks an empty tile.
     rock_tiles: HashMap<(i32, i32, u8), Option<TextureHandle>>,
     rock_boxes: Vec<(usize, [f64; 4])>,
+    colossus_flags: Vec<TextureHandle>,
     cover: Vec<crate::extras::Patch>,
     fx: crate::fx::Fx,
     water: Option<TextureHandle>,
@@ -143,6 +144,15 @@ impl App {
                     let kind = match v { "gate" => BKind::Gate, "tower" => BKind::Tower, _ => BKind::Wall };
                     if let Some(b) = game.sim.state.buildings.iter().find(|b| b.kind == kind && b.hp > 0.0 && b.team == 1) {
                         focus = Some((b.x, b.y));
+                    }
+                }
+                "colossus" => {
+                    // Debug: a finished Colossus beside the town centre for a closer look.
+                    if let Some(tc) = game.sim.state.buildings.iter().find(|b| b.team == 0 && b.kind == BKind::Towncenter).map(|b| (b.x, b.y)) {
+                        let team = v.parse::<i32>().unwrap_or(0);
+                        let b = game.sim.make_building(BKind::Colossus, team, tc.0 + 700.0, tc.1, 1.0);
+                        game.sim.state.buildings.push(b);
+                        focus = Some((tc.0 + 700.0, tc.1 - 100.0));
                     }
                 }
                 "rock" => {
@@ -266,6 +276,7 @@ impl App {
             terrain: None,
             rock_tiles: HashMap::new(),
             rock_boxes: Vec::new(),
+            colossus_flags: Vec::new(),
             cover: Vec::new(),
             fx: Default::default(),
             water: None,
@@ -473,6 +484,16 @@ impl App {
         self.terrain = Some((key, ctx.load_texture("terrain", img, egui::TextureOptions::LINEAR)));
         self.rock_tiles.clear();
         self.rock_boxes = crate::terrain::rock_boxes(s);
+        if self.colossus_flags.is_empty() {
+            for team in 0..2 {
+                let path = assets_dir().join("atlas").join(format!("colossus-flag-{team}.png"));
+                if let Ok(img) = image::open(&path) {
+                    let rgba = img.to_rgba8();
+                    let size = [rgba.width() as usize, rgba.height() as usize];
+                    self.colossus_flags.push(ctx.load_texture(format!("colossus-flag-{team}"), crate::paint::image_from_straight(size, rgba.as_raw()), egui::TextureOptions::LINEAR));
+                }
+            }
+        }
         self.cover = crate::extras::make_cover(&self.game.sim, self.biome());
     }
 
@@ -930,15 +951,48 @@ impl App {
                     batch.frame(atlas, &view, &great_engine_key(b, time), 150.0, 240.0, b.x, b.y, 1.0, depth, white);
                 }
                 BKind::Colossus => {
-                    // Stand-in: the great engine's baked frames at twice the size, darkened.
-                    let mut g2 = (*b).clone();
-                    g2.kind = BKind::Greatengine;
-                    let key = great_engine_key(&g2, time);
-                    let tint = Color32::from_rgb(190, 175, 160);
-                    if b.progress < 1.0 {
-                        batch.frame_partial(atlas, &view, &key, 150.0, 240.0, b.x, b.y, 2.0, depth, b.progress.max(0.08), Color32::from_white_alpha(220));
+                    let baked_key = colossus_key(b, time);
+                    if atlas.has(&baked_key) {
+                        // The real Colossus art (reduced pose set baked by `scripts/bake-colossus.js`).
+                        if b.progress < 1.0 {
+                            batch.frame_partial(atlas, &view, &baked_key, 210.0, 500.0, b.x, b.y, 1.0, depth, b.progress.max(0.08), Color32::from_white_alpha(220));
+                        } else {
+                            batch.frame(atlas, &view, &baked_key, 210.0, 500.0, b.x, b.y, 1.0, depth, white);
+                            if let Some(tex) = self.colossus_flags.get(b.team.clamp(0, 1) as usize) {
+                                // Four banners on the buttresses wave live (web `waveFlag`).
+                                let aim = ((b.aim_angle.unwrap_or(-std::f64::consts::FRAC_PI_2) * 8.0) / std::f64::consts::PI).round() * std::f64::consts::PI / 8.0;
+                                let (ca, sa) = ((aim + std::f64::consts::FRAC_PI_2).cos(), (aim + std::f64::consts::FRAC_PI_2).sin());
+                                let gust = 0.75 + (draw_time * 0.57).sin() * 0.18 + (draw_time * 0.23).sin() * 0.1;
+                                for i in [0, 3, 6, 9] {
+                                    let ang = i as f64 * std::f64::consts::PI / 6.0 + std::f64::consts::PI / 12.0;
+                                    let (px, py) = (ang.cos() * 103.0, ang.sin() * 103.0);
+                                    let (fx, fy) = (b.x + (px * ca - py * sa) * 1.4, b.y + ((px * sa + py * ca) * 0.72 - 124.0) * 1.4);
+                                    let (fw, fh) = (52.0, 36.0);
+                                    for s in 0..16 {
+                                        let t = s as f64 / 16.0;
+                                        let wave = ((draw_time * 2.1 - t * 5.4).sin() * 3.0 + (draw_time * 3.3 - t * 9.0).sin() * 0.9) * t * gust;
+                                        let (x0, y0, w, h) = (fx + t * fw, fy + wave, fw / 16.0 + 0.7, fh - t * 3.0);
+                                        let rect = Rect::from_min_max(view.to_screen(x0, y0), view.to_screen(x0 + w, y0 + h));
+                                        let uv = Rect::from_min_max(egui::pos2(s as f32 / 16.0, 0.0), egui::pos2((s + 1) as f32 / 16.0, 1.0));
+                                        batch.quad(tex.id(), rect, uv, depth + 0.5, white);
+                                        let light = (draw_time * 2.6 - t * 6.0).cos();
+                                        let shade = if light > 0.0 { crate::paint::rgba(255, 239, 209, (light * 0.14 * 255.0) as u8) } else { crate::paint::rgba(0, 0, 0, (-light * 0.14 * 255.0) as u8) };
+                                        batch.shape(depth + 0.6, egui::Shape::rect_filled(rect, 0.0, shade));
+                                    }
+                                }
+                            }
+                        }
                     } else {
-                        batch.frame(atlas, &view, &key, 150.0, 240.0, b.x, b.y, 2.0, depth, tint);
+                        // Stand-in: the great engine's baked frames at twice the size, darkened.
+                        let mut g2 = (*b).clone();
+                        g2.kind = BKind::Greatengine;
+                        let key = great_engine_key(&g2, time);
+                        let tint = Color32::from_rgb(190, 175, 160);
+                        if b.progress < 1.0 {
+                            batch.frame_partial(atlas, &view, &key, 150.0, 240.0, b.x, b.y, 2.0, depth, b.progress.max(0.08), Color32::from_white_alpha(220));
+                        } else {
+                            batch.frame(atlas, &view, &key, 150.0, 240.0, b.x, b.y, 2.0, depth, tint);
+                        }
                     }
                 }
                 _ => {

@@ -20,6 +20,8 @@ pub struct Frame {
     pub h: f32,
     pub dx: f32,
     pub dy: f32,
+    /// Pixels per world unit the frame was baked at.
+    pub res: f32,
 }
 
 struct Resident {
@@ -52,7 +54,21 @@ impl Atlas {
         for (k, v) in doc["frames"].as_object().ok_or("frames")? {
             let a = v.as_array().ok_or("frame")?;
             let n = |i: usize| a.get(i).and_then(|x| x.as_f64()).unwrap_or(0.0) as f32;
-            frames.insert(k.clone(), Frame { page: n(0) as u16, x: n(1), y: n(2), w: n(3), h: n(4), dx: n(5), dy: n(6) });
+            frames.insert(k.clone(), Frame { page: n(0) as u16, x: n(1), y: n(2), w: n(3), h: n(4), dx: n(5), dy: n(6), res: scale });
+        }
+        // The Colossus has its own small atlas (the web game draws it at runtime).
+        let mut pages = pages;
+        if let Ok(text) = std::fs::read_to_string(dir.join("atlas").join("colossus.json")) {
+            if let Ok(extra) = serde_json::from_str::<serde_json::Value>(&text) {
+                let offset = pages.len() as f32;
+                let res = extra["scale"].as_f64().unwrap_or(1.5) as f32;
+                pages.extend(extra["pages"].as_array().into_iter().flatten().filter_map(|p| p.as_str().map(String::from)));
+                for (k, v) in extra["frames"].as_object().into_iter().flatten() {
+                    let Some(a) = v.as_array() else { continue };
+                    let n = |i: usize| a.get(i).and_then(|x| x.as_f64()).unwrap_or(0.0) as f32;
+                    frames.insert(k.clone(), Frame { page: (n(0) + offset) as u16, x: n(1), y: n(2), w: n(3), h: n(4), dx: n(5), dy: n(6), res });
+                }
+            }
         }
         let mut families: HashMap<String, Vec<String>> = HashMap::new();
         for k in frames.keys() {
@@ -112,6 +128,10 @@ impl Atlas {
                 }
             }
         }
+    }
+
+    pub fn has(&self, key: &str) -> bool {
+        self.frames.contains_key(key)
     }
 
     pub fn frame(&self, key: &str) -> Option<Frame> {

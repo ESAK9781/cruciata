@@ -11,5 +11,8 @@ for (const file of ["index.html", "install.html", "README.md", ".nojekyll"])
 for (const directory of ["src", "assets", "docs"])
   fs.cpSync(path.join(root, directory), path.join(output, directory), {
     recursive: true,
+    // The native client's Colossus pages and JSON manifests are not used by the web game.
+    filter: (source) =>
+      !/[\\/]assets[\\/]atlas[\\/](colossus[^\\/]*|manifest\.json)$/.test(source),
   });
 console.log("Static site ready in dist/ - no runtime dependencies.");
