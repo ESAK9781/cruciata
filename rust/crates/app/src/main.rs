@@ -6,6 +6,7 @@ mod keys;
 mod paint;
 mod render;
 mod view;
+mod audio;
 mod wall3d;
 mod terrain;
 mod menu;

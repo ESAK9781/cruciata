@@ -52,6 +52,8 @@ pub struct App {
     result_handled: bool,
     terrain: Option<(u64, TextureHandle)>,
     walls: crate::wall3d::WallCache,
+    audio: Option<crate::audio::Audio>,
+    last_volumes: (f32, f32, bool),
 }
 
 #[derive(PartialEq)]
@@ -169,7 +171,7 @@ impl App {
             ui: app_ui,
             input: InputState::default(),
             fog_tex: FogTex::new(),
-            settings: Settings::default(),
+            settings: { let p = Progress::load(); Settings { music: p.music, effects: p.effects, battle_sounds: p.battle_sounds, gore: p.gore } },
             clusters: Clusters::default(),
             visual_angle: HashMap::new(),
             standard_stop: HashMap::new(),
@@ -184,6 +186,8 @@ impl App {
             result_handled: false,
             terrain: None,
             walls: Default::default(),
+            audio: None,
+            last_volumes: (-1.0, -1.0, true),
         }
     }
 
@@ -379,6 +383,32 @@ impl App {
         }
     }
 
+    fn sync_audio(&mut self) {
+        if !self.game.is_lan() {
+            self.game.sim.settings.gore = self.settings.gore;
+        }
+        let want = (self.settings.effects, self.settings.music, self.settings.battle_sounds);
+        if let Some(a) = self.audio.as_mut() {
+            if want != self.last_volumes {
+                a.enabled = want.2;
+                a.set_volumes(want.0, want.1);
+                self.last_volumes = want;
+                self.progress.music = want.1;
+                self.progress.effects = want.0;
+                self.progress.battle_sounds = want.2;
+                self.progress.gore = self.settings.gore;
+                self.progress.save();
+            }
+            a.update();
+        }
+        if self.ui.sound_select {
+            self.ui.sound_select = false;
+            if let Some(a) = self.audio.as_mut() {
+                a.play("select", 1.0);
+            }
+        }
+    }
+
     fn handle_events(&mut self) {
         let events = std::mem::take(&mut self.game.events);
         for e in events {
@@ -386,6 +416,19 @@ impl App {
                 Event::Toast(t) => self.ui.toast(t),
                 Event::Alert { x, y, .. } => {
                     self.ui.alert = Some((x, y, self.ui.clock));
+                }
+                Event::Sound { kind, x, y, team } => {
+                    let Some(a) = self.audio.as_mut() else { continue };
+                    let mut volume = 1.0f32;
+                    if let (Some(x), Some(y)) = (x, y) {
+                        if team.map(|t| t != self.game.me).unwrap_or(false) && !self.game.sees(x, y) {
+                            continue;
+                        }
+                        let reach = if kind.starts_with("great-") || kind == "explosion" { 3600.0 } else { 1000.0 };
+                        let d = ((x - self.view.cx).powi(2) + (y - self.view.cy).powi(2)).sqrt();
+                        volume = (1.0 - d / reach).clamp(0.0, 1.0) as f32;
+                    }
+                    a.play(&kind, volume);
                 }
                 Event::Finished(_) => {}
                 _ => {}
@@ -880,7 +923,7 @@ impl eframe::App for App {
             let can_resume = store::read_save(None).is_some();
             let out = self.menu.show(ctx, &self.progress, in_game, can_resume);
             self.handle_menu(out);
-            let np = "Background music: shuffled playlist".to_string();
+            let np = self.audio.as_ref().and_then(|a| a.current).map(|t| format!("Now playing: {t} (shuffled playlist)")).unwrap_or_else(|| "Background music: shuffled playlist".to_string());
             overlay::settings_dialog(ctx, &mut self.ui.show_settings, &mut self.settings, &np);
             self.shot_step(ctx);
             ctx.request_repaint();
@@ -889,6 +932,10 @@ impl eframe::App for App {
         if !shot_mode && !self.ui.show_menu {
             self.game.advance(dt);
         }
+        if self.audio.is_none() && self.args.shot.is_none() && self.frames == 2 {
+            self.audio = crate::audio::Audio::new(assets_dir());
+        }
+        self.sync_audio();
         self.handle_events();
         self.save_clock += dt;
         if self.save_clock > 20.0 && !shot_mode {
@@ -986,7 +1033,7 @@ impl eframe::App for App {
             self.view.update();
         }
         overlay::help_dialog(ctx, &mut self.ui.show_help);
-        let np = "Background music: shuffled playlist".to_string();
+        let np = self.audio.as_ref().and_then(|a| a.current).map(|t| format!("Now playing: {t} (shuffled playlist)")).unwrap_or_else(|| "Background music: shuffled playlist".to_string());
         overlay::settings_dialog(ctx, &mut self.ui.show_settings, &mut self.settings, &np);
         let _ = (map_rect, self.last_time);
         self.shot_step(ctx);

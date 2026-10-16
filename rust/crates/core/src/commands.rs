@@ -21,6 +21,7 @@ pub enum Command {
     PlaceWall { kind: BKind, ax: f64, ay: f64, bx: f64, by: f64, builders: Vec<u32>, append: bool },
     Scout { units: Vec<u32> },
     ToggleGate { id: u32 },
+    ClearPatch { units: Vec<u32>, node: u32 },
 }
 
 impl Sim {
@@ -42,6 +43,7 @@ impl Sim {
             Command::PlaceWall { kind, ax, ay, bx, by, builders, append } => self.cmd_place_wall(team, *kind, Pt::new(*ax, *ay), Pt::new(*bx, *by), builders, *append),
             Command::Scout { units } => self.cmd_scout(team, units),
             Command::ToggleGate { id } => self.cmd_toggle_gate(team, *id),
+            Command::ClearPatch { units, node } => self.cmd_clear_patch(team, units, *node),
         }
     }
 
@@ -316,6 +318,31 @@ impl Sim {
         b.auto_closed = Some(false);
         b.closed = Some(b.closed != Some(true));
         self.state.nav_dirty = true;
+        true
+    }
+}
+
+impl Sim {
+    fn cmd_clear_patch(&mut self, team: i32, units: &[u32], node: u32) -> bool {
+        let Some(crate::sim::Obj::Node(ni)) = self.get_object(node) else { return false };
+        let (nx, ny, kind) = (self.state.nodes[ni].x, self.state.nodes[ni].y, self.state.nodes[ni].kind);
+        let workers: Vec<usize> = (0..self.state.units.len()).filter(|&i| self.state.units[i].team == team && self.state.units[i].hp > 0.0 && self.state.units[i].ty == UType::Worker).collect();
+        let mut chosen: Vec<usize> = workers.iter().copied().filter(|&i| units.contains(&self.state.units[i].id)).collect();
+        if chosen.is_empty() {
+            let mut idle: Vec<usize> = workers.iter().copied().filter(|&i| self.state.units[i].job.is_none() && self.state.units[i].order.is_none()).collect();
+            idle.sort_by(|&a, &b| hypot(self.state.units[a].x - nx, self.state.units[a].y - ny).partial_cmp(&hypot(self.state.units[b].x - nx, self.state.units[b].y - ny)).unwrap_or(std::cmp::Ordering::Equal));
+            chosen = idle.into_iter().take(3).collect();
+        }
+        if chosen.is_empty() {
+            self.toast("Select villagers or free an idle villager to clear this patch.");
+            return false;
+        }
+        for i in chosen {
+            let u = &mut self.state.units[i];
+            u.job = Some(Job { kind: "clear".into(), target: Some(node), resource: Some(kind), ..Default::default() });
+            u.order = None;
+        }
+        self.toast("Villagers assigned to clear this patch; no resources are recovered.");
         true
     }
 }

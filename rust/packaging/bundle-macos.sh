@@ -9,6 +9,8 @@ rm -rf dist; mkdir -p "$app/Contents/MacOS" "$app/Contents/Resources"
 cp "$root/rust/target/release/cruciata" "$app/Contents/MacOS/cruciata"
 mkdir -p "$app/Contents/Resources/assets"
 cp -r "$root/assets/atlas" "$app/Contents/Resources/assets/atlas"
+cp -r "$root/assets/audio" "$app/Contents/Resources/assets/audio"
+cp -r "$root/assets/music" "$app/Contents/Resources/assets/music"
 rm -f "$app/Contents/Resources/assets/atlas/manifest.js"
 cat > "$app/Contents/Info.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>

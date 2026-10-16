@@ -291,6 +291,8 @@ fn commands(ui: &mut egui::Ui, f: &mut Frame) {
     let tower_possible: Vec<usize> = f.ui.selected_structures(g, &|b| b.kind == BKind::Wall).into_iter().filter(|&i| g.sim.available_wall(i)).collect();
     let has_gate = !f.ui.selected_structures(g, &|b| b.kind == BKind::Gate && b.progress >= 1.0).is_empty();
     let result = st.result.is_some();
+    let patch = f.ui.sel_node.filter(|id| g.sim.state.nodes.iter().any(|n| n.id == *id));
+    let mut clear_patch = false;
     let mut do_stance: Option<&str> = None;
     let mut up_gate = false;
     let mut up_tower = false;
@@ -334,6 +336,9 @@ fn commands(ui: &mut egui::Ui, f: &mut Frame) {
             if has_gate && cmd_button(ui, "#", "Open / close", "", true, false, "Toggle the gate.") {
                 gate = true;
             }
+            if patch.is_some() && cmd_button(ui, "x", "Clear patch", "", true, false, "Villagers remove this patch without recovering resources.") {
+                clear_patch = true;
+            }
             if non_city && cmd_button(ui, "x", "Destroy", "", true, false, "Demolish the selected structure.") {
                 destroy = true;
             }
@@ -369,6 +374,12 @@ fn commands(ui: &mut egui::Ui, f: &mut Frame) {
     }
     let ui_state = &mut *f.ui;
     let game = &mut *f.g;
+    if clear_patch {
+        if let Some(n) = patch {
+            let units: Vec<u32> = ui_state.selected.iter().copied().collect();
+            game.issue(cruciata_core::lockstep::PlayerCommand::Game(cruciata_core::commands::Command::ClearPatch { units, node: n }));
+        }
+    }
     if let Some(s) = do_stance {
         ui_state.set_stance(game, s);
     }
