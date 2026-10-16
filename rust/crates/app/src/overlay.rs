@@ -382,3 +382,34 @@ pub fn result_dialog(ctx: &egui::Context, g: &Game) -> Option<ResultChoice> {
     });
     choice
 }
+
+/// The playtesting menu (F2). Returns the cheat the player chose.
+pub fn debug_dialog(ctx: &egui::Context, open: &mut bool, g: &Game) -> Option<&'static str> {
+    if !*open {
+        return None;
+    }
+    let mut chosen = None;
+    parchment_window(ctx, "Command the battlefield", open, |ui| {
+        ui.set_width(460.0);
+        ui.label(RichText::new("PLAYTESTING / DEBUG MODE").size(11.0).color(col("#c8a467")));
+        ui.label(RichText::new("Cheats affect this session. Toggle buttons stay active until switched off.").size(13.0));
+        for (id, label) in [
+            ("resources", "Grant 10,000 of every resource"),
+            ("army", "Raise 48 troops"),
+            ("heal", "Heal all your people & structures"),
+            ("invulnerable", "Toggle invulnerability"),
+            ("instant", "Toggle instant building & training"),
+            ("reveal", "Toggle map reveal"),
+            ("speed", "Toggle 4x simulation speed"),
+            ("peace", "Remove enemy combat troops"),
+            ("victory", "Win this battle"),
+        ] {
+            let active = if id == "speed" { g.sim.speed_cheat() == 4.0 } else { g.sim.cheat_on(id) };
+            let b = egui::Button::new(RichText::new(label).size(13.0)).fill(if active { col("#8a5a2d") } else { col("#5a4630") }).min_size(Vec2::new(440.0, 30.0));
+            if ui.add(b).clicked() {
+                chosen = Some(id);
+            }
+        }
+    });
+    chosen
+}

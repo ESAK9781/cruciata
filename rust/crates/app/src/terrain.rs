@@ -85,10 +85,11 @@ impl Cv {
 
 /// Bake the ground. `level` is the biome index used by the original
 /// (0 coastal, 1 river, 2 arid, 3 winter); `coast` enables the sea.
-pub fn bake(state: &State, w: f64, h: f64, level: i32, coast: bool) -> ColorImage {
+pub fn bake(state: &State, w: f64, h: f64, level: i32, coast: bool) -> (ColorImage, ColorImage) {
     let scale = 0.5f64.min(2560.0 / w).min(1800.0 / h);
     let (pw, ph) = ((w * scale).ceil() as u32, (h * scale).ceil() as u32);
     let mut cv = Cv { pm: Pixmap::new(pw.max(1), ph.max(1)).unwrap(), s: scale as f32 };
+    let mut cw = Cv { pm: Pixmap::new(pw.max(1), ph.max(1)).unwrap(), s: scale as f32 };
     let mut rand = Seeded::new(state.seed);
     let colors: [&str; 3] = match level {
         2 => ["#cba766", "#d9ba7c", "#b89759"],
@@ -114,21 +115,21 @@ pub fn bake(state: &State, w: f64, h: f64, level: i32, coast: bool) -> ColorImag
             y += 10.0;
         }
         pts.push((0.0, h));
-        cv.polygon_gradient(&pts, 0.0, 420.0, &[(0.0, "#174a5d"), (0.75, "#247584"), (1.0, "#47958d")]);
+        cw.polygon_gradient(&pts, 0.0, 420.0, &[(0.0, "#174a5d"), (0.75, "#247584"), (1.0, "#47958d")]);
         let mut shore = vec![];
         let mut y = 0.0;
         while y <= h {
             shore.push((coast_x(y), y));
             y += 10.0;
         }
-        cv.line(&shore, 22.0, "#d4c592");
-        cv.line(&shore.iter().map(|&(x, y)| (x - 15.0, y)).collect::<Vec<_>>(), 3.0, "#bdd2b7");
-        cv.line(&shore.iter().map(|&(x, y)| (x + 8.0, y)).collect::<Vec<_>>(), 2.0, "#b9a77c");
+        cw.line(&shore, 22.0, "#d4c592");
+        cw.line(&shore.iter().map(|&(x, y)| (x - 15.0, y)).collect::<Vec<_>>(), 3.0, "#bdd2b7");
+        cw.line(&shore.iter().map(|&(x, y)| (x + 8.0, y)).collect::<Vec<_>>(), 2.0, "#b9a77c");
         for _ in 0..600 {
             let y = rand.next() * h;
             let x = rand.next() * coast_x(y);
             let len = 8.0 + rand.next() * 15.0;
-            cv.line(&[(x, y), (x + len, y)], 1.0, "#81c1c266");
+            cw.line(&[(x, y), (x + len, y)], 1.0, "#81c1c266");
         }
     }
     if level == 1 {
@@ -138,38 +139,33 @@ pub fn bake(state: &State, w: f64, h: f64, level: i32, coast: bool) -> ColorImag
             pts.push((river_x(state, w, y), y));
             y += 10.0;
         }
-        cv.line(&pts, 110.0, "#6c9690");
-        cv.line(&pts, 78.0, "#7aa39a");
-        cv.line(&pts.iter().map(|&(x, y)| (x + 38.0, y)).collect::<Vec<_>>(), 2.0, "#b2c7a5");
+        cw.line(&pts, 110.0, "#6c9690");
+        cw.line(&pts, 78.0, "#7aa39a");
+        cw.line(&pts.iter().map(|&(x, y)| (x + 38.0, y)).collect::<Vec<_>>(), 2.0, "#b2c7a5");
         let by = bridge_y(state, h);
         let bx = river_x(state, w, by);
-        cv.rect(bx - 85.0, by - 47.0, 170.0, 94.0, "#a3946c");
+        cw.rect(bx - 85.0, by - 47.0, 170.0, 94.0, "#a3946c");
         let mut x = bx - 82.0;
         while x < bx + 82.0 {
-            cv.line(&[(x, by - 42.0), (x, by + 42.0)], 2.0, "#cfbb8e");
+            cw.line(&[(x, by - 42.0), (x, by + 42.0)], 2.0, "#cfbb8e");
             x += 12.0;
         }
-        cv.line(&[(bx - 87.0, by - 50.0), (bx + 87.0, by - 50.0)], 6.0, "#a99a77");
-        cv.line(&[(bx - 87.0, by + 50.0), (bx + 87.0, by + 50.0)], 6.0, "#a99a77");
+        cw.line(&[(bx - 87.0, by - 50.0), (bx + 87.0, by - 50.0)], 6.0, "#a99a77");
+        cw.line(&[(bx - 87.0, by + 50.0), (bx + 87.0, by + 50.0)], 6.0, "#a99a77");
     }
-    for road in &state.roads {
-        let pts: Vec<(f64, f64)> = road.iter().map(|p| (p.x, p.y)).collect();
-        if pts.len() < 2 {
-            continue;
-        }
-        cv.line(&pts, 38.0, "#827761");
-        cv.line(&pts, 33.0, "#a89b7e");
-        for off in [-7.0, 7.0] {
-            cv.line(&pts.iter().map(|&(x, y)| (x + off, y)).collect::<Vec<_>>(), 0.8, "#8d78493d");
-        }
-    }
-    // Faint grass tufts that the original tiled over the ground.
+    let to_image = |pm: &Pixmap| -> ColorImage {
+        let px: Vec<eframe::egui::Color32> = pm
+            .pixels()
+            .iter()
+            .map(|p| {
+                let c = p.demultiply();
+                eframe::egui::Color32::from_rgba_unmultiplied(c.red(), c.green(), c.blue(), c.alpha())
+            })
+            .collect();
+        ColorImage { size: [pw as usize, ph as usize], pixels: px }
+    };
     let _ = (sin(0.0), cos(0.0));
-    let px: Vec<eframe::egui::Color32> = cv.pm.pixels().iter().map(|p| {
-        let c = p.demultiply();
-        eframe::egui::Color32::from_rgba_unmultiplied(c.red(), c.green(), c.blue(), c.alpha())
-    }).collect();
-    ColorImage { size: [pw as usize, ph as usize], pixels: px }
+    (to_image(&cv.pm), to_image(&cw.pm))
 }
 
 fn rock_path(contours: &[Vec<cruciata_core::nav::Pt>]) -> Option<tiny_skia::Path> {
@@ -206,6 +202,17 @@ pub fn bake_rocks(state: &State, w: f64, h: f64) -> ColorImage {
     let (pw, ph) = ((w * scale).ceil() as u32, (h * scale).ceil() as u32);
     let mut cv = Cv { pm: Pixmap::new(pw.max(1), ph.max(1)).unwrap(), s: scale as f32 };
     let sk = Transform::from_scale(scale as f32, scale as f32);
+    for road in &state.roads {
+        let pts: Vec<(f64, f64)> = road.iter().map(|p| (p.x, p.y)).collect();
+        if pts.len() < 2 {
+            continue;
+        }
+        cv.line(&pts, 38.0, "#827761");
+        cv.line(&pts, 33.0, "#a89b7e");
+        for off in [-7.0, 7.0] {
+            cv.line(&pts.iter().map(|&(x, y)| (x + off, y)).collect::<Vec<_>>(), 0.8, "#8d78493d");
+        }
+    }
     for f in state.terrain_features.iter().filter(|f| f.kind == "rockmass" && f.forest != Some(true)) {
         let Some(path) = rock_path(&f.contours) else { continue };
         let rim = match f.biome as i32 {
@@ -228,4 +235,65 @@ pub fn bake_rocks(state: &State, w: f64, h: f64) -> ColorImage {
         eframe::egui::Color32::from_rgba_unmultiplied(c.red(), c.green(), c.blue(), c.alpha())
     }).collect();
     ColorImage { size: [pw as usize, ph as usize], pixels: px }
+}
+
+
+/// The 512-unit grass/ground tile the web version repeats over the land (`groundTexture`).
+pub fn ground_tile(level: i32) -> ColorImage {
+    let mut cv = Cv { pm: Pixmap::new(512, 512).unwrap(), s: 1.0 };
+    let mut seed: u32 = 9381u32.wrapping_add((level as u32).wrapping_mul(71));
+    let mut rand = || {
+        seed = seed.wrapping_mul(1664525).wrapping_add(1013904223);
+        seed as f64 / 4294967296.0
+    };
+    for i in 0..38 {
+        let (x, y, r) = (rand() * 512.0, rand() * 512.0, 15.0 + rand() * 48.0);
+        let shade = match level {
+            3 => "#354f5b15",
+            2 => "#66432113",
+            _ => {
+                if i % 3 != 0 {
+                    "#345c2e19"
+                } else {
+                    "#b6945930"
+                }
+            }
+        };
+        let [rr, gg, bb, aa] = col(shade).to_srgba_unmultiplied();
+        // Radial fade as concentric rings.
+        for k in 0..6 {
+            let f = 1.0 - k as f64 / 6.0;
+            cv.ellipse(x, y, r * f, r * f, &format!("#{:02x}{:02x}{:02x}{:02x}", rr, gg, bb, (aa as f64 / 6.0).max(1.0) as u8));
+        }
+        for _ in 0..18 {
+            let a = rand() * std::f64::consts::TAU;
+            let d = rand() * r;
+            let (e1, e2) = (rand() * 2.0 + 0.4, rand() + 0.4);
+            cv.ellipse(x + a.cos() * d, y + a.sin() * d, e1, e2, if level == 3 { "#eeeede35" } else { "#d7bf8d29" });
+        }
+    }
+    for i in 0..6500 {
+        let (x, y) = (rand() * 512.0, rand() * 512.0);
+        if level == 2 {
+            let (e1, e2) = (0.5 + rand() * 1.6, 0.4 + rand());
+            cv.ellipse(x, y, e1, e2, if i % 3 != 0 { "#59432424" } else { "#fff1b329" });
+            if i % 20 == 0 {
+                cv.line(&[(x, y), (x + 5.0, y + 1.0), (x + 9.0, y - 1.0)], 0.6, "#715b3523");
+            }
+        } else if level == 3 {
+            let (e1, e2) = (1.0 + rand() * 3.0, 0.5 + rand() * 1.5);
+            cv.ellipse(x, y, e1, e2, if i % 3 != 0 { "#405b6b18" } else { "#f5f5e333" });
+        } else {
+            let (dx, dy) = (rand() * 3.0 - 1.5, 2.0 + rand() * 4.0);
+            cv.line(&[(x, y), (x + dx, y - dy)], 0.7, if i % 3 != 0 { "#233c232e" } else { "#c8d78c39" });
+            if i % 24 == 0 {
+                cv.ellipse(x, y, 1.3, 0.8, "#e5cdad44");
+            }
+        }
+    }
+    let px: Vec<eframe::egui::Color32> = cv.pm.pixels().iter().map(|p| {
+        let c = p.demultiply();
+        eframe::egui::Color32::from_rgba_unmultiplied(c.red(), c.green(), c.blue(), c.alpha())
+    }).collect();
+    ColorImage { size: [512, 512], pixels: px }
 }

@@ -145,6 +145,7 @@ pub fn header(ctx: &egui::Context, f: &mut Frame, actions: &mut Vec<Action>) {
 
 #[derive(Debug, PartialEq, Clone)]
 pub enum Action {
+    Debug,
     Settings,
     Help,
     Pause,

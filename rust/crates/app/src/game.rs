@@ -52,8 +52,9 @@ impl Game {
             self.chat.append(&mut ls.chat);
         } else if !self.sim.state.paused {
             self.acc = (self.acc + dt).min(0.25);
+            let speed = self.sim.speed_cheat();
             while self.acc >= STEP {
-                self.sim.update(STEP);
+                self.sim.update(STEP * speed);
                 self.acc -= STEP;
             }
         }
@@ -76,12 +77,16 @@ impl Game {
         if self.me == 0 { &self.sim.fog } else { &self.sim.enemy_fog }
     }
 
+    pub fn revealed(&self) -> bool {
+        !self.is_lan() && self.sim.cheat_on("reveal")
+    }
+
     pub fn sees(&self, x: f64, y: f64) -> bool {
-        self.fog().sees(x, y)
+        self.revealed() || self.fog().sees(x, y)
     }
 
     pub fn remembers(&self, x: f64, y: f64) -> bool {
-        self.fog().remembers(x, y)
+        self.revealed() || self.fog().remembers(x, y)
     }
 
     pub fn has_tech(&self, key: &str) -> bool {

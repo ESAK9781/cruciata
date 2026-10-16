@@ -39,7 +39,7 @@ pub struct MapOut {
 }
 
 #[allow(clippy::too_many_arguments)]
-pub fn draw(ui: &mut egui::Ui, inner: Rect, g: &Game, st: &mut UiState, view: &mut View, fog: &FogTex, terrain: Option<TextureId>, icons: &Icons) -> MapOut {
+pub fn draw(ui: &mut egui::Ui, inner: Rect, g: &Game, st: &mut UiState, view: &mut View, fog: &FogTex, terrain: Option<TextureId>, water: Option<TextureId>, icons: &Icons) -> MapOut {
     let p = ui.painter().clone();
     let ctx = ui.ctx().clone();
     let mut out = MapOut { orders_toggled: false, look: None, minimap_order: None };
@@ -177,6 +177,9 @@ pub fn draw(ui: &mut egui::Ui, inner: Rect, g: &Game, st: &mut UiState, view: &m
     let mp = p.with_clip_rect(mrect);
     mp.rect_filled(mrect, 0.0, c("#101a20"));
     if let Some(t) = terrain {
+        mp.image(t, mrect, Rect::from_min_max(Pos2::ZERO, Pos2::new(1.0, 1.0)), Color32::WHITE);
+    }
+    if let Some(t) = water {
         mp.image(t, mrect, Rect::from_min_max(Pos2::ZERO, Pos2::new(1.0, 1.0)), Color32::WHITE);
     }
     let (sx, sy) = (cw as f64 / w, ch as f64 / h);

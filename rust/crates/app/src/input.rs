@@ -247,7 +247,7 @@ fn finish_drag(ui: &mut UiState, g: &mut Game, view: &View, d: Drag) {
 
 /// Keyboard shortcuts; returns a world point to look at (home / alert / idle villager).
 pub fn keys(ctx: &egui::Context, view: &mut View, ui: &mut UiState, g: &mut Game, dt: f64) -> Option<(f64, f64)> {
-    if ctx.wants_keyboard_input() || ui.show_help || ui.show_settings || ui.show_menu {
+    if ctx.wants_keyboard_input() || ui.show_help || ui.show_settings || ui.show_menu || ui.show_debug {
         return None;
     }
     let mut look = None;
@@ -269,6 +269,9 @@ pub fn keys(ctx: &egui::Context, view: &mut View, ui: &mut UiState, g: &mut Game
     });
     view.update();
     let pressed = |k: Key| ctx.input(|i| i.key_pressed(k));
+    if pressed(Key::F2) && !g.is_lan() {
+        ui.show_debug = !ui.show_debug;
+    }
     if pressed(Key::Escape) {
         if ui.mode != Mode::Move || ui.placement.is_some() {
             ui.cancel_mode();

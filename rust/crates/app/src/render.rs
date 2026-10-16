@@ -54,6 +54,8 @@ pub struct App {
     result_handled: bool,
     terrain: Option<(u64, TextureHandle)>,
     rocks: Option<TextureHandle>,
+    water: Option<TextureHandle>,
+    tile: Option<TextureHandle>,
     walls: crate::wall3d::WallCache,
     audio: Option<crate::audio::Audio>,
     gates: crate::gate3d::GateCache,
@@ -148,6 +150,7 @@ impl App {
                     }
                 }
                 "settings" => app_ui.show_settings = true,
+                "debug" => app_ui.show_debug = true,
                 "help" => app_ui.show_help = true,
                 "menu" => app_ui.show_menu = true,
                 "screen" => screen_req = Some(v.to_string()),
@@ -230,6 +233,8 @@ impl App {
             result_handled: false,
             terrain: None,
             rocks: None,
+            water: None,
+            tile: None,
             walls: Default::default(),
             audio: None,
             gates: Default::default(),
@@ -413,7 +418,10 @@ impl App {
             return;
         }
         let coast = s.mode != "quickmatch";
-        let mut img = crate::terrain::bake(s, self.game.sim.geo.w, self.game.sim.geo.h, self.biome(), coast);
+        let (mut img, water) = crate::terrain::bake(s, self.game.sim.geo.w, self.game.sim.geo.h, self.biome(), coast);
+        self.water = Some(ctx.load_texture("water", water, egui::TextureOptions::LINEAR));
+        let repeat = egui::TextureOptions { wrap_mode: egui::TextureWrapMode::Repeat, ..egui::TextureOptions::LINEAR };
+        self.tile = Some(ctx.load_texture("ground-tile", crate::terrain::ground_tile(self.biome()), repeat));
         if data().levels[s.level].kind == "survival" {
             for p in img.pixels.iter_mut() {
                 let [r, g, b, _] = p.to_srgba_unmultiplied();
@@ -515,6 +523,84 @@ impl App {
         }
     }
 
+    /// Animated sea lapping/ripples and river flow lines (web `terrainDetails`).
+    fn draw_water_motion(&self, painter: &egui::Painter, view: &crate::view::View) {
+        use cruciata_core::world::{bridge_y, coast_x, is_river_map, river_x};
+        let sim = &self.game.sim;
+        let time = sim.state.time;
+        let (w, h) = (sim.geo.w, sim.geo.h);
+        let z = view.zoom as f32;
+        let seg = |pts: Vec<egui::Pos2>, width: f64, c: Color32| {
+            if pts.len() > 1 {
+                painter.add(egui::Shape::line(pts, egui::Stroke::new((width as f32 * z).max(0.5), c)));
+            }
+        };
+        let (y0, y1) = (view.y.max(0.0), (view.y + view.h).min(h));
+        if y1 <= y0 {
+            return;
+        }
+        if sim.state.mode != "quickmatch" && data().levels[sim.state.level].terrain == 0 {
+            for band in 0..5 {
+                let phase = (time * 9.0 + band as f64 * 38.0) % 190.0;
+                let mut pts = Vec::new();
+                let mut y = (y0 / 12.0).floor() * 12.0;
+                while y < y1 + 12.0 {
+                    let cx = coast_x(y);
+                    let off = -190.0 + phase + (y / 54.0 + time * 0.65 + band as f64).sin() * 4.0;
+                    pts.push(view.to_screen((cx + off).clamp(0.0, cx - 8.0), y));
+                    y += 12.0;
+                }
+                let a = ((phase / 190.0 * std::f64::consts::PI).sin() * 0.28 * 255.0) as u8;
+                seg(pts, 0.7 + phase / 150.0, Color32::from_rgba_unmultiplied(220, 244, 226, a));
+            }
+            let mut yy = (y0 / 75.0).floor() * 75.0;
+            while yy < y1 {
+                let mut xx = (view.x.max(0.0) / 100.0).floor() * 100.0;
+                while xx < (view.x + view.w).min(coast_x(yy) - 50.0) {
+                    let dy = (xx * 0.03 + time).sin() * 3.0;
+                    seg(vec![view.to_screen(xx, yy + dy), view.to_screen(xx + 20.0, yy + dy)], 0.8, Color32::from_rgba_unmultiplied(0x72, 0xb8, 0xbc, 0x44));
+                    xx += 100.0;
+                }
+                yy += 75.0;
+            }
+        }
+        if is_river_map(&sim.state) {
+            let by = bridge_y(&sim.state, h);
+            let rx = |y: f64| river_x(&sim.state, w, y);
+            for band in 0..5 {
+                let mut y = (y0 / 90.0).floor() * 90.0 - 90.0;
+                while y < y1 + 90.0 {
+                    let yy = y + ((time * 22.0 + band as f64 * 17.0) % 90.0);
+                    let x = rx(yy) + (band as f64 - 2.0) * 13.0;
+                    seg(
+                        vec![
+                            view.to_screen(x, yy),
+                            view.to_screen(x + (yy * 0.04 + time).sin() * 3.0, yy + 17.0),
+                            view.to_screen(x + 3.0, yy + 25.0),
+                        ],
+                        1.0,
+                        Color32::from_rgba_unmultiplied(0xd3, 0xed, 0xe5, 0x44),
+                    );
+                    y += 90.0;
+                }
+            }
+            for side in [-1.0f64, 1.0] {
+                let mut pts: Vec<egui::Pos2> = Vec::new();
+                let bank = Color32::from_rgba_unmultiplied(0xd8, 0xdf, 0xba, 0xaa);
+                let mut y = (y0 / 12.0).floor() * 12.0;
+                while y < y1 + 12.0 {
+                    if (y - by).abs() < 53.0 {
+                        seg(std::mem::take(&mut pts), 2.0, bank);
+                    } else {
+                        pts.push(view.to_screen(rx(y) + side * 49.0 + (y * 0.04 + time * 1.2).sin() * 1.8, y));
+                    }
+                    y += 12.0;
+                }
+                seg(pts, 2.0, bank);
+            }
+        }
+    }
+
     fn draw_world(&mut self, ui: &mut egui::Ui, rect: Rect, dt: f64) {
         self.view.rect = rect;
         self.view.update();
@@ -532,8 +618,25 @@ impl App {
             let tl = view.to_screen(0.0, 0.0);
             let br = view.to_screen(self.game.sim.geo.w, self.game.sim.geo.h);
             painter.image(t.id(), Rect::from_min_max(tl, br), Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)), Color32::WHITE);
+            // Ground pattern over the land (repeats every 512 world units).
+            if let Some(tile) = &self.tile {
+                let (x0, y0) = (view.x.max(0.0), view.y.max(0.0));
+                let (x1, y1) = ((view.x + view.w).min(self.game.sim.geo.w), (view.y + view.h).min(self.game.sim.geo.h));
+                if x1 > x0 && y1 > y0 {
+                    let a = view.to_screen(x0, y0);
+                    let b = view.to_screen(x1, y1);
+                    let uv = Rect::from_min_max(egui::pos2((x0 / 512.0) as f32, (y0 / 512.0) as f32), egui::pos2((x1 / 512.0) as f32, (y1 / 512.0) as f32));
+                    painter.image(tile.id(), Rect::from_min_max(a, b), uv, Color32::WHITE);
+                }
+            }
             if let Some(rk) = &self.rocks {
                 painter.image(rk.id(), Rect::from_min_max(tl, br), Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)), Color32::WHITE);
+            }
+            if let Some(wt) = &self.water {
+                painter.image(wt.id(), Rect::from_min_max(tl, br), Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)), Color32::WHITE);
+            }
+            if view.zoom >= ANIM_SCALE {
+                self.draw_water_motion(&painter, &view);
             }
         }
         let cv = Canvas { painter: &painter, view: &view };
@@ -939,7 +1042,9 @@ impl App {
             }
         }
         // ---- fog ----
-        self.fog_tex.paint(&painter, &view, sim.geo.w, sim.geo.h);
+        if !g.revealed() {
+            self.fog_tex.paint(&painter, &view, sim.geo.w, sim.geo.h);
+        }
         // ---- unit overlays ----
         for &i in &visible {
             let u = &sim.state.units[i];
@@ -1160,7 +1265,7 @@ impl eframe::App for App {
             ctx.request_repaint_after(std::time::Duration::from_millis(16));
             return;
         }
-        if !shot_mode && !self.ui.show_menu {
+        if !shot_mode && !self.ui.show_menu && !self.ui.show_debug {
             self.game.advance(dt);
         }
         if let Some(ls) = self.game.lock.as_ref() {
@@ -1223,7 +1328,7 @@ impl eframe::App for App {
             input::map_input(ctx, &resp, &mut self.view, &mut self.ui, &mut self.game, &mut self.input);
             self.draw_world(ui, map_rect, dt);
             let tex = self.terrain.as_ref().map(|t| t.1.id());
-            let out = mapui::draw(ui, map_rect, &self.game, &mut self.ui, &mut self.view, &self.fog_tex, tex, &self.icons);
+            let out = mapui::draw(ui, map_rect, &self.game, &mut self.ui, &mut self.view, &self.fog_tex, tex, self.water.as_ref().map(|t| t.id()), &self.icons);
             if out.look.is_some() {
                 look = out.look;
             }
@@ -1244,6 +1349,7 @@ impl eframe::App for App {
         for a in actions {
             match a {
                 Action::Help => self.ui.show_help = true,
+                Action::Debug => self.ui.show_debug = !self.ui.show_debug,
                 Action::Settings => self.ui.show_settings = true,
                 Action::Pause => self.game.sim.state.paused = !self.game.sim.state.paused,
                 Action::Menu => {
@@ -1297,6 +1403,16 @@ impl eframe::App for App {
                 self.start_campaign(l, d);
             }
             None => {}
+        }
+        if !self.game.is_lan() {
+            if let Some(c) = overlay::debug_dialog(ctx, &mut self.ui.show_debug, &self.game) {
+                if c == "victory" {
+                    self.ui.show_debug = false;
+                }
+                self.game.sim.cheat(c);
+            }
+        } else {
+            self.ui.show_debug = false;
         }
         overlay::help_dialog(ctx, &mut self.ui.show_help);
         let np = self.audio.as_ref().and_then(|a| a.current).map(|t| format!("Now playing: {t} (shuffled playlist)")).unwrap_or_else(|| "Background music: shuffled playlist".to_string());

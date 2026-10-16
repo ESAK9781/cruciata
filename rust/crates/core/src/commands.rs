@@ -346,3 +346,81 @@ impl Sim {
         true
     }
 }
+
+impl Sim {
+    /// Playtesting cheats of the web debug menu (single-player only).
+    pub fn cheat(&mut self, action: &str) -> bool {
+        if self.state.result.is_some() {
+            return false;
+        }
+        let mut cheats = self.state.cheats.take().unwrap_or_else(|| serde_json::json!({}));
+        let toggle = |c: &mut serde_json::Value, k: &str| {
+            let on = c.get(k).and_then(|v| v.as_bool()).unwrap_or(false);
+            c[k] = serde_json::json!(!on);
+        };
+        match action {
+            "resources" => {
+                for r in Res::ALL {
+                    *self.state.resources.get_mut(r) += 10000.0;
+                }
+                self.state.faith = 250.0;
+            }
+            "heal" => {
+                for u in self.state.units.iter_mut().filter(|u| u.team == 0 && u.hp > 0.0) {
+                    u.hp = u.max_hp;
+                }
+                for b in self.state.buildings.iter_mut().filter(|b| b.team == 0 && b.hp > 0.0) {
+                    b.hp = b.max_hp;
+                }
+            }
+            "invulnerable" => toggle(&mut cheats, "invulnerable"),
+            "instant" => toggle(&mut cheats, "instant"),
+            "reveal" => toggle(&mut cheats, "reveal"),
+            "speed" => {
+                let on = cheats.get("speed").and_then(|v| v.as_f64()) == Some(4.0);
+                cheats["speed"] = serde_json::json!(if on { 1 } else { 4 });
+            }
+            "army" => {
+                if let Some(base) = self.state.buildings.iter().find(|b| b.team == 0 && b.kind == BKind::Towncenter).map(|b| (b.x, b.y)) {
+                    let types = [UType::Sword, UType::Archer, UType::Knight, UType::Standard, UType::Chaplain, UType::Trebuchet];
+                    for i in 0..48usize {
+                        let p = self.find_free(Pt::new(base.0 + 260.0 + (i % 8) as f64 * 28.0, base.1 + 210.0 + (i / 8) as f64 * 28.0));
+                        let ty = types[i % 6];
+                        let u = self.make_unit(ty, 0, p.x, p.y);
+                        self.state.units.push(u);
+                        let ui = self.state.units.len() - 1;
+                        let rank = self.rank_for(ty, 0);
+                        self.apply_rank(ui, rank);
+                    }
+                }
+            }
+            "peace" => {
+                let d = data();
+                for u in self.state.units.iter_mut().filter(|u| u.team == 1) {
+                    if d.ty(u.ty).damage > 0.0 {
+                        u.hp = 0.0;
+                    }
+                }
+                self.state.arrows.clear();
+                self.state.boulders.clear();
+            }
+            "victory" => {
+                self.state.cheats = Some(cheats);
+                self.finish(true);
+                return true;
+            }
+            _ => {}
+        }
+        self.state.cheats = Some(cheats);
+        self.toast(format!("Debug: {action}"));
+        true
+    }
+
+    pub fn cheat_on(&self, name: &str) -> bool {
+        self.state.cheats.as_ref().and_then(|c| c.get(name)).map(|v| v.as_bool().unwrap_or(false)).unwrap_or(false)
+    }
+
+    pub fn speed_cheat(&self) -> f64 {
+        self.state.cheats.as_ref().and_then(|c| c.get("speed")).and_then(|v| v.as_f64()).filter(|s| *s == 4.0).unwrap_or(1.0)
+    }
+}

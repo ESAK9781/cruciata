@@ -92,6 +92,16 @@ pub fn draw(ui: &mut egui::Ui, lay: &Layout, g: &Game, st: &mut UiState, icons: 
     if btn(ui, &mut x, 48.0, "Menu", "btn-menu") {
         actions.push(Action::Menu);
     }
+    if !g.is_lan() {
+        let r = Rect::from_min_size(Pos2::new(x - 52.0, 12.0), Vec2::new(52.0, 29.0));
+        let resp = ui.interact(r, Id::new("btn-debug"), Sense::click());
+        paint_button(&p, r, "Debug", &ButtonStyle::standard(10.0), st.show_debug, true, resp.hovered());
+        resp.clone().on_hover_text("Playtesting cheats (F2)");
+        if resp.clicked() {
+            actions.push(Action::Debug);
+        }
+        x -= 52.0 + 7.0;
+    }
     let cx = (69.0 + 118.0 + x) / 2.0 + 60.0;
     let mw = spaced_width(&ctx, "IN HOC SIGNO VINCES", fell(11.0), 3.0);
     spaced(&p, Pos2::new(cx - mw / 2.0, 20.0), "IN HOC SIGNO VINCES", fell(11.0), c("#ad976e"), 3.0);
