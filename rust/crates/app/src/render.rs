@@ -55,6 +55,7 @@ pub struct App {
     audio: Option<crate::audio::Audio>,
     gates: crate::gate3d::GateCache,
     desync_warned: bool,
+    fps_mark: Option<(std::time::Instant, u32)>,
     last_volumes: (f32, f32, bool),
 }
 
@@ -191,6 +192,7 @@ impl App {
             audio: None,
             gates: Default::default(),
             desync_warned: false,
+            fps_mark: None,
             last_volumes: (-1.0, -1.0, true),
         }
     }
@@ -1036,6 +1038,15 @@ pub fn health_bar(cv: &Canvas, x: f64, y: f64, ratio: f64, w: f64, team: i32) {
 impl eframe::App for App {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         self.frames += 1;
+        if std::env::var_os("CRUCIATA_FPS").is_some() {
+            let now = std::time::Instant::now();
+            let e = self.fps_mark.get_or_insert((now, 0u32));
+            e.1 += 1;
+            if now.duration_since(e.0).as_secs_f32() >= 2.0 {
+                eprintln!("{:.1} fps, sim {:.1} ms/step", e.1 as f32 / 2.0, self.game.sim.state.time);
+                *e = (now, 0);
+            }
+        }
         let dt = (ctx.input(|i| i.unstable_dt) as f64).min(0.1);
         self.ui.clock += dt;
         self.atlas.begin_frame(ctx);
@@ -1066,7 +1077,7 @@ impl eframe::App for App {
             let np = self.audio.as_ref().and_then(|a| a.current).map(|t| format!("Now playing: {t} (shuffled playlist)")).unwrap_or_else(|| "Background music: shuffled playlist".to_string());
             overlay::settings_dialog(ctx, &mut self.ui.show_settings, &mut self.settings, &np);
             self.shot_step(ctx);
-            ctx.request_repaint();
+            ctx.request_repaint_after(std::time::Duration::from_millis(16));
             return;
         }
         if !shot_mode && !self.ui.show_menu {
@@ -1207,7 +1218,7 @@ impl eframe::App for App {
         overlay::settings_dialog(ctx, &mut self.ui.show_settings, &mut self.settings, &np);
         let _ = (map_rect, self.last_time);
         self.shot_step(ctx);
-        ctx.request_repaint();
+        ctx.request_repaint_after(std::time::Duration::from_millis(16));
     }
 }
 
