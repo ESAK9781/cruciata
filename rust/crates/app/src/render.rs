@@ -211,6 +211,15 @@ impl App {
                         if focus.is_none() { focus = Some((tc.0 + n[2], tc.1 + n[3])); }
                     }
                 }
+                "towerwall" => {
+                    // Debug: turn the middle player wall into an attached guard tower.
+                    let walls: Vec<usize> = game.sim.state.buildings.iter().enumerate().filter(|(_, b)| b.team == 0 && b.kind == BKind::Wall).map(|(i, _)| i).collect();
+                    if let Some(&i) = walls.get(walls.len() / 2) {
+                        let item = cruciata_core::model::QueueItem { extra: [("targetKind".to_string(), serde_json::json!("tower"))].into_iter().collect(), ..Default::default() };
+                        game.sim.complete_wall_upgrade(i, &item);
+                        focus = Some((game.sim.state.buildings[i].x, game.sim.state.buildings[i].y));
+                    }
+                }
                 "settings" => app_ui.show_settings = true,
                 "debug" => app_ui.show_debug = true,
                 "help" => app_ui.show_help = true,
@@ -1083,6 +1092,18 @@ impl App {
                         wall_shape(&mut batch, &view, walls.get(&wb), att.x, att.y, depth - 0.01, 1.0);
                     }
                     let (width, _h, oy) = building_canvas(b);
+                    // Attached towers bake once per size/team; real keys also carry link
+                    // coordinates, so fall back to the generic baked frame.
+                    let plain;
+                    let b: &Building = if b.wall_attachment.is_some() && !atlas.has(&building_key(b)) {
+                        let mut p = (*b).clone();
+                        p.links = None;
+                        p.wall_angle = None;
+                        plain = p;
+                        &plain
+                    } else {
+                        b
+                    };
                     let key = building_key(b);
                     if matches!(b.kind, BKind::Gate | BKind::Bastiongate) && b.hp > 0.0 && atlas.frame(&key).is_none() {
                         wall_shape(&mut batch, &view, gates.get(b), b.x, b.y, depth, 1.0);
