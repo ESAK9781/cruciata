@@ -35,7 +35,9 @@ jobs:
           workspaces: rust
       - name: Simulation tests (identical results on every platform)
         working-directory: rust
-        run: cargo test --release -p cruciata-core --test golden_hash --test determinism --test commands_parity --test worldgen_parity --test save_roundtrip -p cruciata-net
+        run: |
+          cargo test --release -p cruciata-core --test golden_hash --test determinism --test commands_parity --test worldgen_parity --test save_roundtrip
+          cargo test --release -p cruciata-net
       - name: Build
         working-directory: rust
         run: cargo build --release -p cruciata
