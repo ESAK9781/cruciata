@@ -311,3 +311,51 @@ pub fn settings_dialog(ctx: &egui::Context, open: &mut bool, s: &mut Settings, n
     });
     skip
 }
+
+pub enum ResultChoice {
+    Menu,
+    Next,
+    Again,
+}
+
+/// The end-of-battle card (`finish` in game.js). Returns the player's choice.
+pub fn result_dialog(ctx: &egui::Context, g: &Game) -> Option<ResultChoice> {
+    let won = g.outcome()?;
+    let st = &g.sim.state;
+    let l = &data().levels[st.level.min(data().levels.len() - 1)];
+    let quick = st.mode == "quickmatch";
+    let (label, title, body, button) = if quick {
+        (
+            "BATTLE COMPLETE",
+            if won { if g.is_lan() { "Victory over your rival." } else { "Quickmatch won." } } else if g.is_lan() { "Your town center has fallen." } else { "Your settlement has fallen." },
+            if won { "The opposing town center is destroyed. Your host holds the battlefield." } else { "Your town center has fallen. Return to the menu to prepare another host." }.to_string(),
+            "Return to the menu".to_string(),
+        )
+    } else {
+        (
+            if won { "CHAPTER COMPLETE" } else { "THE CHRONICLE REMEMBERS" },
+            if won { if st.level == 5 { "Jerusalem is taken." } else { "The standard still flies." } } else { "The settlement has fallen." },
+            if won { l.win.to_string() } else { "Your town centre or your entrusted pilgrims have been lost. Gather the company, protect your workers, and try a different plan.".to_string() },
+            if won && st.level < 5 { format!("Continue to {}", data().levels[st.level + 1].name) } else { "March again".to_string() },
+        )
+    };
+    let mut choice = None;
+    egui::Area::new("result".into()).anchor(Align2::CENTER_CENTER, Vec2::ZERO).order(egui::Order::Foreground).show(ctx, |ui| {
+        egui::Frame::none().fill(col("#1b1e18f2")).stroke(Stroke::new(2.0, col("#c8a467"))).inner_margin(egui::Margin::same(26.0)).show(ui, |ui| {
+            ui.set_width(460.0);
+            ui.vertical_centered(|ui| {
+                eyebrow(ui, label);
+                ui.label(RichText::new(title).size(26.0).color(col("#e4cda2")));
+                ui.label(RichText::new(format!("{} Your people who fell: {}.", body, st.losses)).size(12.0).color(col(INK)));
+                ui.add_space(12.0);
+                if ui.button(RichText::new(button).size(14.0)).clicked() {
+                    choice = Some(if quick || g.is_lan() { ResultChoice::Menu } else if won && st.level < 5 { ResultChoice::Next } else { ResultChoice::Again });
+                }
+                if !quick && !g.is_lan() && ui.button("Return to the menu").clicked() {
+                    choice = Some(ResultChoice::Menu);
+                }
+            });
+        });
+    });
+    choice
+}

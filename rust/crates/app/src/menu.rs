@@ -139,6 +139,7 @@ pub enum Out {
     JoinLan(std::net::SocketAddr),
     Settings,
     Resume,
+    Leave,
     Quit,
 }
 
@@ -178,7 +179,7 @@ impl Menu {
         }
     }
 
-    pub fn show(&mut self, ctx: &egui::Context, progress: &Progress, in_game: bool, can_resume_campaign: bool) -> Out {
+    pub fn show(&mut self, ctx: &egui::Context, progress: &Progress, in_game: bool, in_lan: bool, can_resume_campaign: bool) -> Out {
         let mut out = Out::None;
         egui::CentralPanel::default().frame(egui::Frame::none().fill(col("#1c1f18"))).show(ctx, |ui| {
             let r = ui.max_rect();
@@ -195,7 +196,7 @@ impl Menu {
                         ui.label(RichText::new("CHRONICA \u{b7} FIDES \u{b7} IMPERIUM").size(10.0).color(col(MUTED)).extra_letter_spacing(3.0));
                         ui.add_space(14.0);
                         match &self.screen {
-                            Screen::Main => out = self.main(ui, progress, in_game, can_resume_campaign),
+                            Screen::Main => out = self.main(ui, progress, in_game, in_lan, can_resume_campaign),
                             Screen::Campaign => out = self.campaign(ui, progress),
                             Screen::Slots => out = self.slots(ui),
                             Screen::Creation(slot) => {
@@ -233,7 +234,7 @@ impl Menu {
         r.clicked()
     }
 
-    fn main(&mut self, ui: &mut egui::Ui, _p: &Progress, in_game: bool, can_resume_campaign: bool) -> Out {
+    fn main(&mut self, ui: &mut egui::Ui, _p: &Progress, in_game: bool, in_lan: bool, can_resume_campaign: bool) -> Out {
         let mut out = Out::None;
         eyebrow(ui, "AD MAIOREM DEI GLORIAM");
         ui.label(RichText::new("The road to Jerusalem").size(30.0).color(col("#e4cda2")));
@@ -241,6 +242,9 @@ impl Menu {
         ui.add_space(14.0);
         if in_game && Self::big(ui, "Return to the battle", "Close this menu") {
             out = Out::Resume;
+        }
+        if in_game && in_lan && Self::big(ui, "Leave the match", "Concede and disconnect from your opponent") {
+            out = Out::Leave;
         }
         if Self::big(ui, "Campaign", "Six chapters \u{b7} the pilgrim's chronicle") {
             self.screen = Screen::Campaign;

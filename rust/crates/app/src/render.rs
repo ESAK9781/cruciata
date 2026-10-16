@@ -54,6 +54,7 @@ pub struct App {
     walls: crate::wall3d::WallCache,
     audio: Option<crate::audio::Audio>,
     gates: crate::gate3d::GateCache,
+    desync_warned: bool,
     last_volumes: (f32, f32, bool),
 }
 
@@ -189,6 +190,7 @@ impl App {
             walls: Default::default(),
             audio: None,
             gates: Default::default(),
+            desync_warned: false,
             last_volumes: (-1.0, -1.0, true),
         }
     }
@@ -220,6 +222,7 @@ impl App {
         self.visual_angle.clear();
         self.fog_tex = FogTex::new();
         self.result_handled = false;
+        self.desync_warned = false;
         self.save_clock = 0.0;
         self.menu.screen = Screen::Main;
         self.menu.close_lan();
@@ -284,6 +287,14 @@ impl App {
                 if !self.game.is_lan() {
                     self.game.sim.state.paused = false;
                 }
+            }
+            Out::Leave => {
+                if let Some(ls) = self.game.lock.as_mut() {
+                    ls.leave();
+                }
+                self.game.lock = None;
+                self.game.left = true;
+                self.game.sim.state.paused = true;
             }
             Out::Quit => std::process::exit(0),
         }
@@ -975,9 +986,9 @@ impl eframe::App for App {
         }
         if self.ui.show_menu {
             self.menu.poll_lan();
-            let in_game = !matches!(self.menu.screen, Screen::Loading(_)) && self.game.sim.state.result.is_none() && self.game.sim.state.time > 0.0;
+            let in_game = !matches!(self.menu.screen, Screen::Loading(_)) && self.game.sim.state.result.is_none() && self.game.sim.state.time > 0.0 && !self.game.left;
             let can_resume = store::read_save(None).is_some();
-            let out = self.menu.show(ctx, &self.progress, in_game, can_resume);
+            let out = self.menu.show(ctx, &self.progress, in_game, self.game.is_lan(), can_resume);
             self.handle_menu(out);
             let np = self.audio.as_ref().and_then(|a| a.current).map(|t| format!("Now playing: {t} (shuffled playlist)")).unwrap_or_else(|| "Background music: shuffled playlist".to_string());
             overlay::settings_dialog(ctx, &mut self.ui.show_settings, &mut self.settings, &np);
@@ -990,6 +1001,19 @@ impl eframe::App for App {
         }
         if self.audio.is_none() && self.args.shot.is_none() && self.frames == 2 {
             self.audio = crate::audio::Audio::new(assets_dir());
+        }
+        if let Some(ls) = self.game.lock.as_ref() {
+            if ls.disconnected && self.game.sim.state.result.is_none() {
+                let me0 = self.game.me == 0;
+                self.game.sim.finish(me0);
+                self.ui.toast("Your opponent has left the match.");
+            }
+            if let Some(t) = ls.desync {
+                if !self.desync_warned {
+                    self.desync_warned = true;
+                    self.ui.toast(format!("The two games have fallen out of step (turn {t}). Please restart the match."));
+                }
+            }
         }
         self.sync_audio();
         self.handle_events();
@@ -1087,6 +1111,21 @@ impl eframe::App for App {
             self.view.cx = x;
             self.view.cy = y;
             self.view.update();
+        }
+        match overlay::result_dialog(ctx, &self.game) {
+            Some(overlay::ResultChoice::Menu) => {
+                self.ui.show_menu = true;
+                self.menu.screen = Screen::Main;
+            }
+            Some(overlay::ResultChoice::Next) => {
+                let (l, d) = (self.game.sim.state.level + 1, self.game.sim.state.difficulty.clone());
+                self.start_campaign(l, d);
+            }
+            Some(overlay::ResultChoice::Again) => {
+                let (l, d) = (self.game.sim.state.level, self.game.sim.state.difficulty.clone());
+                self.start_campaign(l, d);
+            }
+            None => {}
         }
         overlay::help_dialog(ctx, &mut self.ui.show_help);
         let np = self.audio.as_ref().and_then(|a| a.current).map(|t| format!("Now playing: {t} (shuffled playlist)")).unwrap_or_else(|| "Background music: shuffled playlist".to_string());
