@@ -50,13 +50,17 @@ jobs:
         id: v
         shell: bash
         run: echo "version=$(grep -m1 '^version' rust/Cargo.toml | sed 's/.*"\(.*\)"/\1/')" >> "$GITHUB_OUTPUT"
+      - name: Install Inno Setup
+        if: matrix.label == 'windows'
+        shell: pwsh
+        run: choco install innosetup -y --no-progress
       - name: Package (Windows)
         if: matrix.label == 'windows'
         shell: bash
         working-directory: rust/packaging
         run: |
           bash ./stage.sh stage/cruciata ../target/release/cruciata.exe
-          iscc //DVersion=${{ steps.v.outputs.version }} //DStage=stage\cruciata windows.iss
+          "/c/Program Files (x86)/Inno Setup 6/ISCC.exe" //DVersion=${{ steps.v.outputs.version }} //DStage=stage\cruciata windows.iss
           mkdir -p ../../out && mv Cruciata-Setup-windows-x64.exe ../../out/
       - name: Package (macOS)
         if: startsWith(matrix.label, 'macos')
