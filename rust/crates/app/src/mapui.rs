@@ -117,10 +117,10 @@ pub fn draw(ui: &mut egui::Ui, inner: Rect, g: &Game, st: &mut UiState, view: &m
     spaced(&p, Pos2::new(card.min.x + pad, y), "WAR ORDERS", sans(7.0), c("#856b47"), 1.4);
     y += 10.0 + 7.0;
     y += paragraph(&p, Pos2::new(card.min.x + pad, y), text_w, &otxt, fell(19.0), c("#392513"), 24.0) + 7.0;
-    y += paragraph(&p, Pos2::new(card.min.x + pad, y), text_w, &osub, sans(9.0), c("#725230"), 15.0);
+    y += paragraph(&p, Pos2::new(card.min.x + pad, y), text_w, &osub, sans(9.0), c("#5e4226"), 15.0);
     y += 12.0;
-    paragraph(&p, Pos2::new(card.min.x + pad, y), text_w - 36.0, &obj.text, sans(8.0), c("#6d6043"), 11.0);
-    p.text(Pos2::new(card.max.x - pad, y), Align2::RIGHT_TOP, format!("{}%", (obj.progress * 100.0).round()), sans(8.0), c("#6d6043"));
+    paragraph(&p, Pos2::new(card.min.x + pad, y), text_w - 36.0, &obj.text, sans(8.0), c("#54482c"), 11.0);
+    p.text(Pos2::new(card.max.x - pad, y), Align2::RIGHT_TOP, format!("{}%", (obj.progress * 100.0).round()), sans(8.0), c("#54482c"));
     y += h_stage + 6.0;
     let track = Rect::from_min_size(Pos2::new(card.min.x + pad, y), Vec2::new(text_w, 4.0));
     p.rect_filled(track, 0.0, c("#a7916b55"));
@@ -149,7 +149,7 @@ pub fn draw(ui: &mut egui::Ui, inner: Rect, g: &Game, st: &mut UiState, view: &m
         let tw = spaced_width(&ctx, lvl.date, sans(7.0), 1.3);
         let r = Rect::from_min_size(Pos2::new(o.x + 14.0, by - 26.0 - 9.0 - 21.0), Vec2::new(tw + 18.0, 21.0));
         p.rect_filled(r, 0.0, c("#354032c2"));
-        spaced(&p, Pos2::new(r.min.x + 9.0, r.center().y - 4.0), lvl.date, sans(7.0), c("#e5d5b3"), 1.3);
+        spaced(&p, Pos2::new(r.min.x + 9.0, r.center().y - 4.0), lvl.date, sans(8.0), c("#f0e3c3"), 1.3);
     }
 
     // Minimap.
@@ -242,7 +242,7 @@ pub fn draw(ui: &mut egui::Ui, inner: Rect, g: &Game, st: &mut UiState, view: &m
         }
     }
     let lw = spaced_width(&ctx, "THE THEATRE OF WAR", sans(6.0), 1.3);
-    spaced(&p, Pos2::new(frame.center().x - lw / 2.0, mrect.max.y + 8.0), "THE THEATRE OF WAR", sans(6.0), c("#c0a579"), 1.3);
+    spaced(&p, Pos2::new(frame.center().x - lw / 2.0, mrect.max.y + 8.0), "THE THEATRE OF WAR", sans(7.0), c("#dcc296"), 1.3);
     out
 }
 

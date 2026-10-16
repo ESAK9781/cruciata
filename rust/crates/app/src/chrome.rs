@@ -87,7 +87,7 @@ pub fn draw(ui: &mut egui::Ui, lay: &Layout, g: &Game, st: &mut UiState, icons: 
     x -= 5.0;
     let label = if g.is_lan() { format!("LAN \u{b7} VS {}", g.peer_name.clone().unwrap_or_default().to_uppercase()) } else { status.to_string() };
     let w = spaced_width(&ctx, &label, sans(8.0), 1.0);
-    spaced(&p, Pos2::new(x - w, 28.0 - 5.0), &label, sans(8.0), c("#9b927b"), 1.0);
+    spaced(&p, Pos2::new(x - w, 28.0 - 5.0), &label, sans(8.0), c("#b7ad92"), 1.0);
     x -= w + 12.0;
     if btn(ui, &mut x, 48.0, "Menu", "btn-menu") {
         actions.push(Action::Menu);
@@ -103,10 +103,10 @@ pub fn draw(ui: &mut egui::Ui, lay: &Layout, g: &Game, st: &mut UiState, icons: 
     p.line_segment([Pos2::new(sb.max.x - 1.0, sb.min.y), Pos2::new(sb.max.x - 1.0, sb.max.y)], Stroke::new(1.0, c("#796045")));
     let y0 = sb.min.y;
     icons.draw(&p, "cross-dim", Rect::from_min_size(Pos2::new(sb.min.x + 10.0, y0 + 20.0), Vec2::splat(16.0)));
-    spaced(&p, Pos2::new(sb.min.x + 31.0, y0 + 25.0), "THE PILGRIM'S CHRONICLE", sans(6.0), c("#bba279"), 1.0);
+    spaced(&p, Pos2::new(sb.min.x + 31.0, y0 + 25.0), "THE PILGRIM'S CHRONICLE", sans(7.0), c("#d4bb8d"), 1.0);
     p.text(Pos2::new(sb.min.x + 15.0, y0 + 54.0), Align2::LEFT_TOP, "The road to", fell(27.0), c(INK));
     p.text(Pos2::new(sb.min.x + 15.0, y0 + 85.0), Align2::LEFT_TOP, "Jerusalem", fell_italic(27.0), c("#c99468"));
-    p.line_segment([Pos2::new(sb.min.x + 10.0, y0 + 153.0), Pos2::new(sb.max.x - 13.0, y0 + 153.0)], Stroke::new(1.0, c("#705a3c")));
+    p.line_segment([Pos2::new(sb.min.x + 10.0, y0 + 153.0), Pos2::new(sb.max.x - 13.0, y0 + 153.0)], Stroke::new(1.0, c("#8a7149")));
     spaced(&p, Pos2::new(sb.min.x + 14.0, y0 + 172.0), "STEWARDSHIP", sans(8.0), c("#bba279"), 1.4);
     let idle = g.my_workers().into_iter().filter(|&i| g.sim.state.units[i].job.is_none() && g.sim.state.units[i].order.is_none()).count();
     let rows: [(&str, String, &str, &str); 3] = [("\u{2302}", "Find settlement".into(), "Q", "side-home"), ("\u{2659}", format!("Idle villagers   {}", idle), "V", "side-idle"), ("", "All villagers".into(), "E", "side-workers")];
@@ -141,14 +141,14 @@ pub fn draw(ui: &mut egui::Ui, lay: &Layout, g: &Game, st: &mut UiState, icons: 
     for (i, r_) in Res::ALL.iter().enumerate() {
         let n = g.my_workers().into_iter().filter(|&u| g.sim.state.units[u].job.as_ref().and_then(|j| j.resource) == Some(*r_)).count();
         let y = y0 + 306.0 + i as f32 * 20.5;
-        p.text(Pos2::new(sb.min.x + 14.0, y), Align2::LEFT_CENTER, format!("{} hands", cap(res_name(*r_))), sans(9.0), c("#948e75"));
+        p.text(Pos2::new(sb.min.x + 14.0, y), Align2::LEFT_CENTER, format!("{} hands", cap(res_name(*r_))), sans(9.0), c("#b3ad92"));
         p.text(Pos2::new(sb.max.x - 17.0, y), Align2::RIGHT_CENTER, n.to_string(), sans(9.0), c("#d1be92"));
     }
     let by = y0 + 407.0;
-    p.line_segment([Pos2::new(sb.min.x + 10.0, by), Pos2::new(sb.max.x - 13.0, by)], Stroke::new(1.0, c("#705a3c")));
-    spaced(&p, Pos2::new(sb.min.x + 15.0, by + 15.0), "A KINGDOM IS BUILT BY MANY HANDS", sans(6.0), c("#bba279"), 1.0);
-    p.text(Pos2::new(sb.min.x + 15.0, by + 36.0), Align2::LEFT_TOP, "Guard the fields. Shelter the", fell_italic(14.0), c("#a29375"));
-    p.text(Pos2::new(sb.min.x + 15.0, by + 58.0), Align2::LEFT_TOP, "pilgrims. Preserve your company.", fell_italic(14.0), c("#a29375"));
+    p.line_segment([Pos2::new(sb.min.x + 10.0, by), Pos2::new(sb.max.x - 13.0, by)], Stroke::new(1.0, c("#8a7149")));
+    spaced(&p, Pos2::new(sb.min.x + 15.0, by + 15.0), "A KINGDOM IS BUILT BY MANY HANDS", sans(7.0), c("#d4bb8d"), 1.0);
+    p.text(Pos2::new(sb.min.x + 15.0, by + 36.0), Align2::LEFT_TOP, "Guard the fields. Shelter the", fell_italic(14.0), c("#c4b38c"));
+    p.text(Pos2::new(sb.min.x + 15.0, by + 58.0), Align2::LEFT_TOP, "pilgrims. Preserve your company.", fell_italic(14.0), c("#c4b38c"));
     if !g.is_lan() {
         let r = Rect::from_min_size(Pos2::new(sb.min.x + 15.0, by + 94.0), Vec2::new(120.0, 28.0));
         let resp = ui.interact(r, Id::new("side-restart"), Sense::click());
@@ -168,10 +168,10 @@ pub fn draw(ui: &mut egui::Ui, lay: &Layout, g: &Game, st: &mut UiState, icons: 
     } else {
         (format!("CHAPTER {} \u{b7} {}", l.roman, l.sub), l.title.to_string())
     };
-    spaced(&p, Pos2::new(lay.heading.min.x, lay.heading.min.y + 1.0), &eyebrow_txt, sans(7.0), c("#bba279"), 1.4);
+    spaced(&p, Pos2::new(lay.heading.min.x, lay.heading.min.y + 1.0), &eyebrow_txt, sans(8.0), c("#d4bb8d"), 1.4);
     p.text(Pos2::new(lay.heading.min.x, lay.heading.min.y + 11.0), Align2::LEFT_TOP, title, fell(22.0), c(INK));
     let t = stt.time;
-    p.text(Pos2::new(lay.heading.max.x, lay.heading.min.y + 20.0), Align2::RIGHT_CENTER, format!("{:02}:{:02}", (t / 60.0).floor() as i64, (t % 60.0).floor() as i64), sans(12.0), c("#b4a27b"));
+    p.text(Pos2::new(lay.heading.max.x, lay.heading.min.y + 20.0), Align2::RIGHT_CENTER, format!("{:02}:{:02}", (t / 60.0).floor() as i64, (t % 60.0).floor() as i64), sans(12.0), c("#cdb98f"));
 
     // ---- resource bar ----
     let rb = lay.resbar;
@@ -203,7 +203,7 @@ pub fn draw(ui: &mut egui::Ui, lay: &Layout, g: &Game, st: &mut UiState, icons: 
     }
     let status_txt = if let Some(w) = g.outcome() { if w { "VICTORY" } else { "DEFEAT" }.to_string() } else if g.paused() { "AT REST".into() } else if g.stock().food < 1.0 { "FOOD SHORTAGE".into() } else { "THE HOST MARCHES".into() };
     let sw = spaced_width(&ctx, &status_txt, sans(7.0), 1.0);
-    spaced(&p, Pos2::new(rb.max.x - 12.0 - sw, cy - 4.0), &status_txt, sans(7.0), c("#a6997b"), 1.0);
+    spaced(&p, Pos2::new(rb.max.x - 12.0 - sw, cy - 4.0), &status_txt, sans(7.0), c("#bfb293"), 1.0);
 
     // ---- map frame ----
     ridge(&p, lay.map, 3.0, c("#9c8052"));
@@ -211,10 +211,10 @@ pub fn draw(ui: &mut egui::Ui, lay: &Layout, g: &Game, st: &mut UiState, icons: 
     gradient_v(&p, lay.panel, c("#302019"), c("#221914"));
     ridge(&p, lay.panel, 2.0, c("#a67736"));
     // ---- footer ----
-    spaced(&p, Pos2::new(lay.footer.min.x, lay.footer.min.y + 1.0), "LMB select \u{b7} Shift-drag company \u{b7} empty RMB drag pan \u{b7} RMB command \u{b7} WASD / arrows pan \u{b7} wheel zoom", sans(8.0), c("#958469"), 0.2);
+    spaced(&p, Pos2::new(lay.footer.min.x, lay.footer.min.y + 1.0), "LMB select \u{b7} Shift-drag company \u{b7} empty RMB drag pan \u{b7} RMB command \u{b7} WASD / arrows pan \u{b7} wheel zoom", sans(8.0), c("#b9aa8c"), 0.2);
     let right = if g.sim.state.result.is_some() { "Battle concluded".to_string() } else if g.is_lan() { "Player versus player".to_string() } else { format!("Enemy command \u{b7} {} AI", g.sim.state.difficulty) };
     let rw = spaced_width(&ctx, &right, sans(8.0), 0.2);
-    spaced(&p, Pos2::new(lay.footer.max.x - rw, lay.footer.min.y + 1.0), &right, sans(8.0), c("#958469"), 0.2);
+    spaced(&p, Pos2::new(lay.footer.max.x - rw, lay.footer.min.y + 1.0), &right, sans(8.0), c("#b9aa8c"), 0.2);
 }
 
 fn gear(p: &egui::Painter, c0: Pos2, color: Color32) {

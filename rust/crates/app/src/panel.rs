@@ -212,10 +212,10 @@ pub fn command_panel(ui: &mut egui::Ui, rect: Rect, f: &mut Frame) {
     let tw = 140.0;
     let ctx = ui.ctx().clone();
     let mut y = y0 + 3.0;
-    spaced(&p, Pos2::new(tx, y), &sel.label, sans(7.0), col("#bba279"), 1.4);
+    spaced(&p, Pos2::new(tx, y), &sel.label, sans(8.0), col("#d4bb8d"), 1.4);
     y += 12.0;
     y += paragraph(&p, Pos2::new(tx, y), tw, &sel.title, fell(18.0), col(INK), 21.0) + 4.0;
-    y += paragraph(&p, Pos2::new(tx, y), tw, &sel.detail, sans(9.0), col("#dec8a4"), 13.0) + 6.0;
+    y += paragraph(&p, Pos2::new(tx, y), tw, &sel.detail, sans(9.0), col("#eadab8"), 13.0) + 6.0;
     let role_h = paragraph_height(&ctx, tw, &sel.role, sans(10.0), 14.0).min(rect.max.y - 40.0 - y);
     {
         let clip = Rect::from_min_size(Pos2::new(tx, y), Vec2::new(tw, role_h.max(0.0)));
@@ -226,7 +226,7 @@ pub fn command_panel(ui: &mut egui::Ui, rect: Rect, f: &mut Frame) {
     let bar = Rect::from_min_size(Pos2::new(tx, y.min(rect.max.y - 30.0)), Vec2::new(tw, 4.0));
     p.rect_filled(bar, 0.0, col("#1c241c"));
     p.rect_filled(Rect::from_min_size(bar.min, Vec2::new(tw * sel.health.clamp(0.0, 1.0) as f32, 4.0)), 0.0, col("#7f965a"));
-    paragraph(&p, Pos2::new(tx, bar.max.y + 4.0), tw, &sel.queue, sans(7.0), col("#b8a076"), 11.0);
+    paragraph(&p, Pos2::new(tx, bar.max.y + 4.0), tw, &sel.queue, sans(8.0), col("#d1b98a"), 12.0);
 
     // Commands column.
     commands(ui, Rect::from_min_size(Pos2::new(rect.min.x + 225.0, y0 + 1.0), Vec2::new(105.0, rect.height() - 20.0)), f);
@@ -453,7 +453,7 @@ fn muster(ui: &mut egui::Ui, rect: Rect, f: &mut Frame) {
             p.rect_filled(r, 0.0, col("#5d493033"));
             p.rect_filled(Rect::from_min_size(Pos2::new(r.min.x, r.max.y - 2.0), Vec2::new(w, 2.0)), 0.0, col("#c29858"));
         }
-        p.text(r.center() - Vec2::new(0.0, 1.0), Align2::CENTER_CENTER, label, fell(13.0), if sel { col("#e4cda2") } else if resp.hovered() { col("#cdb88e") } else { col("#a9946b") });
+        p.text(r.center() - Vec2::new(0.0, 1.0), Align2::CENTER_CENTER, label, fell(13.0), if sel { col("#e4cda2") } else if resp.hovered() { col("#cdb88e") } else { col("#c9b184") });
         if resp.clicked() {
             f.ui.tab = *tab;
         }

@@ -255,29 +255,45 @@ pub fn map_controls(ctx: &egui::Context, rect: Rect, g: &Game, ui_state: &mut Ui
 }
 
 fn parchment_window(ctx: &egui::Context, title: &str, open: &mut bool, add: impl FnOnce(&mut egui::Ui)) {
+    // Dim everything behind the dialog.
+    egui::Area::new("dialog-dim".into()).order(egui::Order::Middle).fixed_pos(ctx.screen_rect().min).interactable(true).show(ctx, |ui| {
+        let r = ctx.screen_rect();
+        ui.allocate_rect(r, egui::Sense::click());
+        ui.painter().rect_filled(r, 0.0, Color32::from_black_alpha(150));
+    });
     let mut keep = *open;
-    egui::Window::new(RichText::new(title).size(20.0).color(col("#493e28")))
+    egui::Window::new(RichText::new(title).font(crate::style::fell(24.0)).color(col("#f0dfb4")))
         .open(&mut keep)
         .collapsible(false)
         .resizable(false)
+        .order(egui::Order::Foreground)
         .anchor(Align2::CENTER_CENTER, Vec2::ZERO)
-        .frame(egui::Frame::none().fill(col("#d9c79d")).stroke(Stroke::new(3.0, col("#907345"))).inner_margin(egui::Margin::same(22.0)))
+        .frame(egui::Frame::none().fill(col("#2a1f17")).stroke(Stroke::new(2.0, col("#a98a56"))).inner_margin(egui::Margin::same(24.0)))
         .show(ctx, |ui| {
-            ui.visuals_mut().override_text_color = Some(col("#493e28"));
+            ui.visuals_mut().override_text_color = Some(col("#f1e3c3"));
+            ui.visuals_mut().widgets.inactive.bg_fill = col("#5a4630");
+            ui.visuals_mut().widgets.inactive.weak_bg_fill = col("#5a4630");
+            ui.visuals_mut().widgets.hovered.bg_fill = col("#7a5f3e");
+            ui.visuals_mut().widgets.hovered.weak_bg_fill = col("#7a5f3e");
+            ui.visuals_mut().selection.bg_fill = col("#b98a4a");
+            ui.spacing_mut().item_spacing = Vec2::new(10.0, 10.0);
             add(ui);
         });
     *open = keep;
 }
 
 pub fn help_dialog(ctx: &egui::Context, open: &mut bool) {
+    if !*open {
+        return;
+    }
     parchment_window(ctx, "Build a kingdom. Lead a company.", open, |ui| {
-        ui.set_width(620.0);
+        ui.set_width(660.0);
         egui::ScrollArea::vertical().max_height(480.0).show(ui, |ui| {
-            ui.label(RichText::new("Your villagers gather food, wood, gold, and stone. Resources are credited only when they return to a suitable storehouse. Protect those routes.").size(12.0));
+            ui.label(RichText::new("Your villagers gather food, wood, gold, and stone. Resources are credited only when they return to a suitable storehouse. Protect those routes.").size(13.0));
             for (h, t) in HELP {
                 ui.add_space(6.0);
-                ui.label(RichText::new(*h).strong().size(13.0).color(col("#7a5a2e")));
-                ui.label(RichText::new(*t).size(11.5));
+                ui.label(RichText::new(*h).font(crate::style::fell(17.0)).color(col("#e2b46a")));
+                ui.label(RichText::new(*t).size(13.0));
             }
         });
     });
@@ -297,17 +313,24 @@ impl Default for Settings {
 }
 
 pub fn settings_dialog(ctx: &egui::Context, open: &mut bool, s: &mut Settings, now_playing: &str) -> bool {
+    if !*open {
+        return false;
+    }
     let mut skip = false;
     parchment_window(ctx, "Settings", open, |ui| {
-        ui.set_width(360.0);
-        ui.add(egui::Slider::new(&mut s.music, 0.0..=1.0).text("Music").custom_formatter(|v, _| format!("{}%", (v * 100.0).round())));
-        ui.add(egui::Slider::new(&mut s.effects, 0.0..=1.0).text("Sound effects").custom_formatter(|v, _| format!("{}%", (v * 100.0).round())));
-        ui.label(RichText::new(now_playing).size(10.0));
-        if ui.button("Next track").clicked() {
+        ui.set_width(420.0);
+        ui.label(RichText::new("MAKE CAMP").size(11.0).color(col("#c8a467")));
+        for (label, value) in [("Music", &mut s.music), ("Sound effects", &mut s.effects)] {
+            ui.label(RichText::new(label).size(14.0));
+            ui.add(egui::Slider::new(value, 0.0..=1.0).custom_formatter(|v, _| format!("{}%", (v * 100.0).round())).trailing_fill(true));
+        }
+        ui.label(RichText::new(now_playing).size(12.0).color(col("#d9c79d")));
+        if ui.add(egui::Button::new(RichText::new("Next track").size(13.0))).clicked() {
             skip = true;
         }
-        ui.checkbox(&mut s.battle_sounds, "Battle sounds");
-        ui.checkbox(&mut s.gore, "Blood & fallen soldiers");
+        ui.checkbox(&mut s.battle_sounds, RichText::new("Battle sounds").size(14.0));
+        ui.checkbox(&mut s.gore, RichText::new("Blood & fallen soldiers").size(14.0));
+        ui.label(RichText::new("Campaign completion and active games are stored on this computer.").size(11.0).color(col("#c9b78f")));
     });
     skip
 }

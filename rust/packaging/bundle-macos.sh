@@ -22,11 +22,13 @@ cat > "$app/Contents/Info.plist" <<PLIST
 <key>CFBundleVersion</key><string>$version</string>
 <key>CFBundleShortVersionString</key><string>$version</string>
 <key>CFBundleExecutable</key><string>cruciata</string>
+<key>CFBundleIconFile</key><string>Cruciata</string>
 <key>CFBundlePackageType</key><string>APPL</string>
 <key>NSHighResolutionCapable</key><true/>
 <key>LSMinimumSystemVersion</key><string>12.0</string>
 </dict></plist>
 PLIST
+rm -rf Cruciata.iconset && cp -r "$here/icons/iconset" Cruciata.iconset && iconutil -c icns Cruciata.iconset -o "$app/Contents/Resources/Cruciata.icns" || true
 chmod +x "$app/Contents/MacOS/cruciata"
 # Ad-hoc signature so Apple Silicon will run the unsigned bundle.
 codesign --force --deep --sign - "$app" || true

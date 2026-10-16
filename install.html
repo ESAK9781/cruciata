@@ -75,6 +75,16 @@
         display: block;
         margin-bottom: 12px;
       }
+      .badge {
+        display: inline-block;
+        font-size: 10px;
+        letter-spacing: 1.5px;
+        text-transform: uppercase;
+        color: #1d2418;
+        background: var(--gold);
+        padding: 2px 8px;
+        margin-bottom: 8px;
+      }
       a.button {
         display: block;
         text-align: center;
@@ -118,39 +128,36 @@
       <div class="grid" id="downloads">
         <section class="card" data-os="windows">
           <h2>Windows</h2>
-          <small>Windows 10 or 11 · 64-bit installer</small>
+          <small>Windows 10 or 11 · 64-bit</small>
           <a
             class="button"
             href="https://github.com/ESAK9781/cruciata/releases/latest/download/Cruciata-Setup-windows-x64.exe"
-            >Download installer (.exe)</a
+            >Download the installer</a
           >
         </section>
         <section class="card" data-os="mac">
           <h2>macOS</h2>
-          <small>macOS 12 or newer · disk image</small>
+          <small>macOS 12 or newer</small>
           <a
             class="button"
+            data-arch="arm"
             href="https://github.com/ESAK9781/cruciata/releases/latest/download/Cruciata-macOS-arm64.dmg"
-            >Apple Silicon (.dmg)</a
+            >Installer · Apple Silicon</a
           >
           <a
             class="button"
+            data-arch="intel"
             href="https://github.com/ESAK9781/cruciata/releases/latest/download/Cruciata-macOS-x64.dmg"
-            >Intel (.dmg)</a
+            >Installer · Intel</a
           >
         </section>
         <section class="card" data-os="linux">
           <h2>Linux</h2>
-          <small>64-bit · Debian/Ubuntu package or any distribution</small>
+          <small>Debian, Ubuntu and derivatives · 64-bit</small>
           <a
             class="button"
             href="https://github.com/ESAK9781/cruciata/releases/latest/download/cruciata_amd64.deb"
-            >Debian / Ubuntu (.deb)</a
-          >
-          <a
-            class="button"
-            href="https://github.com/ESAK9781/cruciata/releases/latest/download/Cruciata-linux-x64.tar.gz"
-            >Other (.tar.gz)</a
+            >Download the installer (.deb)</a
           >
         </section>
       </div>
@@ -202,11 +209,15 @@
             : /linux|x11/.test(ua)
               ? "linux"
               : "";
-        const mine = document.querySelector(`[data-os="${os}"]`);
-        if (mine) {
-          mine.classList.add("recommended");
-          mine.parentElement.prepend(mine);
-        }
+        const mine =
+          document.querySelector(`[data-os="${os}"]`) ||
+          document.querySelector('[data-os="windows"]');
+        mine.classList.add("recommended");
+        mine.parentElement.prepend(mine);
+        mine.insertAdjacentHTML(
+          "afterbegin",
+          '<span class="badge">Recommended for your computer</span>',
+        );
       })();
     </script>
   </body>

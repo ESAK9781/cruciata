@@ -13,3 +13,6 @@ serde = { version = "1", features = ["derive"] }
 eframe = { version = "0.29", default-features = false, features = ["glow", "default_fonts", "wayland", "x11"] }
 image = { version = "0.25", default-features = false, features = ["png"] }
 rodio = { version = "0.19", default-features = false, features = ["vorbis", "mp3", "wav"] }
+
+[target.'cfg(windows)'.build-dependencies]
+winres = "0.1"

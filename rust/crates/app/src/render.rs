@@ -121,6 +121,7 @@ impl App {
         }
         let mut app_ui = UiState::new();
         let mut focus: Option<(f64, f64)> = None;
+        let mut follow = false;
         let mut screen_req: Option<String> = None;
         let mut game = Game::solo(sim);
         for cmd in args.run.clone() {
@@ -132,6 +133,22 @@ impl App {
                         focus = Some((b.x, b.y));
                     }
                 }
+                "standard" => {
+                    if let Some(u) = game.sim.state.units.iter().find(|u| u.team == 0 && u.ty == UType::Standard) {
+                        app_ui.selected = HashSet::from([u.id]);
+                        follow = true;
+                    }
+                }
+                "orderrel" => {
+                    let mut p = v.split(',').filter_map(|x| x.parse::<f64>().ok());
+                    if let (Some(dx), Some(dy), Some(u)) = (p.next(), p.next(), game.sim.state.units.iter().find(|u| u.team == 0 && u.ty == UType::Standard).map(|u| (u.x, u.y))) {
+                        let g = Pt::new(u.0 + dx, u.1 + dy);
+                        let t = input::resolve_targets(&game, g);
+                        app_ui.issue_order(&mut game, g, false, false, t.enemy, t.node, t.building, t.escort);
+                    }
+                }
+                "settings" => app_ui.show_settings = true,
+                "help" => app_ui.show_help = true,
                 "menu" => app_ui.show_menu = true,
                 "screen" => screen_req = Some(v.to_string()),
                 "reveal" => {
@@ -167,6 +184,11 @@ impl App {
             }
         }
         app_ui.show_menu = app_ui.show_menu || args.shot.is_none() && args.run.is_empty() && args.quick.is_none() && args.level == 0 && args.at.is_none();
+        if follow {
+            if let Some(u) = game.sim.state.units.iter().find(|u| u.team == 0 && u.ty == UType::Standard) {
+                focus = Some((u.x, u.y));
+            }
+        }
         if let Some((x, y)) = focus {
             view.cx = x;
             view.cy = y;
@@ -822,7 +844,7 @@ impl App {
                 cv.rect(o.x - 1.5, o.y - 1.5, 3.0, 3.0, with_alpha(col(if o.attack == Some(true) { "#d9604a" } else { "#efe2b0" }), 0.75));
             }
             for (_, l) in lanes {
-                cv.dashed_line((l.1 / l.0, l.2 / l.0), (l.3.x, l.3.y), 1.4, with_alpha(col(if l.4 { "#d9604a" } else { "#efe2b0" }), 0.5), 5.0, 7.0, -(time as f32) * 18.0);
+                cv.dashed_line((l.1 / l.0, l.2 / l.0), (l.3.x, l.3.y), 1.4, with_alpha(col(if l.4 { "#d9604a" } else { "#efe2b0" }), 0.5), 5.0, 7.0, ((time as f32) * 18.0).rem_euclid(12.0));
             }
         }
         let mut targets: HashSet<u32> = HashSet::new();
@@ -1121,7 +1143,11 @@ impl eframe::App for App {
             let out = self.menu.show(ctx, &self.progress, in_game, self.game.is_lan(), can_resume, &self.icons, self.icons.map.get("banner").map(|t| t.id()));
             self.handle_menu(out);
             let np = self.audio.as_ref().and_then(|a| a.current).map(|t| format!("Now playing: {t} (shuffled playlist)")).unwrap_or_else(|| "Background music: shuffled playlist".to_string());
-            overlay::settings_dialog(ctx, &mut self.ui.show_settings, &mut self.settings, &np);
+            if overlay::settings_dialog(ctx, &mut self.ui.show_settings, &mut self.settings, &np) {
+                if let Some(a) = self.audio.as_mut() {
+                    a.next_track();
+                }
+            }
             self.shot_step(ctx);
             ctx.request_repaint_after(std::time::Duration::from_millis(16));
             return;
@@ -1260,7 +1286,11 @@ impl eframe::App for App {
         }
         overlay::help_dialog(ctx, &mut self.ui.show_help);
         let np = self.audio.as_ref().and_then(|a| a.current).map(|t| format!("Now playing: {t} (shuffled playlist)")).unwrap_or_else(|| "Background music: shuffled playlist".to_string());
-        overlay::settings_dialog(ctx, &mut self.ui.show_settings, &mut self.settings, &np);
+        if overlay::settings_dialog(ctx, &mut self.ui.show_settings, &mut self.settings, &np) {
+                if let Some(a) = self.audio.as_mut() {
+                    a.next_track();
+                }
+            }
         let _ = (map_rect, self.last_time);
         self.shot_step(ctx);
         ctx.request_repaint_after(std::time::Duration::from_millis(16));

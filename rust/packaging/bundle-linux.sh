@@ -11,7 +11,7 @@ cat > stage/cruciata/install.sh <<'INS'
 set -e
 dest="${HOME}/.local/share/cruciata"
 mkdir -p "$dest" "${HOME}/.local/bin" "${HOME}/.local/share/applications"
-cp -r "$(dirname "$0")/cruciata" "$(dirname "$0")/assets" "$dest/"
+cp -r "$(dirname "$0")/cruciata" "$(dirname "$0")/assets" "$(dirname "$0")/cruciata.png" "$dest/"
 ln -sf "$dest/cruciata" "${HOME}/.local/bin/cruciata"
 cat > "${HOME}/.local/share/applications/cruciata.desktop" <<DESK
 [Desktop Entry]
@@ -19,16 +19,20 @@ Type=Application
 Name=Cruciata
 Comment=A pilgrim's empire - real-time strategy
 Exec=$dest/cruciata
+Icon=$dest/cruciata.png
 Categories=Game;StrategyGame;
 Terminal=false
 DESK
 echo "Installed. Start it from your application menu or run: cruciata"
 INS
+cp "$here/icons/icon-256.png" stage/cruciata/cruciata.png
 chmod +x stage/cruciata/install.sh stage/cruciata/cruciata
 tar -C stage -czf Cruciata-linux-x64.tar.gz cruciata
 # .deb
 d="debroot"
-rm -rf "$d"; mkdir -p "$d/DEBIAN" "$d/opt/cruciata" "$d/usr/bin" "$d/usr/share/applications"
+rm -rf "$d"; mkdir -p "$d/DEBIAN" "$d/opt/cruciata" "$d/usr/bin" "$d/usr/share/applications" "$d/usr/share/icons/hicolor/256x256/apps" "$d/usr/share/icons/hicolor/48x48/apps"
+cp "$here/icons/icon-256.png" "$d/usr/share/icons/hicolor/256x256/apps/cruciata.png"
+cp "$here/icons/icon-48.png" "$d/usr/share/icons/hicolor/48x48/apps/cruciata.png"
 cp -r stage/cruciata/cruciata stage/cruciata/assets "$d/opt/cruciata/"
 ln -s /opt/cruciata/cruciata "$d/usr/bin/cruciata"
 cat > "$d/usr/share/applications/cruciata.desktop" <<DESK
@@ -37,6 +41,7 @@ Type=Application
 Name=Cruciata
 Comment=A pilgrim's empire - real-time strategy
 Exec=/opt/cruciata/cruciata
+Icon=cruciata
 Categories=Game;StrategyGame;
 Terminal=false
 DESK

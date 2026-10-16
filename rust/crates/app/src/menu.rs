@@ -213,8 +213,8 @@ impl Menu {
             let left = (((r.width() - 1300.0).max(0.0)) / 2.0 + 75.0).max(40.0);
             let x0 = r.min.x + left;
             icons.draw(&p, "cross-gold", Rect::from_min_size(Pos2::new(x0, r.min.y + 40.0), Vec2::splat(65.0)));
-            p.text(Pos2::new(x0 + 87.0, r.min.y + 28.0), Align2::LEFT_TOP, "cruciāta", serif(46.0), col("#ddbd77"));
-            spaced(&p, Pos2::new(x0 + 87.0, r.min.y + 96.0), "CHRONICA \u{b7} FIDES \u{b7} IMPERIUM", sans(10.0), col("#ddbd77"), 4.0);
+            p.text(Pos2::new(x0 + 87.0, r.min.y + 38.0), Align2::LEFT_TOP, "cruciāta", serif(46.0), col("#ddbd77"));
+            spaced(&p, Pos2::new(x0 + 88.0, r.min.y + 92.0), "CHRONICA \u{b7} FIDES \u{b7} IMPERIUM", sans(10.0), col("#ddbd77"), 4.0);
             if let Some(t) = banner {
                 let h = (r.height() * 0.58).min(560.0);
                 let w = h * 260.0 / 620.0;
