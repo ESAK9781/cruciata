@@ -26,9 +26,9 @@ pub struct Plan {
 
 pub fn plan_for(difficulty: &str) -> Plan {
     match difficulty {
-        "easy" => Plan { think: 10.0, workers: 10.0, attack: 22.0, retreat: 0.65, reserve: 6, grace: 300.0 },
-        "hard" => Plan { think: 4.0, workers: 24.0, attack: 28.0, retreat: 0.45, reserve: 7, grace: 180.0 },
-        _ => Plan { think: 6.0, workers: 16.0, attack: 24.0, retreat: 0.55, reserve: 6, grace: 240.0 },
+        "easy" => Plan { think: 10.0, workers: 10.0, attack: 16.0, retreat: 0.65, reserve: 5, grace: 300.0 },
+        "hard" => Plan { think: 4.0, workers: 24.0, attack: 20.0, retreat: 0.45, reserve: 4, grace: 180.0 },
+        _ => Plan { think: 6.0, workers: 16.0, attack: 18.0, retreat: 0.55, reserve: 4, grace: 240.0 },
     }
 }
 
@@ -915,11 +915,50 @@ impl Sim {
             self.train(&mut ctx, ty);
         }
         let fort_count = ctx.known.iter().filter(|k| matches!(k.kind, BKind::Wall | BKind::Gate | BKind::Tower | BKind::Watchtower | BKind::Fort)).count();
-        if fort_count > 10 && ctx.army.len() >= 8 {
-            for ty in [UType::Trebuchet, UType::Ram] {
+        // Walls the army cannot walk through call for engines in proportion,
+        // more after every failed assault.
+        let walled = fort_count > 5;
+        let failures0 = self.state.enemy.failures.unwrap_or(0.0);
+        if walled && ctx.army.len() >= 6 {
+            let limit = 8f64.min(3.0 + (fort_count as f64 / 8.0).floor() + 2f64.min(failures0));
+            for (ty, cap) in [(UType::Ram, limit), (UType::Trebuchet, limit.min(4.0)), (UType::Ballista, limit.min(3.0))] {
                 let have = ctx.army.iter().filter(|&&u| self.state.units[u].ty == ty).count() as f64;
-                if have < 6f64.min(2.0 + (fort_count as f64 / 12.0).floor()) && self.train(&mut ctx, ty) {
+                if have < cap && self.train(&mut ctx, ty) {
                     break;
+                }
+            }
+        }
+        // A failed push against walls earns a temporary forward post: two
+        // defense towers just beyond the enemy's reach where engines gather.
+        let posts = self.state.buildings.iter().filter(|b| b.team == 1 && b.hp > 0.0 && b.extra.get("forwardPost").and_then(|v| v.as_bool()) == Some(true)).count();
+        let post_cost = Cost::of(&[(Res::Wood, 280.0), (Res::Stone, 240.0)]);
+        let post_at = self.state.enemy.extra.get("postAt").and_then(|v| v.as_f64()).unwrap_or(0.0);
+        if walled && failures0 >= 1.0 && posts < 4 && now >= post_at && ctx.ws.len() >= 8 && self.afford(&post_cost, 1) {
+            self.state.enemy.extra.insert("postAt".into(), serde_json::json!(now + 90.0));
+            let fort = ctx.known.iter().filter(|k| matches!(k.kind, BKind::Wall | BKind::Gate | BKind::Tower | BKind::Watchtower)).min_by(|a, c| cmp(dist(Self::bpt(a), base_pt), dist(Self::bpt(c), base_pt))).cloned();
+            if let Some(fort) = fort {
+                let fp = Self::bpt(&fort);
+                let back = atan2(base_pt.y - fp.y, base_pt.x - fp.x);
+                'post: for distance in [1100.0, 1250.0, 1400.0, 1550.0] {
+                    for lateral in [0.0, 240.0, -240.0, 480.0, -480.0] {
+                        let p = Pt::new(fp.x + cos(back) * distance + cos(back + std::f64::consts::PI / 2.0) * lateral, fp.y + sin(back) * distance + sin(back + std::f64::consts::PI / 2.0) * lateral);
+                        let q = Pt::new(p.x + cos(back + std::f64::consts::PI / 2.0) * 90.0, p.y + sin(back + std::f64::consts::PI / 2.0) * 90.0);
+                        if !self.valid_site(BKind::Tower, p, 1, 0.0, None) || !self.valid_site(BKind::Tower, q, 1, 0.0, None) || ctx.known.iter().any(|k| dist(Self::bpt(k), p) < 700.0) {
+                            continue;
+                        }
+                        self.pay(&post_cost, 1.0, 1);
+                        let mut ids = Vec::new();
+                        for at in [p, q] {
+                            let mut b = self.make_building(BKind::Tower, 1, at.x, at.y, 0.0);
+                            b.extra.insert("forwardPost".into(), serde_json::json!(true));
+                            ids.push(b.id);
+                            self.state.buildings.push(b);
+                        }
+                        self.state.nav_dirty = true;
+                        let builders = self.idle_builders(&ctx, 4);
+                        self.queue_construction(&builders, &ids, false);
+                        break 'post;
+                    }
                 }
             }
         }
@@ -994,6 +1033,43 @@ impl Sim {
                     let un = &mut self.state.units[scout];
                     un.order = Some(Order { x: f.x, y: f.y, attack: Some(false), ..Default::default() });
                     un.path_timer = 0.0;
+                }
+            }
+        }
+        // Siege engines at the walls are hunted down first.
+        {
+            let wall_sides: Vec<Pt> = self.state.buildings.iter().filter(|b| b.team == 1 && b.hp > 0.0 && (matches!(b.kind, BKind::Wall | BKind::Gate | BKind::Bastiongate) || b.wall_attachment.is_some())).map(Self::bpt).collect();
+            let mut raiding: Vec<usize> = (0..self.state.units.len())
+                .filter(|&i| {
+                    let u = &self.state.units[i];
+                    u.team == 0 && u.hp > 0.0 && matches!(u.ty, UType::Ram | UType::Ballista | UType::Trebuchet) && self.enemy_fog.sees(u.x, u.y) && wall_sides.iter().any(|b| dist(*b, Pt::new(u.x, u.y)) < 700.0)
+                })
+                .collect();
+            let sortie_at = self.state.enemy.extra.get("sortieAt").and_then(|v| v.as_f64()).unwrap_or(0.0);
+            if !raiding.is_empty() && now >= sortie_at {
+                self.state.enemy.extra.insert("sortieAt".into(), serde_json::json!(now + 4.0));
+                raiding.sort_by(|&a, &b| cmp(dist(self.unit_pt(a), base_pt), dist(self.unit_pt(b), base_pt)));
+                let engine = raiding[0];
+                let (eid, ep) = (self.state.units[engine].id, self.unit_pt(engine));
+                let mut hunters: Vec<usize> = ctx
+                    .army
+                    .iter()
+                    .copied()
+                    .filter(|&u| {
+                        let un = &self.state.units[u];
+                        un.scout != Some(true) && un.garrison_base.is_none() && un.fixed_defense != Some(true) && un.order.as_ref().and_then(|o| o.formation).is_none() && un.hp / un.max_hp > plan.retreat && dist(self.unit_pt(u), ep) < 1800.0
+                    })
+                    .collect();
+                hunters.sort_by(|&a, &b| cmp(dist(self.unit_pt(a), ep), dist(self.unit_pt(b), ep)));
+                hunters.truncate(16);
+                for u in hunters {
+                    let un = &mut self.state.units[u];
+                    un.target = Some(eid);
+                    un.order = Some(Order { x: ep.x, y: ep.y, attack: Some(true), ..Default::default() });
+                    un.path.clear();
+                    un.path_goal = None;
+                    un.path_request = None;
+                    un.home = None;
                 }
             }
         }
@@ -1139,7 +1215,7 @@ impl Sim {
             && self.state.enemy.assault.is_none()
             && healthy.len() as f64 >= need_size
             && now >= plan.grace
-            && now - self.state.enemy.attack > 65.0
+            && now - self.state.enemy.attack > 40.0
         {
             self.state.enemy.attack = now;
             if self.state.enemy.faith >= 30.0 && self.state.difficulty != "easy" {

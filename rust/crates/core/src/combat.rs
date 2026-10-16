@@ -77,6 +77,10 @@ impl Sim {
         if e.hp / e.max_hp < 0.3 {
             score -= 25.0;
         }
+        // Defenders go for the engines battering their walls before anything else.
+        if u.team == 1 && matches!(e.ty, UType::Ram | UType::Ballista | UType::Trebuchet) {
+            score -= 260.0;
+        }
         score
     }
 

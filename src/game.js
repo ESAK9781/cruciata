@@ -6996,6 +6996,9 @@
     if (u.type === "sword" && e.type === "knight") score -= 40;
     if (e.target === u.id) score -= 55;
     if (e.hp / e.maxHp < 0.3) score -= 25;
+    // Defenders go for the engines battering their walls before anything else.
+    if (u.team === 1 && ["ram", "ballista", "trebuchet"].includes(e.type))
+      score -= 260;
     return score;
   }
   function acquire(u, r = 310) {
@@ -7679,25 +7682,25 @@
     easy: {
       think: 10,
       workers: 10,
-      attack: 22,
+      attack: 16,
       retreat: 0.65,
-      reserve: 6,
+      reserve: 5,
       grace: 300,
     },
     normal: {
       think: 6,
       workers: 16,
-      attack: 24,
+      attack: 18,
       retreat: 0.55,
-      reserve: 6,
+      reserve: 4,
       grace: 240,
     },
     hard: {
       think: 4,
       workers: 24,
-      attack: 28,
+      attack: 20,
       retreat: 0.45,
-      reserve: 7,
+      reserve: 4,
       grace: 180,
     },
   };
@@ -8458,14 +8461,80 @@
     const fortCount = known.filter((k) =>
       ["wall", "gate", "tower", "watchtower", "fort"].includes(k.kind),
     ).length;
-    if (fortCount > 10 && army.length >= 8)
-      for (const type of ["trebuchet", "ram"])
-        if (
-          army.filter((u) => u.type === type).length <
-            Math.min(6, 2 + Math.floor(fortCount / 12)) &&
-          train(type)
-        )
+    // Walls the army cannot walk through call for engines in proportion, more
+    // after every failed assault.
+    const walled = fortCount > 5;
+    if (walled && army.length >= 6) {
+      const limit = Math.min(
+        8,
+        3 + Math.floor(fortCount / 8) + Math.min(2, ai.failures || 0),
+      );
+      for (const [type, cap] of [
+        ["ram", limit],
+        ["trebuchet", Math.min(limit, 4)],
+        ["ballista", Math.min(limit, 3)],
+      ])
+        if (army.filter((u) => u.type === type).length < cap && train(type))
           break;
+    }
+    // A failed push against walls earns a temporary forward post: two defense
+    // towers just beyond the enemy's reach where engines can gather.
+    const posts = state.buildings.filter(
+      (b) => b.team === 1 && b.forwardPost && b.hp > 0,
+    );
+    if (
+      walled &&
+      (ai.failures || 0) >= 1 &&
+      posts.length < 4 &&
+      state.time >= (ai.postAt || 0) &&
+      ws.length >= 8 &&
+      afford({ wood: 280, stone: 240 }, 1)
+    ) {
+      ai.postAt = state.time + 90;
+      const fort = known
+        .filter((k) => ["wall", "gate", "tower", "watchtower"].includes(k.kind))
+        .sort((a, c) => distance(a, base) - distance(c, base))[0];
+      if (fort) {
+        const back = Math.atan2(base.y - fort.y, base.x - fort.x);
+        post: for (const dist of [1100, 1250, 1400, 1550])
+          for (const lateral of [0, 240, -240, 480, -480]) {
+            const p = {
+                x:
+                  fort.x +
+                  Math.cos(back) * dist +
+                  Math.cos(back + Math.PI / 2) * lateral,
+                y:
+                  fort.y +
+                  Math.sin(back) * dist +
+                  Math.sin(back + Math.PI / 2) * lateral,
+              },
+              q = {
+                x: p.x + Math.cos(back + Math.PI / 2) * 90,
+                y: p.y + Math.sin(back + Math.PI / 2) * 90,
+              };
+            if (
+              !validSite("tower", p, 1) ||
+              !validSite("tower", q, 1) ||
+              known.some((k) => distance(k, p) < 700)
+            )
+              continue;
+            pay({ wood: 280, stone: 240 }, 1, 1);
+            const towers = [p, q].map((at) => {
+              const b = makeBuilding("tower", 1, at.x, at.y, 0);
+              b.forwardPost = true;
+              state.buildings.push(b);
+              return b;
+            });
+            state.navDirty = true;
+            queueConstruction(
+              ws.filter((u) => u.job?.kind !== "build").slice(0, 4),
+              towers.map((b) => b.id),
+              false,
+            );
+            break post;
+          }
+      }
+    }
     if (state.difficulty !== "easy" && state.time > 300) {
       for (const type of ["sword", "archer", "knight"]) {
         const t = TECHS[type + (rankFor(type, 1) + 1)],
@@ -8535,6 +8604,50 @@
           scout.pathTimer = 0;
         }
       }
+    // Siege engines at the walls are hunted down first.
+    const wallSides = state.buildings.filter(
+      (b) =>
+        b.team === 1 &&
+        b.hp > 0 &&
+        (b.kind === "wall" ||
+          b.kind === "gate" ||
+          b.kind === "bastiongate" ||
+          b.wallAttachment),
+    );
+    const raiding = state.units
+      .filter(
+        (u) =>
+          u.team === 0 &&
+          u.hp > 0 &&
+          ["ram", "ballista", "trebuchet"].includes(u.type) &&
+          enemyFog.sees(u) &&
+          wallSides.some((b) => distance(b, u) < 700),
+      )
+      .sort((a, b) => distance(a, base) - distance(b, base));
+    if (raiding.length && state.time >= (ai.sortieAt || 0)) {
+      ai.sortieAt = state.time + 4;
+      const engine = raiding[0];
+      const hunters = army
+        .filter(
+          (u) =>
+            !u.scout &&
+            !u.garrisonBase &&
+            !u.fixedDefense &&
+            !u.order?.formation &&
+            u.hp / u.maxHp > plan.retreat &&
+            distance(u, engine) < 1800,
+        )
+        .sort((a, b) => distance(a, engine) - distance(b, engine))
+        .slice(0, 16);
+      for (const u of hunters) {
+        u.target = engine.id;
+        u.order = { x: engine.x, y: engine.y, attack: true };
+        u.path = [];
+        u.pathGoal = null;
+        u.pathRequest = null;
+        u.home = null;
+      }
+    }
     const active = army.filter((u) => !u.scout),
       visibleThreats = state.units.filter(
         (u) =>
@@ -8759,7 +8872,7 @@
           plan.attack * (1 + Math.min(0.5, 0.15 * (ai.failures || 0))),
         ) &&
       state.time >= plan.grace &&
-      state.time - ai.attack > 65
+      state.time - ai.attack > 40
     ) {
       ai.attack = state.time;
       if (ai.faith >= 30 && state.difficulty !== "easy") {
