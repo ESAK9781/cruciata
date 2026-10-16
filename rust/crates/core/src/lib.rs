@@ -6,6 +6,8 @@ pub mod js;
 pub mod model;
 pub mod nav;
 pub mod sim;
+pub mod campaign;
+pub mod worldgen;
 pub mod names;
 pub mod update;
 pub mod ai;
