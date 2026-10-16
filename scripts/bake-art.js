@@ -482,6 +482,11 @@ const fs = require("node:fs"),
       path.join(staging, "manifest.js"),
       "window.CruciataAtlasManifest = " + JSON.stringify(metadata) + ";\n",
     );
+    // Plain JSON copy for the native client.
+    fs.writeFileSync(
+      path.join(staging, "manifest.json"),
+      JSON.stringify(metadata),
+    );
     for (const name of fs.readdirSync(staging))
       if (/^page-\d+\.png$/.test(name) && !metadata.pages.includes(name))
         fs.unlinkSync(path.join(staging, name));
