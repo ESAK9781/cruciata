@@ -152,6 +152,17 @@ pub fn bake(state: &State, w: f64, h: f64, level: i32, coast: bool) -> ColorImag
         cv.line(&[(bx - 87.0, by - 50.0), (bx + 87.0, by - 50.0)], 6.0, "#a99a77");
         cv.line(&[(bx - 87.0, by + 50.0), (bx + 87.0, by + 50.0)], 6.0, "#a99a77");
     }
+    for road in &state.roads {
+        let pts: Vec<(f64, f64)> = road.iter().map(|p| (p.x, p.y)).collect();
+        if pts.len() < 2 {
+            continue;
+        }
+        cv.line(&pts, 38.0, "#827761");
+        cv.line(&pts, 33.0, "#a89b7e");
+        for off in [-7.0, 7.0] {
+            cv.line(&pts.iter().map(|&(x, y)| (x + off, y)).collect::<Vec<_>>(), 0.8, "#8d78493d");
+        }
+    }
     // Faint grass tufts that the original tiled over the ground.
     let _ = (sin(0.0), cos(0.0));
     let px: Vec<eframe::egui::Color32> = cv.pm.pixels().iter().map(|p| {
