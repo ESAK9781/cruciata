@@ -450,6 +450,15 @@ impl App {
                     }
                     a.play(&kind, volume);
                 }
+                Event::Impact { x, y, heavy } => {
+                    self.ui.impacts.push((x, y, self.ui.clock, heavy));
+                    if self.ui.impacts.len() > 60 {
+                        self.ui.impacts.remove(0);
+                    }
+                    let d = ((x - self.view.cx).powi(2) + (y - self.view.cy).powi(2)).sqrt();
+                    let power = if heavy { 14.0 } else { 5.0 } * (1.0 - d / 3600.0).clamp(0.0, 1.0);
+                    self.ui.shake = self.ui.shake.max(power);
+                }
                 Event::Finished(_) => {}
                 _ => {}
             }
@@ -459,7 +468,11 @@ impl App {
     fn draw_world(&mut self, ui: &mut egui::Ui, rect: Rect, dt: f64) {
         self.view.rect = rect;
         self.view.update();
-        let view = self.view.clone();
+        let mut view = self.view.clone();
+        if self.ui.shake > 0.0 {
+            view.x += (self.game.sim.state.time * 83.0).sin() * self.ui.shake / view.zoom;
+            view.y += (self.game.sim.state.time * 97.0).cos() * self.ui.shake * 0.7 / view.zoom;
+        }
         let painter = ui.painter_at(rect);
         let ground = self.ground_color();
         let biome = self.biome();
@@ -474,6 +487,7 @@ impl App {
         let sim = &g.sim;
         let me = g.me;
         let time = sim.state.time;
+        let time_clock = self.ui.clock;
         let motion = view.zoom >= ANIM_SCALE;
         let draw_time = if motion { time } else { 0.0 };
         let mut batch = Batch::new();
@@ -832,6 +846,24 @@ impl App {
                 cv.ellipse(x - 1.0, fy - 1.0, 4.5 * k, 4.5 * k, col("#f5a23b"));
             }
         }
+        // ---- impact smoke and dust ----
+        for &(x, y, t0, heavy) in &self.ui.impacts {
+            let t = time_clock - t0;
+            if !(0.0..1.2).contains(&t) || !view.on_screen(x, y, 200.0) {
+                continue;
+            }
+            let k = t / 1.2;
+            let scale = if heavy { 90.0 } else { 38.0 };
+            cv.ellipse(x, y, scale * (0.4 + k), scale * 0.7 * (0.4 + k), with_alpha(col("#6b5d49"), 0.5 * (1.0 - k) as f32));
+            for i in 0..7 {
+                let a = i as f64 * 0.9 + x * 0.01;
+                let r = scale * 0.7 * k;
+                cv.ellipse(x + a.cos() * r, y + a.sin() * r * 0.6 - k * 25.0, scale * 0.22 * (1.0 + k), scale * 0.2 * (1.0 + k), with_alpha(col("#4a4036"), 0.55 * (1.0 - k) as f32));
+            }
+            if t < 0.25 {
+                cv.ellipse(x, y - 6.0, scale * 0.5 * (1.0 - t * 2.0), scale * 0.4 * (1.0 - t * 2.0), with_alpha(col("#ffd27a"), 0.9 * (1.0 - t * 4.0) as f32));
+            }
+        }
         // ---- fog ----
         self.fog_tex.paint(&painter, &view, sim.geo.w, sim.geo.h);
         // ---- unit overlays ----
@@ -1081,6 +1113,8 @@ impl eframe::App for App {
             r.t += dt;
         }
         self.ui.rings.retain(|r| r.t < 1.0);
+        self.ui.impacts.retain(|i| self.ui.clock - i.2 < 1.3);
+        self.ui.shake = (self.ui.shake - dt * 16.0).max(0.0);
         self.ui.prune(&self.game);
         self.fog_tex.update(ctx, &self.game);
         self.ensure_terrain(ctx);
