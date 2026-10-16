@@ -8,12 +8,18 @@ const fs = require("node:fs"),
 (async () => {
   const output = path.resolve(__dirname, "../assets/atlas");
   for (const name of fs.readdirSync(output))
-    if (/^colossus-\d+\.png$/.test(name)) fs.unlinkSync(path.join(output, name));
+    if (/^colossus-\d+\.png$/.test(name))
+      fs.unlinkSync(path.join(output, name));
   const browser = await chromium.launch();
   const page = await browser.newPage();
-  await page.goto((process.env.BAKE_URL || "http://127.0.0.1:3000") + "/?test&bake");
+  await page.goto(
+    (process.env.BAKE_URL || "http://127.0.0.1:3000") + "/?test&bake",
+  );
   await page.exposeFunction("saveColossusPage", (index, encoded) => {
-    fs.writeFileSync(path.join(output, `colossus-${index}.png`), Buffer.from(encoded, "base64"));
+    fs.writeFileSync(
+      path.join(output, `colossus-${index}.png`),
+      Buffer.from(encoded, "base64"),
+    );
   });
   const meta = await page.evaluate(async () => {
     const scale = 1.5,
@@ -21,10 +27,19 @@ const fs = require("node:fs"),
       frames = {},
       pages = [],
       writes = [];
-    let canvas, pg, x = 2, y = 2, rowHeight = 0;
+    let canvas,
+      pg,
+      x = 2,
+      y = 2,
+      rowHeight = 0;
     const flush = () => {
       if (!canvas) return;
-      writes.push(window.saveColossusPage(pages.length - 1, canvas.toDataURL("image/png").split(",")[1]));
+      writes.push(
+        window.saveColossusPage(
+          pages.length - 1,
+          canvas.toDataURL("image/png").split(",")[1],
+        ),
+      );
     };
     const next = () => {
       flush();
@@ -47,7 +62,10 @@ const fs = require("node:fs"),
       g.translate(ox, oy);
       draw(g);
       const rgba = g.getImageData(0, 0, c.width, c.height).data;
-      let left = c.width, top = c.height, right = 0, bottom = 0;
+      let left = c.width,
+        top = c.height,
+        right = 0,
+        bottom = 0;
       for (let yy = 0; yy < c.height; yy++)
         for (let xx = 0; xx < c.width; xx++)
           if (rgba[(yy * c.width + xx) * 4 + 3]) {
@@ -59,7 +77,8 @@ const fs = require("node:fs"),
       if (left > right) return true;
       const sw = right - left + 1,
         sh = bottom - top + 1;
-      if (sw + 4 > size || sh + 4 > size) throw Error(`Sprite exceeds its page: ${key} ${sw}x${sh}`);
+      if (sw + 4 > size || sh + 4 > size)
+        throw Error(`Sprite exceeds its page: ${key} ${sw}x${sh}`);
       if (x + sw + 2 > size) {
         x = 2;
         y += rowHeight + 2;
@@ -77,15 +96,27 @@ const fs = require("node:fs"),
     const proto = CanvasRenderingContext2D.prototype,
       drawImage = proto.drawImage;
     proto.drawImage = function (img, ...rest) {
-      if (img.width === 120 && img.height === 84 && window.__team !== undefined && !window.__flags[window.__team])
-        window.__flags[window.__team] = img.toDataURL("image/png").split(",")[1];
+      if (
+        img.width === 120 &&
+        img.height === 84 &&
+        window.__team !== undefined &&
+        !window.__flags[window.__team]
+      )
+        window.__flags[window.__team] = img
+          .toDataURL("image/png")
+          .split(",")[1];
       return drawImage.call(this, img, ...rest);
     };
     const g = document.createElement("canvas").getContext("2d"),
       A = CruciataArt;
     const poses = [
-      ["fire", 0], ["fire", 4], ["fire", 8],
-      ["reload", 1], ["reload", 4], ["reload", 8], ["reload", 12],
+      ["fire", 0],
+      ["fire", 4],
+      ["fire", 8],
+      ["reload", 1],
+      ["reload", 4],
+      ["reload", 8],
+      ["reload", 12],
       ["ready", 0],
     ];
     for (const team of [0, 1])
@@ -94,19 +125,34 @@ const fs = require("node:fs"),
         window.__team = team;
         for (const [pose, n] of poses) {
           const b = { kind: "colossus", x: 0, y: 0, team, aimAngle };
-          if (pose === "fire") A.greatEngine(g, { ...b, lastShot: 0 }, (n + 0.01) / 12);
-          else if (pose === "reload") A.greatEngine(g, { ...b, lastShot: 0 }, n + 0.01);
+          if (pose === "fire")
+            A.greatEngine(g, { ...b, lastShot: 0 }, (n + 0.01) / 12);
+          else if (pose === "reload")
+            A.greatEngine(g, { ...b, lastShot: 0 }, n + 0.01);
           else A.greatEngine(g, b, 18);
         }
       }
     flush();
     await Promise.all(writes);
-    return { scale, pages: pages.map((_, i) => `colossus-${i}.png`), frames, flags: window.__flags };
+    return {
+      scale,
+      pages: pages.map((_, i) => `colossus-${i}.png`),
+      frames,
+      flags: window.__flags,
+    };
   });
   for (const [team, data] of Object.entries(meta.flags || {}))
-    fs.writeFileSync(path.join(output, `colossus-flag-${team}.png`), Buffer.from(data, "base64"));
+    fs.writeFileSync(
+      path.join(output, `colossus-flag-${team}.png`),
+      Buffer.from(data, "base64"),
+    );
   delete meta.flags;
   fs.writeFileSync(path.join(output, "colossus.json"), JSON.stringify(meta));
-  console.log(meta.pages.length, "pages;", Object.keys(meta.frames).length, "frames");
+  console.log(
+    meta.pages.length,
+    "pages;",
+    Object.keys(meta.frames).length,
+    "frames",
+  );
   await browser.close();
 })();

@@ -15,8 +15,14 @@ function walk(folder, prefix = "") {
         : [prefix + e.name],
     );
 }
+// The native client's atlas files (Colossus pages, JSON manifests) stay out of the web build.
+const nativeOnly = /^assets\/atlas\/(colossus[^/]*|manifest\.json)$/;
 for (const folder of ["src", "assets", "docs"])
-  assets.push(...walk(path.join(root, folder), folder + "/"));
+  assets.push(
+    ...walk(path.join(root, folder), folder + "/").filter(
+      (file) => !nativeOnly.test(file),
+    ),
+  );
 assets.sort();
 
 test("deployment contains only the exact static browser assets", async () => {
