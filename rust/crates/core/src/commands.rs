@@ -18,6 +18,9 @@ pub enum Command {
     PlaceBuild { kind: BKind, x: f64, y: f64, rotation: f64, builders: Vec<u32>, append: bool },
     WallUpgrade { kind: BKind, first: u32 },
     Destroy { id: u32 },
+    PlaceWall { kind: BKind, ax: f64, ay: f64, bx: f64, by: f64, builders: Vec<u32>, append: bool },
+    Scout { units: Vec<u32> },
+    ToggleGate { id: u32 },
 }
 
 impl Sim {
@@ -36,6 +39,9 @@ impl Sim {
             Command::PlaceBuild { kind, x, y, rotation, builders, append } => self.cmd_place(team, *kind, Pt::new(*x, *y), *rotation, builders, *append),
             Command::WallUpgrade { kind, first } => self.cmd_wall_upgrade(team, *kind, *first),
             Command::Destroy { id } => self.cmd_destroy(team, *id),
+            Command::PlaceWall { kind, ax, ay, bx, by, builders, append } => self.cmd_place_wall(team, *kind, Pt::new(*ax, *ay), Pt::new(*bx, *by), builders, *append),
+            Command::Scout { units } => self.cmd_scout(team, units),
+            Command::ToggleGate { id } => self.cmd_toggle_gate(team, *id),
         }
     }
 
@@ -235,6 +241,81 @@ impl Sim {
         let max = self.state.buildings[bi].max_hp;
         self.damage(Obj::Building(bi), max * 100.0, Some(DmgSource { id: None, team, ty: None }), true);
         self.rebuild_navigation();
+        true
+    }
+}
+
+impl Sim {
+    fn cmd_place_wall(&mut self, team: i32, kind: BKind, a: Pt, b: Pt, builders: &[u32], append: bool) -> bool {
+        let kind = if kind == BKind::Bastionwall { BKind::Bastionwall } else { BKind::Wall };
+        let cost = data().bld(kind).cost.clone().unwrap_or_default();
+        let points = self.wall_line(a, b);
+        let mut projects: Vec<u32> = Vec::new();
+        for (i, p) in points.iter().enumerate() {
+            if self.state.buildings.iter().any(|x| x.hp > 0.0 && x.kind == BKind::Wall && hypot(x.x - p.x, x.y - p.y) < 12.0) {
+                continue;
+            }
+            if !self.valid_site(BKind::Wall, *p, team, 0.0, None) || !self.afford(&cost, team) {
+                continue;
+            }
+            self.pay(&cost, 1.0, team);
+            let next = points.get(i + 1).or_else(|| if i > 0 { points.get(i - 1) } else { None }).copied().unwrap_or(Pt::new(p.x + 32.0, p.y));
+            let mut w = self.make_building(kind, team, p.x, p.y, 0.0);
+            w.wall_angle = Some(crate::js::atan2(next.y - p.y, next.x - p.x));
+            projects.push(w.id);
+            self.state.buildings.push(w);
+        }
+        if projects.is_empty() {
+            self.toast("No clear ground or insufficient stone for this wall.");
+            return false;
+        }
+        self.rebuild_navigation();
+        let crew: Vec<usize> = (0..self.state.units.len())
+            .filter(|&i| {
+                let u = &self.state.units[i];
+                u.team == team && u.hp > 0.0 && u.ty == UType::Worker && builders.contains(&u.id)
+            })
+            .collect();
+        self.queue_construction(&crew, &projects, append);
+        self.toast(format!("{} wall sections planned. Villagers build along the line automatically.", projects.len()));
+        true
+    }
+
+    fn cmd_scout(&mut self, team: i32, units: &[u32]) -> bool {
+        let members: Vec<usize> = self
+            .fighters(team)
+            .into_iter()
+            .filter(|&i| units.contains(&self.state.units[i].id) && (self.state.units[i].ty != UType::Trebuchet || self.state.units[i].deployment == "packed"))
+            .collect();
+        if members.is_empty() {
+            self.toast("Select a company to explore together.");
+            return false;
+        }
+        let id = self.next_uid();
+        for &i in &members {
+            let u = &mut self.state.units[i];
+            u.auto_scout = Some(id);
+            u.target = None;
+            u.manual_target = false;
+            u.hold = false;
+            u.order = None;
+            u.path_timer = 0.0;
+        }
+        let ids: Vec<u32> = members.iter().map(|&i| self.state.units[i].id).collect();
+        self.state.scouting_groups.get_or_insert_with(Vec::new).push(ScoutGroup { id, members: ids, think: 0.0, retreat_until: 0.0, status: "exploring".into(), goal: None, formation: None, extra: Default::default() });
+        self.toast("The company will explore unseen land together and withdraw from attacks. Move, attack or hold ends scouting.");
+        true
+    }
+
+    fn cmd_toggle_gate(&mut self, team: i32, id: u32) -> bool {
+        let Some(bi) = self.bidx(id) else { return false };
+        let b = &mut self.state.buildings[bi];
+        if b.team != team || b.kind != BKind::Gate || b.progress < 1.0 {
+            return false;
+        }
+        b.auto_closed = Some(false);
+        b.closed = Some(b.closed != Some(true));
+        self.state.nav_dirty = true;
         true
     }
 }

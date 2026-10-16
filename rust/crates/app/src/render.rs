@@ -3,31 +3,43 @@
 use crate::assets::assets_dir;
 use crate::atlas::Atlas;
 use crate::cluster::{clustered, Clusters};
+use crate::game::Game;
+use crate::hud::{self, Action, Frame};
+use crate::input::{self, InputState};
 use crate::keys::*;
-use crate::paint::{col, Batch, Canvas};
+use crate::overlay::{self, FogTex, Settings};
+use crate::paint::{col, with_alpha, Batch, Canvas};
+use crate::panel;
+use crate::ui_state::*;
 use crate::view::View;
 use crate::Args;
+use cruciata_core::build::COLOSSUS_MIN_RANGE;
+use cruciata_core::data::data;
 use cruciata_core::model::*;
-use cruciata_core::sim::{Sim, STEP};
-use eframe::egui::{self, Color32, Rect, Stroke, TextureHandle};
+use cruciata_core::nav::Pt;
+use cruciata_core::sim::{Event, Sim, STEP};
+use eframe::egui::{self, Color32, Rect, Sense, Stroke, TextureHandle};
 use std::collections::{HashMap, HashSet};
 
 const ANIM_SCALE: f64 = 0.5;
 const CLUSTER_SCALE: f64 = 0.25;
 
 pub struct App {
-    pub sim: Sim,
+    pub game: Game,
     pub atlas: Atlas,
     pub view: View,
     pub args: Args,
+    pub ui: UiState,
+    input: InputState,
+    fog_tex: FogTex,
+    pub settings: Settings,
     clusters: Clusters,
     visual_angle: HashMap<u32, f64>,
     standard_stop: HashMap<u32, (bool, f64)>,
     soft_shadow: TextureHandle,
-    acc: f64,
     frames: u64,
     shot_state: ShotState,
-    pub selected: HashSet<u32>,
+    last_time: f64,
 }
 
 #[derive(PartialEq)]
@@ -55,14 +67,20 @@ fn make_shadow(ctx: &egui::Context) -> TextureHandle {
     ctx.load_texture("soft-shadow", egui::ColorImage { size: [w, h], pixels: px }, egui::TextureOptions::LINEAR)
 }
 
+fn start_sim(args: &Args) -> Sim {
+    let mut sim = match args.quick {
+        Some(seed) => Sim::start_level(0, Some(serde_json::json!({ "seed": seed, "width": 6400, "height": 4400, "biome": 0 })), "normal", false),
+        None => Sim::start_level(args.level, None, "normal", false),
+    };
+    sim.state.paused = false;
+    sim
+}
+
 impl App {
     pub fn new(cc: &eframe::CreationContext<'_>, args: Args) -> App {
+        hud::apply_theme(&cc.egui_ctx);
         let atlas = Atlas::load(assets_dir()).expect("sprite atlas");
-        let mut sim = match args.quick {
-            Some(seed) => Sim::start_level(0, Some(serde_json::json!({ "seed": seed, "width": 6400, "height": 4400, "biome": 0 })), "normal", false),
-            None => Sim::start_level(args.level, None, "normal", false),
-        };
-        sim.state.paused = false;
+        let mut sim = start_sim(&args);
         let (w, h) = (sim.geo.w, sim.geo.h);
         let mut view = View::new(w, h);
         if let Some(b) = sim.state.buildings.iter().find(|b| b.kind == BKind::Towncenter && b.team == 0) {
@@ -79,44 +97,85 @@ impl App {
         for _ in 0..(args.seconds / STEP) as usize {
             sim.update(STEP);
         }
+        let mut app_ui = UiState::new();
+        let mut game = Game::solo(sim);
+        for cmd in args.run.clone() {
+            let (k, v) = cmd.split_once(':').unwrap_or((cmd.as_str(), ""));
+            match k {
+                "army" => app_ui.select_army(&game),
+                "workers" => app_ui.select_workers(&game),
+                "tab" => app_ui.tab = match v { "build" => Tab::Settlement, "research" => Tab::Research, _ => Tab::Army },
+                "b" => {
+                    if let Some(b) = game.sim.state.buildings.iter().find(|b| b.team == 0 && crate::keys::bkind_name(b.kind) == v) {
+                        app_ui.sel_buildings = vec![b.id];
+                    }
+                }
+                "order" => {
+                    let mut p = v.split(',').filter_map(|x| x.parse::<f64>().ok());
+                    if let (Some(x), Some(y)) = (p.next(), p.next()) {
+                        let t = input::resolve_targets(&game, Pt::new(x, y));
+                        app_ui.issue_order(&mut game, Pt::new(x, y), false, false, t.enemy, t.node, t.building, t.escort);
+                    }
+                }
+                "wait" => {
+                    for _ in 0..(v.parse::<f64>().unwrap_or(1.0) / STEP) as usize {
+                        game.sim.update(STEP);
+                    }
+                }
+                _ => {}
+            }
+        }
         let shot_state = if args.shot.is_some() { ShotState::Waiting(0) } else { ShotState::Off };
         App {
             soft_shadow: make_shadow(&cc.egui_ctx),
-            sim,
+            game,
             atlas,
             view,
             args,
+            ui: app_ui,
+            input: InputState::default(),
+            fog_tex: FogTex::new(),
+            settings: Settings::default(),
             clusters: Clusters::default(),
             visual_angle: HashMap::new(),
             standard_stop: HashMap::new(),
-            acc: 0.0,
             frames: 0,
             shot_state,
-            selected: HashSet::new(),
+            last_time: 0.0,
         }
-    }
-
-    fn step_sim(&mut self, dt: f64) {
-        if self.args.shot.is_some() {
-            return;
-        }
-        self.acc = (self.acc + dt).min(0.25);
-        while self.acc >= STEP {
-            self.sim.update(STEP);
-            self.acc -= STEP;
-        }
-        self.sim.events.clear();
     }
 
     fn biome(&self) -> i32 {
-        let s = &self.sim.state;
+        let s = &self.game.sim.state;
         if let Some(b) = s.config.as_ref().and_then(|c| c.get("biome")).and_then(|b| b.as_f64()) {
             return b as i32;
         }
-        match cruciata_core::data::data().levels[s.level].terrain {
+        match data().levels[s.level].terrain {
             2 => 3,
             t if t >= 3 => 2,
             t => t,
+        }
+    }
+
+    fn ground_color(&self) -> Color32 {
+        match self.biome() {
+            2 => col("#cba766"),
+            3 => col("#aabbb4"),
+            _ => col("#628444"),
+        }
+    }
+
+    fn handle_events(&mut self) {
+        let events = std::mem::take(&mut self.game.events);
+        for e in events {
+            match e {
+                Event::Toast(t) => self.ui.toast(t),
+                Event::Alert { x, y, .. } => {
+                    self.ui.alert = Some((x, y, self.ui.clock));
+                }
+                Event::Finished(_) => {}
+                _ => {}
+            }
         }
     }
 
@@ -125,21 +184,21 @@ impl App {
         self.view.update();
         let view = self.view.clone();
         let painter = ui.painter_at(rect);
+        let ground = self.ground_color();
         let biome = self.biome();
-        let ground = match biome {
-            2 => "#cba766",
-            3 => "#aabbb4",
-            _ => "#628444",
-        };
-        painter.rect_filled(rect, 0.0, col(ground));
+        painter.rect_filled(rect, 0.0, ground);
         let cv = Canvas { painter: &painter, view: &view };
-        let time = self.sim.state.time;
+        let g = &self.game;
+        let sim = &g.sim;
+        let me = g.me;
+        let time = sim.state.time;
         let motion = view.zoom >= ANIM_SCALE;
         let draw_time = if motion { time } else { 0.0 };
         let mut batch = Batch::new();
         let shadow_id = self.soft_shadow.id();
-        let sim = &self.sim;
         let atlas = &mut self.atlas;
+        let white = Color32::WHITE;
+        let full_uv = Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0));
 
         // ---- decorations ----
         for d in &sim.geo.decorations {
@@ -153,9 +212,8 @@ impl App {
                 _ => {
                     let k = d.scale;
                     let tl = view.to_screen(d.x + 7.0 * k - 24.0 * k, d.y + 7.0 * k - 14.0 * k);
-                    let r = Rect::from_min_size(tl, egui::vec2((48.0 * k * view.zoom) as f32, (28.0 * k * view.zoom) as f32));
-                    batch.quad(shadow_id, r, Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)), d.y, Color32::WHITE);
-                    batch.frame(atlas, &view, &tree_key(biome == 2, biome == 3), 50.0, 110.0, d.x, d.y, k, d.y, Color32::WHITE);
+                    batch.quad(shadow_id, Rect::from_min_size(tl, egui::vec2((48.0 * k * view.zoom) as f32, (28.0 * k * view.zoom) as f32)), full_uv, d.y, white);
+                    batch.frame(atlas, &view, &tree_key(biome == 2, biome == 3), 50.0, 110.0, d.x, d.y, k, d.y, white);
                 }
             }
         }
@@ -175,12 +233,9 @@ impl App {
                     cv.rect(px, py, cell + 1.0, cell + 1.0, col(if snow { "#8da58f" } else if palm { "#4f7d3c" } else { "#2f5e32" }));
                     continue;
                 }
-                let hash = ((((t.x as i64 * 73856093) as i32) ^ ((t.y as i64 * 19349663) as i32)) as i32 as u32).wrapping_mul(2654435761);
-                let mut tree = |x: f64, y: f64, k: f64, batch: &mut Batch, atlas: &mut Atlas| {
-                    batch.frame(atlas, &view, &tree_key(palm, snow), 50.0, 110.0, x, y, k, y, Color32::WHITE);
-                };
+                let hash = ((((t.x as i64 * 73856093) as i32) ^ ((t.y as i64 * 19349663) as i32)) as u32).wrapping_mul(2654435761);
                 if mid {
-                    tree(px + cell / 2.0, py + cell / 2.0, 2.3, &mut batch, atlas);
+                    batch.frame(atlas, &view, &tree_key(palm, snow), 50.0, 110.0, px + cell / 2.0, py + cell / 2.0, 2.3, py + cell / 2.0, white);
                     continue;
                 }
                 for i in 0..4u32 {
@@ -188,7 +243,8 @@ impl App {
                     let jx = ((h & 255) as f64 / 255.0 - 0.5) * 14.0;
                     let jy = (((h >> 8) & 255) as f64 / 255.0 - 0.5) * 14.0;
                     let k = 1.4 + (((h >> 16) & 255) as f64 / 255.0) * 0.25;
-                    tree(px + if i % 2 == 1 { 0.75 } else { 0.25 } * cell + jx, py + if i > 1 { 0.75 } else { 0.25 } * cell + jy, k, &mut batch, atlas);
+                    let (x, y) = (px + if i % 2 == 1 { 0.75 } else { 0.25 } * cell + jx, py + if i > 1 { 0.75 } else { 0.25 } * cell + jy);
+                    batch.frame(atlas, &view, &tree_key(palm, snow), 50.0, 110.0, x, y, k, y, white);
                 }
             }
         }
@@ -200,16 +256,16 @@ impl App {
             if n.kind == Res::Wood {
                 let k = 1.3;
                 let tl = view.to_screen(n.x + 7.0 * k - 24.0 * k, n.y + 7.0 * k - 14.0 * k);
-                batch.quad(shadow_id, Rect::from_min_size(tl, egui::vec2((48.0 * k * view.zoom) as f32, (28.0 * k * view.zoom) as f32)), Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)), n.y, Color32::WHITE);
-                batch.frame(atlas, &view, &tree_key(n.palm, n.snow), 50.0, 110.0, n.x, n.y, k, n.y, Color32::WHITE);
+                batch.quad(shadow_id, Rect::from_min_size(tl, egui::vec2((48.0 * k * view.zoom) as f32, (28.0 * k * view.zoom) as f32)), full_uv, n.y, white);
+                batch.frame(atlas, &view, &tree_key(n.palm, n.snow), 50.0, 110.0, n.x, n.y, k, n.y, white);
             } else {
                 let tl = view.to_screen(n.x + 7.0 - 28.0, n.y + 7.0 - 18.0);
-                batch.quad(shadow_id, Rect::from_min_size(tl, egui::vec2((56.0 * view.zoom) as f32, (36.0 * view.zoom) as f32)), Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)), n.y, Color32::WHITE);
-                batch.frame(atlas, &view, &resource_key(n), 55.0, 80.0, n.x, n.y, 1.0, n.y, Color32::WHITE);
+                batch.quad(shadow_id, Rect::from_min_size(tl, egui::vec2((56.0 * view.zoom) as f32, (36.0 * view.zoom) as f32)), full_uv, n.y, white);
+                batch.frame(atlas, &view, &resource_key(n), 55.0, 80.0, n.x, n.y, 1.0, n.y, white);
             }
         }
         // ---- structures ----
-        let known: Vec<&Building> = sim.state.buildings.iter().map(|b| if b.team == 0 || sim.fog.sees(b.x, b.y) { Some(b) } else { sim.fog.known.get(&b.id) }).flatten().collect();
+        let known: Vec<&Building> = sim.state.buildings.iter().filter_map(|b| if b.team == me || g.sees(b.x, b.y) { Some(b) } else { g.fog().known.get(&b.id) }).collect();
         for b in &known {
             if !view.on_screen(b.x, b.y, 120f64.max(visual_height(b) + b.h / 2.0)) {
                 continue;
@@ -220,7 +276,7 @@ impl App {
                     cv.rect(b.x - 16.0, b.y - 16.0, 32.0, 32.0, col(if b.fortified { "#6d6a63" } else { "#a09a89" }));
                 }
                 BKind::Greatengine => {
-                    batch.frame(atlas, &view, &great_engine_key(b, time), 150.0, 240.0, b.x, b.y, 1.0, depth, Color32::WHITE);
+                    batch.frame(atlas, &view, &great_engine_key(b, time), 150.0, 240.0, b.x, b.y, 1.0, depth, white);
                 }
                 BKind::Colossus => {
                     cv.ellipse(b.x, b.y, b.w / 2.0, b.h / 2.0, col("#4a3b2a"));
@@ -231,23 +287,25 @@ impl App {
                     if b.hp > 0.0 && b.progress < 1.0 {
                         batch.frame_partial(atlas, &view, &key, width / 2.0, oy, b.x, b.y, 1.0, depth, b.progress.max(0.08), Color32::from_white_alpha(230));
                     } else {
-                        batch.frame(atlas, &view, &key, width / 2.0, oy, b.x, b.y, 1.0, depth, Color32::WHITE);
+                        batch.frame(atlas, &view, &key, width / 2.0, oy, b.x, b.y, 1.0, depth, white);
                         if b.hp > 0.0 && !matches!(b.kind, BKind::Wall | BKind::Farm | BKind::Gate | BKind::Bastiongate) {
                             let frame = (((draw_time * 0.7) / (std::f64::consts::PI * 2.0)) * 24.0).floor() as i64 % 24;
-                            batch.frame(atlas, &view, &building_motion_key(b, frame), width / 2.0, oy, b.x, b.y, 1.0, depth + 0.001, Color32::WHITE);
+                            batch.frame(atlas, &view, &building_motion_key(b, frame), width / 2.0, oy, b.x, b.y, 1.0, depth + 0.001, white);
                         }
                     }
                 }
             }
         }
         // ---- units ----
-        let mut visible: Vec<usize> = (0..sim.state.units.len()).filter(|&i| {
-            let u = &sim.state.units[i];
-            u.hp > 0.0 && view.on_screen(u.x, u.y, 130.0) && (u.team == 0 || sim.fog.sees(u.x, u.y))
-        }).collect();
+        let mut visible: Vec<usize> = (0..sim.state.units.len())
+            .filter(|&i| {
+                let u = &sim.state.units[i];
+                u.hp > 0.0 && view.on_screen(u.x, u.y, 130.0) && (u.team == me || g.sees(u.x, u.y))
+            })
+            .collect();
         visible.sort_by(|&a, &b| sim.state.units[a].y.partial_cmp(&sim.state.units[b].y).unwrap_or(std::cmp::Ordering::Equal));
         let crowd = visible.iter().filter(|&&i| clustered(sim.state.units[i].ty)).count();
-        let per_unit = ((2400 / crowd.max(1)) as usize).clamp(1, 3);
+        let per_unit = (2400 / crowd.max(1)).clamp(1, 3);
         let live: HashSet<u32> = sim.state.units.iter().map(|u| u.id).collect();
         self.visual_angle.retain(|k, _| live.contains(k));
         self.clusters.retain_live(&live);
@@ -262,13 +320,12 @@ impl App {
             let u = &sim.state.units[i];
             let angle = *self.visual_angle.get(&u.id).unwrap_or(&u.angle);
             let want_cluster = clustered(u.ty) && view.zoom >= CLUSTER_SCALE && per_unit > 1;
-            let tint = Color32::WHITE;
             match u.ty {
                 UType::Ram | UType::Ballista | UType::Trebuchet => {
-                    batch.frame(atlas, &view, &siege_machine_key(u, time, angle), 80.0, 120.0, u.x, u.y, 0.72, u.y, tint);
+                    batch.frame(atlas, &view, &siege_machine_key(u, time, angle), 80.0, 120.0, u.x, u.y, 0.72, u.y, white);
                 }
                 UType::Pilgrim | UType::Merchant => {
-                    batch.frame(atlas, &view, &caravan_frame(u, time, angle), 80.0, 120.0, u.x, u.y, 0.72, u.y, tint);
+                    batch.frame(atlas, &view, &caravan_frame(u, time, angle), 80.0, 120.0, u.x, u.y, 0.72, u.y, white);
                 }
                 _ => {
                     if want_cluster {
@@ -280,9 +337,9 @@ impl App {
                             v.y = f.y;
                             v.anim = if motion { u.anim + k as f64 * 2.1 } else { 0.0 };
                             v.work_phase = Some(if motion { u.work_phase.unwrap_or(0.0) + k as f64 * 0.31 } else { 0.0 });
-                            v.moving = if motion { u.moving } else { false };
+                            v.moving = motion && u.moving;
                             v.strike = if motion { (u.strike - k as f64 * 0.04).max(0.0) } else { 0.0 };
-                            batch.frame(atlas, &view, &person_key(&v, angle), 50.0, 95.0, f.x, f.y, 0.72, f.y, tint);
+                            batch.frame(atlas, &view, &person_key(&v, angle), 50.0, 95.0, f.x, f.y, 0.72, f.y, white);
                         }
                     } else {
                         let mut v = u.clone();
@@ -292,7 +349,7 @@ impl App {
                             v.moving = false;
                             v.strike = 0.0;
                         }
-                        batch.frame(atlas, &view, &person_key(&v, angle), 50.0, 95.0, u.x, u.y, 0.72, u.y, tint);
+                        batch.frame(atlas, &view, &person_key(&v, angle), 50.0, 95.0, u.x, u.y, 0.72, u.y, white);
                         if u.ty == UType::Standard {
                             let st = self.standard_stop.entry(u.id).or_insert((u.moving, -10.0));
                             if st.0 && !u.moving {
@@ -300,7 +357,7 @@ impl App {
                             }
                             st.0 = u.moving;
                             let pose = if u.moving { (time * 12.0).floor() as i64 % 12 } else { ((time - st.1).max(0.0) * 3.0).floor().min(24.0) as i64 };
-                            batch.frame(atlas, &view, &standard_key(u, pose, u.moving), 130.0, 120.0, u.x, u.y, 0.72, u.y + 0.01, tint);
+                            batch.frame(atlas, &view, &standard_key(u, pose, u.moving), 130.0, 120.0, u.x, u.y, 0.72, u.y + 0.01, white);
                         }
                     }
                 }
@@ -308,24 +365,230 @@ impl App {
         }
         batch.flush(&painter);
 
+        // ---- markers: rally points, order lines, attack reticles ----
+        for b in &known {
+            if let Some(r) = b.rally {
+                if b.hp > 0.0 && b.team == me && self.ui.building_selected(b.id) {
+                    cv.dashed_line((b.x, b.y), (r.x, r.y), 1.2, col("#edc57888"), 6.0, 8.0, 0.0);
+                    cv.circle_stroke(r.x, r.y, 6.0, 1.6, col("#edc578"));
+                }
+            }
+        }
+        if !self.ui.selected.is_empty() && self.ui.selected.len() <= 400 {
+            let mut lanes: HashMap<u32, (f64, f64, f64, Pt, bool)> = HashMap::new();
+            for u in &sim.state.units {
+                if u.team != me || u.hp <= 0.0 || u.ty == UType::Worker || !self.ui.selected.contains(&u.id) {
+                    continue;
+                }
+                let Some(o) = &u.order else { continue };
+                let key = o.formation.unwrap_or(u.id);
+                let l = lanes.entry(key).or_insert((0.0, 0.0, 0.0, Pt::new(o.x, o.y), false));
+                l.0 += 1.0;
+                l.1 += u.x;
+                l.2 += u.y;
+                l.4 |= o.attack == Some(true);
+                cv.rect(o.x - 1.5, o.y - 1.5, 3.0, 3.0, with_alpha(col(if o.attack == Some(true) { "#d9604a" } else { "#efe2b0" }), 0.75));
+            }
+            for (_, l) in lanes {
+                cv.dashed_line((l.1 / l.0, l.2 / l.0), (l.3.x, l.3.y), 1.4, with_alpha(col(if l.4 { "#d9604a" } else { "#efe2b0" }), 0.5), 5.0, 7.0, -(time as f32) * 18.0);
+            }
+        }
+        let mut targets: HashSet<u32> = HashSet::new();
+        for u in &sim.state.units {
+            if u.team == me && u.hp > 0.0 && self.ui.selected.contains(&u.id) && u.manual_target {
+                if let Some(t) = u.target {
+                    targets.insert(t);
+                }
+            }
+        }
+        for id in targets {
+            if let Some(o) = sim.get_object(id) {
+                let (p, r0, hp) = match o {
+                    cruciata_core::sim::Obj::Unit(i) => (Pt::new(sim.state.units[i].x, sim.state.units[i].y), 18.0, sim.state.units[i].hp),
+                    cruciata_core::sim::Obj::Building(i) => (Pt::new(sim.state.buildings[i].x, sim.state.buildings[i].y), sim.state.buildings[i].r, sim.state.buildings[i].hp),
+                    _ => continue,
+                };
+                if hp <= 0.0 || !g.sees(p.x, p.y) {
+                    continue;
+                }
+                let r = r0 + 12.0 + (time * 8.0).sin() * 3.0;
+                cv.circle_stroke(p.x, p.y, r, 3.0, col("#ff5544"));
+                for s in [-1.0, 1.0] {
+                    cv.line(&[(p.x + s * (r + 10.0), p.y), (p.x + s * (r - 5.0), p.y)], 3.0, col("#ff5544"));
+                    cv.line(&[(p.x, p.y + s * (r + 10.0)), (p.x, p.y + s * (r - 5.0))], 3.0, col("#ff5544"));
+                }
+            }
+        }
+        // ---- projectiles ----
+        for a in &sim.state.arrows {
+            if !view.on_screen(a.x, a.y, 120.0) {
+                continue;
+            }
+            let angle = (a.ty - a.y).atan2(a.tx - a.x);
+            let total = ((a.tx - a.sx).powi(2) + (a.ty - a.sy).powi(2)).sqrt();
+            let progress = if total > 0.0 { (1.0 - ((a.tx - a.x).powi(2) + (a.ty - a.y).powi(2)).sqrt() / total).clamp(0.0, 1.0) } else { 0.0 };
+            let arc = (progress * std::f64::consts::PI).sin() * (65f64).min(total * 0.22);
+            let (c, s) = (angle.cos(), angle.sin());
+            let tilt = (progress * std::f64::consts::PI).cos() * 0.45;
+            let len = if a.siege { 22.0 } else { 15.0 };
+            let (hx, hy) = (a.x, a.y - arc);
+            let (tx, ty) = (hx - c * len, hy - s * len + tilt * len * 0.4);
+            cv.ellipse(a.x, a.y, 2.4, 1.2, col("#25332340"));
+            cv.line(&[(tx, ty), (hx, hy)], if a.siege { 2.4 } else { 1.3 }, col("#6b5636"));
+            cv.line(&[(hx - c * 3.0, hy - s * 3.0), (hx + c * 2.0, hy + s * 2.0)], if a.siege { 3.0 } else { 2.0 }, col("#cfd3cf"));
+        }
+        for b in &sim.state.boulders {
+            let t = b.t / b.duration;
+            let (x, y) = (b.sx + (b.tx - b.sx) * t, b.sy + (b.ty - b.sy) * t);
+            let height = (t * std::f64::consts::PI).sin() * (if b.heavy { 340.0 } else { 150.0 }) + b.lift.unwrap_or(0.0) * (1.0 - t.min(1.0));
+            let fy = y - height;
+            if view.on_screen(b.tx, b.ty, b.r) {
+                cv.circle_stroke(b.tx, b.ty, b.r, 1.5, col("#b99a6477"));
+            }
+            if !view.on_screen(x, fy, 55.0) {
+                continue;
+            }
+            let k = 1.0 + (t * std::f64::consts::PI).sin() * 0.3;
+            cv.ellipse(x, y, 7.0, 6.0, col("#44513955"));
+            if b.heavy {
+                cv.ellipse(x, fy, 17.0 * k, 15.0 * k, col("#2b2623"));
+                cv.ellipse(x - 3.0 * k, fy - 4.0 * k, 14.0 * k, 12.0 * k, col("#837b66"));
+            } else {
+                cv.ellipse(x, fy, 6.0 * k, 6.0 * k, col("#c8451c"));
+                cv.ellipse(x - 1.0, fy - 1.0, 4.5 * k, 4.5 * k, col("#f5a23b"));
+            }
+        }
+        // ---- fog ----
+        self.fog_tex.paint(&painter, &view, sim.geo.w, sim.geo.h);
         // ---- unit overlays ----
         for &i in &visible {
             let u = &sim.state.units[i];
-            if self.selected.contains(&u.id) {
-                cv.circle_stroke(u.x, u.y, if u.ty == UType::Knight { 18.0 } else { 12.0 }, 1.8, col("#ede1ae"));
+            if self.ui.selected.contains(&u.id) {
+                let r = if clustered(u.ty) && view.zoom >= CLUSTER_SCALE { if u.ty == UType::Knight { 24.0 } else { 16.0 } } else if u.ty == UType::Trebuchet { 24.0 } else if u.ty == UType::Knight { 18.0 } else { 12.0 };
+                cv.circle_stroke(u.x, u.y, r, 1.8, col("#ede1ae"));
             }
-            if self.selected.contains(&u.id) || u.hp < u.max_hp {
-                let w = if u.ty == UType::Trebuchet { 40.0 } else { 28.0 };
-                health_bar(&cv, u.x, u.y - 32.0, u.hp / u.max_hp, w, u.team);
+            if u.blessed > 0.0 {
+                cv.circle_stroke(u.x, u.y, 22.0, 1.5, col("#ebcb78aa"));
+            }
+            if self.ui.selected.contains(&u.id) || u.hp < u.max_hp {
+                health_bar(&cv, u.x, u.y - 32.0, u.hp / u.max_hp, if u.ty == UType::Trebuchet { 40.0 } else { 28.0 }, u.team);
+            }
+            if u.ty == UType::Trebuchet && (u.deployment == "setting-up" || u.deployment == "packing") {
+                health_bar(&cv, u.x, u.y + 35.0, 1.0 - u.deploy_timer / if u.deployment == "setting-up" { 6.0 } else { 4.0 }, 42.0, 0);
             }
         }
         for b in &known {
             if b.hp > 0.0 && view.on_screen(b.x, b.y, 200.0) {
-                if b.hp < b.max_hp || b.team == 1 {
+                if self.ui.building_selected(b.id) {
+                    cv.rect_stroke(b.x - b.w / 2.0 - 6.0, b.y - b.h / 2.0 - 6.0, b.w + 12.0, b.h + 12.0, 2.0, col("#eed5a0"));
+                }
+                if b.hp < b.max_hp || b.team != me && b.team != 2 || self.ui.building_selected(b.id) {
                     health_bar(&cv, b.x, b.y + b.h / 2.0 + 10.0, b.hp / b.max_hp, b.w.min(90.0), b.team);
                 }
                 if b.progress < 1.0 {
                     health_bar(&cv, b.x, b.y - b.h / 2.0 - 12.0, b.progress, 70.0, 0);
+                }
+            }
+        }
+        // ---- siege ranges (above fog) ----
+        for b in sim.state.buildings.iter().filter(|b| b.team == me && b.hp > 0.0 && b.progress >= 1.0 && self.ui.building_selected(b.id)) {
+            if b.kind == BKind::Greatengine {
+                cv.circle_stroke(b.x, b.y, 2200.0, 2.0, col("#e8b64bcc"));
+                cv.circle_stroke(b.x, b.y, 320.0, 2.0, col("#d96b4f99"));
+                cv.text(b.x + 140.0, b.y - 100.0, "GREAT ENGINE | 320-2200", 13.0, col("#f5d497"));
+            }
+            if b.kind == BKind::Colossus {
+                cv.dashed_circle(b.x, b.y, COLOSSUS_MIN_RANGE, 2.0, col("#ffb08a99"), 6.0, 12.0, 0.0);
+                let aims: Vec<(Pt, bool)> = {
+                    let mut v = vec![];
+                    if self.ui.pointer_on_map && self.ui.placement.is_none() {
+                        v.push((self.ui.mouse, true));
+                    }
+                    if let Some(t) = b.attack_target.and_then(|id| sim.get_object(id)).map(|o| sim.obj_pos(o)).or(b.fire_target) {
+                        v.push((t, false));
+                    }
+                    v
+                };
+                for (p, hover) in aims {
+                    let d = ((b.x - p.x).powi(2) + (b.y - p.y).powi(2)).sqrt();
+                    let r = 20.0 + 0.045 * d;
+                    let close = d < COLOSSUS_MIN_RANGE;
+                    cv.dashed_circle(p.x, p.y, r, 2.0, col(if hover { "#f2c669" } else { "#e2674a" }), 16.0, 10.0, 0.0);
+                    cv.text(p.x + 14.0, p.y - r - 8.0, &if close { format!("Too close (minimum {})", COLOSSUS_MIN_RANGE) } else { format!("Shot lands within {} units", r.round()) }, 13.0, col("#fff1c9"));
+                }
+            }
+            if let Some(t) = b.fire_target {
+                cv.line(&[(t.x - 14.0, t.y), (t.x + 14.0, t.y)], 2.0, col("#f2aa4e"));
+                cv.line(&[(t.x, t.y - 14.0), (t.x, t.y + 14.0)], 2.0, col("#f2aa4e"));
+            }
+        }
+        for u in sim.state.units.iter().filter(|u| u.team == me && u.ty == UType::Trebuchet && u.hp > 0.0 && self.ui.selected.contains(&u.id)) {
+            cv.circle_stroke(u.x, u.y, 690.0, 1.5, col("#f1cd82aa"));
+            cv.circle_stroke(u.x, u.y, 180.0, 1.5, col("#f1cd82aa"));
+            if let Some(t) = u.fire_target {
+                cv.line(&[(t.x - 12.0, t.y), (t.x + 12.0, t.y)], 2.0, col("#f2aa4e"));
+                cv.line(&[(t.x, t.y - 12.0), (t.x, t.y + 12.0)], 2.0, col("#f2aa4e"));
+            }
+        }
+        // ---- rings from orders ----
+        for r in &self.ui.rings {
+            let a = (1.0 - r.t).max(0.0) as f32;
+            cv.circle_stroke(r.x, r.y, 24.0 * (0.5 + r.t), 2.0, with_alpha(col(r.color), a));
+        }
+        // ---- drag box ----
+        if let Some(d) = &self.ui.drag {
+            if ((d.start.x - d.end.x).powi(2) + (d.start.y - d.end.y).powi(2)).sqrt() * view.zoom > 4.0 {
+                let r = Rect::from_two_pos(view.to_screen(d.start.x, d.start.y), view.to_screen(d.end.x, d.end.y));
+                painter.rect_filled(r, 0.0, col("#eed7a122"));
+                painter.rect_stroke(r, 0.0, Stroke::new(1.5, col("#efdaa7")));
+            }
+        }
+        // ---- placement preview ----
+        let wall_preview = self.ui.wall_drag.or_else(|| if matches!(self.ui.placement, Some(BKind::Wall | BKind::Bastionwall)) { self.ui.wall_anchor.map(|a| (a, self.ui.mouse)) } else { None });
+        if let Some((a, b)) = wall_preview {
+            let kind = self.ui.placement.unwrap_or(BKind::Wall);
+            let cost = data().bld(kind).cost.clone().unwrap_or_default();
+            let mut count = 0;
+            for p in sim.wall_line(a, b) {
+                if sim.state.buildings.iter().any(|x| x.team == me && x.kind == BKind::Wall && x.hp > 0.0 && ((x.x - p.x).powi(2) + (x.y - p.y).powi(2)).sqrt() < 12.0) {
+                    continue;
+                }
+                let valid = sim.valid_site(BKind::Wall, p, me, 0.0, None);
+                if valid {
+                    count += 1;
+                }
+                cv.rect(p.x - 16.0, p.y - 16.0, 32.0, 32.0, col(if valid { "#dac39299" } else { "#b3333388" }));
+                cv.rect_stroke(p.x - 16.0, p.y - 16.0, 32.0, 32.0, 1.0, col(if valid { "#fff1bd" } else { "#ff786b" }));
+            }
+            let m = self.ui.mouse;
+            cv.text(m.x + 80.0, m.y - 24.0, &format!("{} sections / {} stone / {} wood", count, count as f64 * cost.0.iter().find(|x| x.0 == Res::Stone).map(|x| x.1).unwrap_or(0.0), count as f64 * cost.0.iter().find(|x| x.0 == Res::Wood).map(|x| x.1).unwrap_or(0.0)), 14.0, col("#fff1c9"));
+        } else if let (Some(kind), true) = (self.ui.placement, self.ui.pointer_on_map) {
+            let m = self.ui.mouse;
+            let spec = data().bld(kind);
+            let turned = kind == BKind::Gate && self.ui.rotation == 90.0;
+            let (w, h) = if turned { (spec.h, spec.w) } else { (spec.w, spec.h) };
+            let valid = sim.valid_site(kind, m, me, self.ui.rotation, None);
+            let ghost = Building { kind: if kind == BKind::Bastionwall { BKind::Wall } else { kind }, fortified: kind == BKind::Bastionwall, team: me, x: m.x, y: m.y, w: spec.w, h: spec.h, hp: spec.hp, max_hp: spec.hp, progress: 1.0, rotation: Some(self.ui.rotation), ..Default::default() };
+            let mut gb = Batch::new();
+            if matches!(kind, BKind::Greatengine) {
+                gb.frame(&mut self.atlas, &view, &great_engine_key(&Building { aim_angle: Some(-std::f64::consts::FRAC_PI_2), ..ghost.clone() }, 0.0), 150.0, 240.0, m.x, m.y, 1.0, m.y, Color32::from_white_alpha(150));
+            } else if !matches!(kind, BKind::Colossus | BKind::Wall | BKind::Bastionwall) {
+                let (width, _hh, oy) = building_canvas(&ghost);
+                gb.frame(&mut self.atlas, &view, &building_key(&ghost), width / 2.0, oy, m.x, m.y, 1.0, m.y, Color32::from_white_alpha(150));
+            }
+            gb.flush(&painter);
+            cv.rect(m.x - w / 2.0, m.y - h / 2.0, w, h, col(if valid { "#a4cc6422" } else { "#d63a3555" }));
+            cv.rect_stroke(m.x - w / 2.0 - 5.0, m.y - h / 2.0 - 5.0, w + 10.0, h + 10.0, 2.0, col(if valid { "#d8e5a2" } else { "#ae3229" }));
+            if kind == BKind::Greatengine {
+                cv.circle_stroke(m.x, m.y, 2200.0, 2.0, col(if valid { "#e8b64bcc" } else { "#d96b4faa" }));
+                cv.circle_stroke(m.x, m.y, 320.0, 2.0, col("#d96b4fcc"));
+                cv.text(m.x, m.y + 338.0, "Range 320-2200", 12.0, col("#f5d497"));
+            }
+            if kind == BKind::Colossus {
+                cv.circle_stroke(m.x, m.y, COLOSSUS_MIN_RANGE, 2.0, col("#d96b4fcc"));
+                for d in [1500.0, 3000.0, 4500.0] {
+                    cv.circle_stroke(m.x, m.y, d, 1.2, col("#e8b64b66"));
+                    cv.text(m.x, m.y - d - 6.0, &format!("{}: scatter {}", d, (20.0 + 0.045 * d).round()), 12.0, col("#f5d497"));
                 }
             }
         }
@@ -340,19 +603,84 @@ pub fn health_bar(cv: &Canvas, x: f64, y: f64, ratio: f64, w: f64, team: i32) {
 impl eframe::App for App {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         self.frames += 1;
-        let dt = ctx.input(|i| i.unstable_dt) as f64;
+        let dt = (ctx.input(|i| i.unstable_dt) as f64).min(0.1);
+        self.ui.clock += dt;
         self.atlas.begin_frame(ctx);
-        self.step_sim(dt.min(0.1));
+        let shot_mode = self.args.shot.is_some();
+        if !shot_mode && !self.ui.show_menu {
+            self.game.advance(dt);
+        }
+        self.handle_events();
+        for r in self.ui.rings.iter_mut() {
+            r.t += dt;
+        }
+        self.ui.rings.retain(|r| r.t < 1.0);
+        self.ui.prune(&self.game);
+        self.fog_tex.update(ctx, &self.game);
+        let mut actions: Vec<Action> = Vec::new();
+        {
+            let mut f = Frame { g: &mut self.game, ui: &mut self.ui, atlas: &mut self.atlas };
+            hud::header(ctx, &mut f, &mut actions);
+            hud::sidebar(ctx, &mut f, &mut actions);
+            hud::resource_bar(ctx, &mut f);
+            panel::command_panel(ctx, &mut f);
+        }
+        let mut look: Option<(f64, f64)> = input::keys(ctx, &mut self.view, &mut self.ui, &mut self.game, dt);
+        let mut map_rect = Rect::NOTHING;
         egui::CentralPanel::default().frame(egui::Frame::none()).show(ctx, |ui| {
             let rect = ui.max_rect();
+            map_rect = rect;
+            let resp = ui.allocate_rect(rect, Sense::click_and_drag());
+            self.view.rect = rect;
+            input::map_input(ctx, &resp, &mut self.view, &mut self.ui, &mut self.game, &mut self.input);
             self.draw_world(ui, rect, dt);
         });
+        let ground = self.ground_color();
+        overlay::objective_panel(ctx, map_rect, &self.game);
+        if let Some((x, y, attack)) = overlay::minimap(ctx, map_rect, &self.game, &mut self.ui, &mut self.view, &self.fog_tex, ground) {
+            let t = input::resolve_targets(&self.game, Pt::new(x, y));
+            self.ui.issue_order(&mut self.game, Pt::new(x, y), attack, false, t.enemy, t.node, t.building, t.escort);
+        }
+        if let Some(l) = overlay::colossus_banner(ctx, map_rect, &self.game) {
+            look = Some(l);
+        }
+        overlay::map_controls(ctx, map_rect, &self.game, &mut self.ui, &mut self.view, &mut look);
+        overlay::toasts(ctx, map_rect, &mut self.ui);
+        for a in actions {
+            match a {
+                Action::Help => self.ui.show_help = true,
+                Action::Settings => self.ui.show_settings = true,
+                Action::Pause => self.game.sim.state.paused = !self.game.sim.state.paused,
+                Action::Menu => self.ui.show_menu = true,
+                Action::Home => {
+                    if let Some(b) = self.game.sim.state.buildings.iter().find(|b| b.kind == BKind::Towncenter && b.team == self.game.me) {
+                        look = Some((b.x + 150.0, b.y - 100.0));
+                    }
+                }
+                Action::Look(x, y) => look = Some((x, y)),
+                _ => {}
+            }
+        }
+        if let Some((x, y)) = look {
+            self.view.cx = x;
+            self.view.cy = y;
+            self.view.update();
+        }
+        overlay::help_dialog(ctx, &mut self.ui.show_help);
+        let np = "Background music: shuffled playlist".to_string();
+        overlay::settings_dialog(ctx, &mut self.ui.show_settings, &mut self.settings, &np);
+        let _ = (map_rect, self.last_time);
         // Screenshot mode: wait for atlas pages, capture, quit.
         if let Some(path) = self.args.shot.clone() {
             match self.shot_state {
                 ShotState::Waiting(n) => {
                     let idle = self.atlas.pending_pages() == 0;
-                    self.shot_state = if (idle && n > 8) || n > 600 { ctx.send_viewport_cmd(egui::ViewportCommand::Screenshot); ShotState::Requested } else { ShotState::Waiting(n + 1) };
+                    self.shot_state = if (idle && n > 8) || n > 600 {
+                        ctx.send_viewport_cmd(egui::ViewportCommand::Screenshot);
+                        ShotState::Requested
+                    } else {
+                        ShotState::Waiting(n + 1)
+                    };
                 }
                 ShotState::Requested => {
                     let img = ctx.input(|i| i.events.iter().find_map(|e| if let egui::Event::Screenshot { image, .. } = e { Some(image.clone()) } else { None }));
@@ -371,6 +699,5 @@ impl eframe::App for App {
             }
         }
         ctx.request_repaint();
-        let _ = Stroke::NONE;
     }
 }

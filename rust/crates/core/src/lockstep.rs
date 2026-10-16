@@ -17,7 +17,6 @@ pub enum PlayerCommand {
     Deploy { units: Vec<u32> },
     CancelSiege { units: Vec<u32>, structures: Vec<u32> },
     CancelBuild { id: u32 },
-    Gate { id: u32, closed: bool },
     Rally { id: u32, x: f64, y: f64 },
 }
 
@@ -40,12 +39,6 @@ impl Sim {
             PlayerCommand::CancelSiege { units, structures } => self.cancel_siege_targeting(team, units, structures),
             PlayerCommand::CancelBuild { id } => {
                 self.cancel_structure(team, *id);
-            }
-            PlayerCommand::Gate { id, closed } => {
-                if let Some(b) = self.state.buildings.iter_mut().find(|b| b.id == *id && b.team == team && b.hp > 0.0 && b.progress >= 1.0 && b.kind == BKind::Gate) {
-                    b.closed = Some(*closed);
-                    self.state.nav_dirty = true;
-                }
             }
             PlayerCommand::Rally { id, x, y } => {
                 let p = self.find_free(crate::nav::Pt::new(*x, *y));

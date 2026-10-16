@@ -5,6 +5,14 @@ mod keys;
 mod paint;
 mod render;
 mod view;
+mod game;
+mod hud;
+mod input;
+mod overlay;
+mod panel;
+mod pick;
+mod text;
+mod ui_state;
 
 use eframe::egui;
 
@@ -17,6 +25,7 @@ pub struct Args {
     pub zoom: Option<f64>,
     pub at: Option<(f64, f64)>,
     pub size: Option<(f32, f32)>,
+    pub run: Vec<String>,
 }
 
 fn parse_args() -> Args {
@@ -37,6 +46,7 @@ fn parse_args() -> Args {
                     a.at = Some((x, y));
                 }
             }
+            "--do" => a.run = next().split(';').map(String::from).collect(),
             "--size" => {
                 let s = next();
                 let mut p = s.split('x').filter_map(|x| x.parse::<f32>().ok());
