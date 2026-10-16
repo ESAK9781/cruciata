@@ -70,26 +70,47 @@ impl QuickForm {
     }
 
     fn ui(&mut self, ui: &mut egui::Ui) {
-        egui::Grid::new("quickform").num_columns(2).spacing([14.0, 8.0]).show(ui, |ui| {
-            combo(ui, "Map size", &mut self.size, &SIZES.iter().map(|s| s.0).collect::<Vec<_>>());
-            combo(ui, "Resource frequency", &mut self.frequency, &FREQ.iter().map(|s| s.0).collect::<Vec<_>>());
-            ui.label("Starting resources per type");
+        ui.spacing_mut().item_spacing = Vec2::new(10.0, 6.0);
+        form_combo(ui, "Map size", &mut self.size, &SIZES.iter().map(|s| s.0).collect::<Vec<_>>());
+        form_combo(ui, "Resource frequency", &mut self.frequency, &FREQ.iter().map(|s| s.0).collect::<Vec<_>>());
+        form_row(ui, "Starting resources per type", |ui| {
             ui.add(egui::DragValue::new(&mut self.resources).range(100.0..=5000.0).speed(10.0));
-            ui.end_row();
-            ui.label("Starting soldiers per army");
+        });
+        form_row(ui, "Starting soldiers per army", |ui| {
             ui.add(egui::DragValue::new(&mut self.units).range(0.0..=80.0));
-            ui.end_row();
-            combo(ui, "Army composition", &mut self.composition, &COMP.iter().map(|s| s.0).collect::<Vec<_>>());
-            ui.label("Starting villagers per settlement");
+        });
+        form_combo(ui, "Army composition", &mut self.composition, &COMP.iter().map(|s| s.0).collect::<Vec<_>>());
+        form_row(ui, "Starting villagers per settlement", |ui| {
             ui.add(egui::DragValue::new(&mut self.workers).range(4.0..=24.0));
-            ui.end_row();
-            combo(ui, "Starting structures", &mut self.structures, &STRUCT.iter().map(|s| s.0).collect::<Vec<_>>());
-            combo(ui, "Biome", &mut self.biome, &BIOME);
-            ui.label("Generation seed");
+        });
+        form_combo(ui, "Starting structures", &mut self.structures, &STRUCT.iter().map(|s| s.0).collect::<Vec<_>>());
+        form_combo(ui, "AI difficulty", &mut self.difficulty, &DIFF.iter().map(|s| s.0).collect::<Vec<_>>());
+        form_combo(ui, "Biome", &mut self.biome, &BIOME);
+        form_row(ui, "Generation seed", |ui| {
             ui.add(egui::DragValue::new(&mut self.seed).range(1..=2147483647u64));
-            ui.end_row();
         });
     }
+}
+
+/// One labelled row: the label sits on a fixed column and everything is vertically centred.
+fn form_row(ui: &mut egui::Ui, label: &str, add: impl FnOnce(&mut egui::Ui)) {
+    ui.allocate_ui_with_layout(Vec2::new(ui.available_width(), 32.0), egui::Layout::left_to_right(egui::Align::Center), |ui| {
+        ui.allocate_ui_with_layout(Vec2::new(280.0, 28.0), egui::Layout::left_to_right(egui::Align::Center), |ui| {
+            ui.set_min_size(Vec2::new(280.0, 28.0));
+            ui.label(RichText::new(label).size(12.0).color(col(INK)));
+        });
+        add(ui);
+    });
+}
+
+fn form_combo(ui: &mut egui::Ui, label: &str, value: &mut usize, items: &[&str]) {
+    form_row(ui, label, |ui| {
+        egui::ComboBox::from_id_salt(label).selected_text(items[*value]).width(260.0).show_ui(ui, |ui| {
+            for (i, it) in items.iter().enumerate() {
+                ui.selectable_value(value, i, *it);
+            }
+        });
+    });
 }
 
 fn combo(ui: &mut egui::Ui, label: &str, value: &mut usize, items: &[&str]) {
@@ -291,8 +312,6 @@ impl Menu {
 
     fn campaign(&mut self, ui: &mut egui::Ui, p: &Progress) -> Out {
         let mut out = Out::None;
-        eyebrow(ui, "ITINERARIUM \u{b7} 1097\u{2013}1099");
-        ui.label(RichText::new("The pilgrim's chronicle").size(26.0).color(col("#e4cda2")));
         ui.horizontal(|ui| {
             ui.label("Enemy command");
             egui::ComboBox::from_id_salt("campdiff").selected_text(["Easy \u{b7} patient opponent", "Normal \u{b7} balanced opponent", "Hard \u{b7} coordinated opponent"][self.campaign_difficulty]).show_ui(ui, |ui| {
@@ -320,8 +339,6 @@ impl Menu {
 
     fn slots(&mut self, ui: &mut egui::Ui) -> Out {
         let mut out = Out::None;
-        eyebrow(ui, "TRES CHRONICAE \u{b7} THREE LOCAL SESSIONS");
-        ui.label(RichText::new("Quickmatch").size(26.0).color(col("#e4cda2")));
         ui.add_space(8.0);
         for i in 0..3 {
             let saved = store::read_save(Some(i));
@@ -353,8 +370,6 @@ impl Menu {
 
     fn creation(&mut self, ui: &mut egui::Ui, slot: usize) -> Out {
         let mut out = Out::None;
-        eyebrow(ui, &format!("QUICKMATCH \u{b7} SESSION {}", slot + 1));
-        ui.label(RichText::new("Shape the battlefield").size(26.0).color(col("#e4cda2")));
         ui.horizontal(|ui| {
             for (n, sub) in [("frontier", "Balanced settlement"), ("siege", "Developed armies"), ("scarcity", "Every patch matters"), ("empire", "A grand battlefield")] {
                 if ui.button(format!("{}\n{}", crate::text::cap(n), sub)).clicked() {
@@ -365,7 +380,6 @@ impl Menu {
         ui.add_space(8.0);
         let mut f = self.form.clone();
         f.ui(ui);
-        combo_row(ui, "AI difficulty", &mut f.difficulty, &DIFF.iter().map(|s| s.0).collect::<Vec<_>>());
         self.form = f;
         ui.label(RichText::new("Both armies receive the same stores, soldiers, workers, buildings, training costs and population rules. Resources are finite; fog conceals your settlement until explored.").size(10.0).color(col(MUTED)));
         ui.add_space(8.0);
@@ -383,8 +397,6 @@ impl Menu {
     fn lan_hub(&mut self, ui: &mut egui::Ui) -> Out {
         let mut out = Out::None;
         self.poll_lan();
-        eyebrow(ui, "PLAYER VERSUS PLAYER \u{b7} SAME NETWORK");
-        ui.label(RichText::new("LAN multiplayer").size(26.0).color(col("#e4cda2")));
         ui.label(RichText::new("Games on your network appear here by themselves. Nothing to type, no addresses, no ports.").size(11.5).color(col(INK)));
         if let Some(e) = &self.lan.error {
             ui.colored_label(col("#d9604a"), e);
@@ -428,7 +440,6 @@ impl Menu {
     }
 
     fn lan_host(&mut self, ui: &mut egui::Ui) -> Out {
-        ui.add_space(30.0);
         ui.label(RichText::new("Waiting for a friend to join\u{2026}").size(22.0).color(col("#e4cda2")));
         ui.label(RichText::new(format!("Your game is visible on this network as \u{201c}{}\u{201d}. Your friend only needs to open LAN multiplayer and press Join.", session::computer_name())).size(12.0).color(col(INK)));
         ui.add_space(10.0);

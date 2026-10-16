@@ -121,6 +121,7 @@ impl App {
         }
         let mut app_ui = UiState::new();
         let mut focus: Option<(f64, f64)> = None;
+        let mut screen_req: Option<String> = None;
         let mut game = Game::solo(sim);
         for cmd in args.run.clone() {
             let (k, v) = cmd.split_once(':').unwrap_or((cmd.as_str(), ""));
@@ -132,6 +133,7 @@ impl App {
                     }
                 }
                 "menu" => app_ui.show_menu = true,
+                "screen" => screen_req = Some(v.to_string()),
                 "reveal" => {
                     for v in game.sim.fog.explored.iter_mut() {
                         *v = 1;
@@ -169,6 +171,14 @@ impl App {
             view.cx = x;
             view.cy = y;
         }
+        let mut menu0 = Menu::new();
+        match screen_req.as_deref() {
+            Some("campaign") => menu0.screen = Screen::Campaign,
+            Some("slots") => menu0.screen = Screen::Slots,
+            Some("creation") => menu0.screen = Screen::Creation(0),
+            Some("lan") => menu0.open_lan_hub(),
+            _ => {}
+        }
         let shot_state = if args.shot.is_some() { ShotState::Waiting(0) } else { ShotState::Off };
         App {
             soft_shadow: make_shadow(&cc.egui_ctx),
@@ -186,7 +196,7 @@ impl App {
             frames: 0,
             shot_state,
             last_time: 0.0,
-            menu: Menu::new(),
+            menu: menu0,
             progress: Progress::load(),
             slot: None,
             loader: None,
