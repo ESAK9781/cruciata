@@ -204,3 +204,27 @@ test("the enemy researching a tech does not block ours", async ({ page }) => {
   expect(result.started).toBe(true);
   expect(result.queued).toBe(1);
 });
+
+test("beginning Colossal engineering is announced", async ({ page }) => {
+  await begin(page);
+  const text = await page.evaluate(() => {
+    cruciata.scenario((s) => {
+      s.resources = { food: 9000, wood: 20000, stone: 20000, gold: 20000 };
+      s.techs.engineworks = true;
+      const own = s.buildings.find(
+        (b) => b.team === 0 && b.kind === "towncenter",
+      );
+      s.buildings.push({
+        ...JSON.parse(JSON.stringify(own)),
+        id: 99951,
+        kind: "siegeworkshop",
+        queue: [],
+        progress: 1,
+      });
+    });
+    const started = cruciata.research("colossal", [99951]);
+    return { started, toast: document.getElementById("toast").textContent };
+  });
+  expect(text.started).toBe(true);
+  expect(text.toast).toContain("Colossal engineering begun");
+});

@@ -121,6 +121,7 @@ impl Sim {
             cost: Some(cost_json(&t.cost)),
             extra: Default::default(),
         });
+        self.announce_research(team, key);
         true
     }
 

@@ -452,6 +452,7 @@ impl Sim {
             }
             self.pay(&t.cost, 1.0, 1);
             self.state.buildings[wi].queue.push(QueueItem { kind: "research".into(), ty: None, tech: Some(key.into()), time: 0.0, duration: t.time, cost: Some(cost_json(&t.cost)), extra: Default::default() });
+            self.announce_research(1, key);
             return;
         }
     }

@@ -17,6 +17,8 @@ pub const STEP: f64 = 1.0 / 30.0;
 #[derive(Clone, Debug)]
 pub enum Event {
     Toast(String),
+    /// A message for one side only (the other player in a LAN match never sees it).
+    ToastFor(i32, String),
     Sound { kind: String, x: Option<f64>, y: Option<f64>, team: Option<i32> },
     /// A player unit or structure was attacked (front ends decide whether to ping).
     Alert { x: f64, y: f64, kind: Option<BKind>, team: i32 },
@@ -145,6 +147,10 @@ impl Sim {
 
     pub fn toast(&mut self, text: impl Into<String>) {
         self.events.push(Event::Toast(text.into()));
+    }
+
+    pub fn toast_for(&mut self, team: i32, text: impl Into<String>) {
+        self.events.push(Event::ToastFor(team, text.into()));
     }
 
     pub fn sound(&mut self, kind: &str, at: Option<(f64, f64, i32)>) {

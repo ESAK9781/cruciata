@@ -673,6 +673,11 @@ impl App {
         for e in events {
             match e {
                 Event::Toast(t) => self.ui.toast(t),
+                Event::ToastFor(team, t) => {
+                    if team == self.game.me {
+                        self.ui.toast(t);
+                    }
+                }
                 Event::Alert { x, y, team, .. } => {
                     if team == self.game.me {
                         self.ui.alert = Some((x, y, self.ui.clock));

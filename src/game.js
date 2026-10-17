@@ -5296,6 +5296,7 @@
       duration: t.time,
       cost: { ...t.cost },
     });
+    announceResearch(0, key);
     updateUI();
     return true;
   }
@@ -5844,6 +5845,19 @@
       x: clamp(target.x + Math.cos(angle) * reach, 10, W - 10),
       y: clamp(target.y + Math.sin(angle) * reach, 10, H - 10),
     };
+  }
+  // Both sides hear the moment Colossal engineering is begun, so nobody is surprised.
+  function announceResearch(team, key) {
+    if (key !== "colossal") return;
+    if (team === 1) {
+      toast(
+        "WARNING: the enemy has begun researching Colossal engineering! Prepare to strike their siege workshop or to answer a Colossus.",
+      );
+      sound("horn");
+    } else if (team === 0)
+      toast(
+        "Colossal engineering begun. The enemy has been told and will prepare.",
+      );
   }
   function announceColossus(b) {
     b.announced = true;
@@ -8516,6 +8530,7 @@
           duration: t.time,
           cost: { ...t.cost },
         });
+        announceResearch(1, key);
         return;
       }
     }

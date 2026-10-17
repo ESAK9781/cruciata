@@ -378,6 +378,17 @@ impl Sim {
         out
     }
 
+    /// Both sides hear the moment Colossal engineering is begun.
+    pub fn announce_research(&mut self, team: i32, key: &str) {
+        if key != "colossal" {
+            return;
+        }
+        let other = 1 - team;
+        self.toast_for(other, "WARNING: the enemy has begun researching Colossal engineering! Prepare to strike their siege workshop or to answer a Colossus.");
+        self.sound("horn", None);
+        self.toast_for(team, "Colossal engineering begun. The enemy has been told and will prepare.");
+    }
+
     pub fn announce_colossus(&mut self, bi: usize) {
         self.state.buildings[bi].announced = Some(true);
         let (team, x, y) = (self.state.buildings[bi].team, self.state.buildings[bi].x, self.state.buildings[bi].y);
