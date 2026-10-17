@@ -106,16 +106,41 @@ test("a crew of builders spreads around a building instead of queueing on one si
   expect(sides).toBeGreaterThanOrEqual(3);
 });
 
-test("rim trees carry a reserve so the whole forest can be harvested", async ({
+test("cutting a forest's edge trees removes their tile and exposes the ones behind", async ({
   page,
 }) => {
-  await page.goto("/?test");
-  const stats = await page.evaluate(() => {
-    document.getElementById("front-menu").hidden = true;
-    cruciata.start(0);
+  await begin(page);
+  const result = await page.evaluate(() => {
     const S = cruciata.internals().state;
-    const rim = S.nodes.filter((n) => n.kind === "wood" && n.reserve > 0);
-    return { rim: rim.length };
+    const rim = S.nodes.find((n) => n.kind === "wood" && n.grove !== undefined);
+    const mass = S.terrainFeatures[rim.grove];
+    const before = mass.tiles.length;
+    const [tx, ty] = rim.tile;
+    cruciata.scenario((s) => {
+      const siblings = s.nodes.filter(
+        (n) => n.grove === rim.grove && n.tile[0] === tx && n.tile[1] === ty,
+      );
+      for (const n of siblings) n.remaining = 1;
+      const u = s.units.find((u) => u.team === 0 && u.type === "worker");
+      s.units = [u];
+      for (const n of siblings) {
+        Object.assign(u, {
+          x: n.x,
+          y: n.y + 30,
+          order: null,
+          job: {
+            kind: "gather",
+            resource: "wood",
+            target: n.id,
+            phase: "approach",
+          },
+        });
+        cruciata.step(3);
+      }
+    });
+    const gone = !mass.tiles.some((t) => t.x === tx && t.y === ty);
+    return { before, after: mass.tiles.length, gone };
   });
-  expect(stats.rim).toBeGreaterThan(0);
+  expect(result.gone).toBe(true);
+  expect(result.after).toBe(result.before - 1);
 });

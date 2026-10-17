@@ -227,6 +227,17 @@ impl App {
                         }
                     }
                 }
+                "chopforest" => {
+                    // Debug: fell the outermost trees of every forest N times over.
+                    let rounds: usize = v.parse().unwrap_or(2);
+                    for _ in 0..rounds {
+                        let live: Vec<usize> = (0..game.sim.state.nodes.len()).filter(|&i| game.sim.state.nodes[i].remaining > 0.0 && game.sim.state.nodes[i].extra.contains_key("grove")).collect();
+                        for i in live {
+                            game.sim.state.nodes[i].remaining = 0.0;
+                            game.sim.erode_grove(i);
+                        }
+                    }
+                }
                 "towerwall" => {
                     // Debug: turn the middle player wall into an attached guard tower.
                     let walls: Vec<usize> = game.sim.state.buildings.iter().enumerate().filter(|(_, b)| b.team == 0 && b.kind == BKind::Wall).map(|(i, _)| i).collect();

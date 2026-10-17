@@ -1208,39 +1208,50 @@
     return mass;
   }
   // Trees along the outside of a forest are ordinary, harvestable wood
-  // deposits: one per exposed tile edge. The interior stays solid and unreachable.
+  // deposits: one per exposed tile edge. Cutting the last tree of a tile
+  // removes the tile (erodeGrove), exposing the trees behind it, so a forest
+  // thins from the outside in until none is left.
+  const GROVE_DIRS = [
+    [1, 0],
+    [-1, 0],
+    [0, 1],
+    [0, -1],
+  ];
+  function groveHash(x, y, k) {
+    return (
+      (Math.imul(
+        (x * 73856093) ^ (y * 19349663) ^ (k * 83492791),
+        2654435761,
+      ) >>>
+        0) /
+      4294967296
+    );
+  }
+  function rimTree(mass, t, dx, dy, jitter, scale) {
+    const cell = mass.cell;
+    return {
+      id: ++uid,
+      kind: "wood",
+      x: (t.x + 0.5) * cell + dx * (cell / 2 + 22) + (dy ? jitter : 0),
+      y: (t.y + 0.5) * cell + dy * (cell / 2 + 22) + (dx ? jitter : 0),
+      r: 23,
+      remaining: 660,
+      max: 660,
+      palm: !!mass.palm,
+      snow: !!mass.snow,
+      scale,
+      tile: [t.x, t.y],
+      grove: state.terrainFeatures.indexOf(mass),
+    };
+  }
   function forestRimNodes(mass, random) {
-    const cell = mass.cell,
-      has = new Set(mass.tiles.map((t) => t.x + "," + t.y)),
-      palm = !!mass.palm,
-      snow = !!mass.snow,
+    const has = new Set(mass.tiles.map((t) => t.x + "," + t.y)),
       out = [];
     for (const t of mass.tiles)
-      for (const [dx, dy] of [
-        [1, 0],
-        [-1, 0],
-        [0, 1],
-        [0, -1],
-      ]) {
+      for (const [dx, dy] of GROVE_DIRS) {
         if (has.has(t.x + dx + "," + (t.y + dy))) continue;
-        const n = {
-          id: ++uid,
-          kind: "wood",
-          x:
-            (t.x + 0.5) * cell +
-            dx * (cell / 2 + 22) +
-            (dy ? (random() - 0.5) * 24 : 0),
-          y:
-            (t.y + 0.5) * cell +
-            dy * (cell / 2 + 22) +
-            (dx ? (random() - 0.5) * 24 : 0),
-          r: 23,
-          remaining: 660,
-          max: 660,
-          palm,
-          snow,
-          scale: 0.9 + random() * 0.3,
-        };
+        const jitter = (random() - 0.5) * 24,
+          n = rimTree(mass, t, dx, dy, jitter, 0.9 + random() * 0.3);
         if (!landFree(n.x, n.y, 52, false) || !groundFree(n.x, n.y, 4))
           continue;
         if (state.buildings.some((b) => distance(b, n) < b.r + 45)) continue;
@@ -1249,21 +1260,70 @@
         out.push(n);
       }
     // Keep the rim loose enough to walk beside: skip neighbours closer than 40.
-    const placed = [];
+    const covered = new Set();
     for (const n of out)
       if (!state.nodes.some((m) => distance(m, n) < 40)) {
         state.nodes.push(n);
-        placed.push(n);
+        covered.add(n.tile[0] + "," + n.tile[1]);
       }
-    // Trees deeper inside the forest are harvested through the rim: when a
-    // rim deposit runs dry it refills from the trees standing behind it, so
-    // every tree of the forest can be cut.
-    if (placed.length) {
-      const share = Math.floor(
-        Math.max(0, mass.tiles.length * 660 - placed.length * 660) /
-          placed.length,
+    // Every exposed tile keeps at least one tree, so none is unreachable.
+    for (const n of out)
+      if (!covered.has(n.tile[0] + "," + n.tile[1])) {
+        state.nodes.push(n);
+        covered.add(n.tile[0] + "," + n.tile[1]);
+      }
+  }
+  // The last tree of a tile is gone: remove the tile and expose its neighbours.
+  function erodeGrove(n) {
+    const mass = state.terrainFeatures?.[n.grove];
+    if (!mass || !n.tile || !mass.tiles) return;
+    const [tx, ty] = n.tile;
+    if (
+      state.nodes.some(
+        (m) =>
+          m !== n &&
+          m.grove === n.grove &&
+          m.tile &&
+          m.tile[0] === tx &&
+          m.tile[1] === ty &&
+          m.remaining > 0,
+      )
+    )
+      return;
+    const at = mass.tiles.findIndex((t) => t.x === tx && t.y === ty);
+    if (at < 0) return;
+    mass.tiles.splice(at, 1);
+    rockCollision.delete(mass);
+    mass.contours = mass.tiles.length
+      ? traceRockContours(
+          new Map(mass.tiles.map((p) => [p.x + "," + p.y, p])),
+          mass.cell,
+        )
+      : [];
+    state.navDirty = true;
+    for (const [dx, dy] of GROVE_DIRS) {
+      const t = mass.tiles.find((q) => q.x === tx + dx && q.y === ty + dy);
+      if (
+        !t ||
+        state.nodes.some(
+          (m) =>
+            m.grove === n.grove &&
+            m.tile &&
+            m.tile[0] === t.x &&
+            m.tile[1] === t.y &&
+            m.remaining > 0,
+        )
+      )
+        continue;
+      const tree = rimTree(
+        mass,
+        t,
+        -dx,
+        -dy,
+        (groveHash(t.x, t.y, 1) - 0.5) * 24,
+        0.9 + groveHash(t.x, t.y, 2) * 0.3,
       );
-      for (const n of placed) n.reserve = share;
+      if (landFree(tree.x, tree.y, 52, false)) state.nodes.push(tree);
     }
   }
   function makeRockClusters(random) {
@@ -6920,11 +6980,14 @@
       {
         target.remaining = Math.max(0, target.remaining - amount);
         if (!target.remaining && target.reserve > 0) {
+          // Older saves: the rim deposit refills from the trees behind it.
           const refill = Math.min(target.max || 660, target.reserve);
           target.remaining = refill;
           target.reserve -= refill;
-        } else if (!target.remaining && target.kind !== "food")
+        } else if (!target.remaining && target.kind !== "food") {
+          if (target.grove !== undefined) erodeGrove(target);
           state.navDirty = true;
+        }
       }
       if (u.carry >= capacity - 0.001 || target.remaining === 0) {
         job.phase = "deliver";

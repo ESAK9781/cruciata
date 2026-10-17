@@ -783,6 +783,9 @@ impl Sim {
                     self.state.nodes[i].remaining = refill;
                     self.state.nodes[i].extra.insert("reserve".into(), serde_json::json!(reserve - refill));
                 } else if new_remaining == 0.0 && self.state.nodes[i].kind != Res::Food {
+                    if self.state.nodes[i].extra.contains_key("grove") {
+                        self.erode_grove(i);
+                    }
                     self.state.nav_dirty = true;
                 }
             }

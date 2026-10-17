@@ -1316,34 +1316,47 @@ impl Sim {
         self.finish_mass(&tiles, cell, true, seed, Some((palm, snow)));
     }
 
+    fn grove_hash(x: i32, y: i32, k: i32) -> f64 {
+        let h = (x.wrapping_mul(73856093) ^ y.wrapping_mul(19349663) ^ k.wrapping_mul(83492791)) as u32;
+        h.wrapping_mul(2654435761u32) as f64 / 4294967296.0
+    }
+
+    fn rim_tree(&mut self, fi: usize, tx: i32, ty: i32, dx: i32, dy: i32, jitter: f64, scale: f64) -> Node {
+        let (cell, palm, snow) = {
+            let m = &self.state.terrain_features[fi];
+            (m.cell, m.palm.unwrap_or(false), m.snow.unwrap_or(false))
+        };
+        let id = self.next_uid();
+        let mut extra: crate::model::Extra = Default::default();
+        extra.insert("tile".into(), serde_json::json!([tx, ty]));
+        extra.insert("grove".into(), serde_json::json!(fi));
+        Node {
+            id,
+            kind: Res::Wood,
+            x: (tx as f64 + 0.5) * cell + dx as f64 * (cell / 2.0 + 22.0) + if dy != 0 { jitter } else { 0.0 },
+            y: (ty as f64 + 0.5) * cell + dy as f64 * (cell / 2.0 + 22.0) + if dx != 0 { jitter } else { 0.0 },
+            r: 23.0,
+            remaining: 660.0,
+            max: 660.0,
+            palm,
+            snow,
+            scale,
+            extra,
+        }
+    }
+
     fn forest_rim_nodes(&mut self, fi: usize, random: &mut Seeded) {
-        let mass = self.state.terrain_features[fi].clone();
-        let cell = mass.cell;
-        let has: std::collections::HashSet<(i32, i32)> = mass.tiles.iter().map(|t| (t.x, t.y)).collect();
-        let palm = mass.palm.unwrap_or(false);
-        let snow = mass.snow.unwrap_or(false);
+        let tiles: Vec<(i32, i32)> = self.state.terrain_features[fi].tiles.iter().map(|t| (t.x, t.y)).collect();
+        let has: std::collections::HashSet<(i32, i32)> = tiles.iter().copied().collect();
         let mut out: Vec<Node> = Vec::new();
-        for t in &mass.tiles {
+        for &(tx, ty) in &tiles {
             for (dx, dy) in [(1, 0), (-1, 0), (0, 1), (0, -1)] {
-                if has.contains(&(t.x + dx, t.y + dy)) {
+                if has.contains(&(tx + dx, ty + dy)) {
                     continue;
                 }
-                let id = self.next_uid();
-                let jx = if dy != 0 { (random.next() - 0.5) * 24.0 } else { 0.0 };
-                let jy = if dx != 0 { (random.next() - 0.5) * 24.0 } else { 0.0 };
-                let n = Node {
-                    id,
-                    kind: Res::Wood,
-                    x: (t.x as f64 + 0.5) * cell + dx as f64 * (cell / 2.0 + 22.0) + jx,
-                    y: (t.y as f64 + 0.5) * cell + dy as f64 * (cell / 2.0 + 22.0) + jy,
-                    r: 23.0,
-                    remaining: 660.0,
-                    max: 660.0,
-                    palm,
-                    snow,
-                    scale: 0.9 + random.next() * 0.3,
-                    extra: Default::default(),
-                };
+                let jitter = (random.next() - 0.5) * 24.0;
+                let scale = 0.9 + random.next() * 0.3;
+                let n = self.rim_tree(fi, tx, ty, dx, dy, jitter, scale);
                 if !self.land_free(n.x, n.y, 52.0, false) || !self.ground_free(n.x, n.y, 4.0) {
                     continue;
                 }
@@ -1356,19 +1369,68 @@ impl Sim {
                 out.push(n);
             }
         }
-        let mut placed: Vec<usize> = Vec::new();
-        for n in out {
+        let tile_of = |n: &Node| -> (i64, i64) {
+            let t = n.extra.get("tile").and_then(|v| v.as_array()).cloned().unwrap_or_default();
+            (t.first().and_then(|v| v.as_i64()).unwrap_or(0), t.get(1).and_then(|v| v.as_i64()).unwrap_or(0))
+        };
+        let mut covered: std::collections::HashSet<(i64, i64)> = std::collections::HashSet::new();
+        for n in &out {
             if !self.state.nodes.iter().any(|m| dist(Pt::new(m.x, m.y), Pt::new(n.x, n.y)) < 40.0) {
-                self.state.nodes.push(n);
-                placed.push(self.state.nodes.len() - 1);
+                self.state.nodes.push(n.clone());
+                covered.insert(tile_of(n));
             }
         }
-        // Trees deeper inside the forest are harvested through the rim: a dry rim
-        // deposit refills from the trees behind it, so every tree can be cut.
-        if !placed.is_empty() {
-            let share = ((mass.tiles.len() as f64 * 660.0 - placed.len() as f64 * 660.0).max(0.0) / placed.len() as f64).floor();
-            for i in placed {
-                self.state.nodes[i].extra.insert("reserve".into(), serde_json::json!(share));
+        // Every exposed tile keeps at least one tree, so none is unreachable.
+        for n in out {
+            let t = tile_of(&n);
+            if !covered.contains(&t) {
+                covered.insert(t);
+                self.state.nodes.push(n);
+            }
+        }
+    }
+
+    /// The last tree of a forest tile is gone: remove the tile and expose its neighbours.
+    pub fn erode_grove(&mut self, ni: usize) {
+        let (fi, tx, ty) = {
+            let n = &self.state.nodes[ni];
+            let (Some(g), Some(t)) = (n.extra.get("grove").and_then(|v| v.as_u64()), n.extra.get("tile").and_then(|v| v.as_array())) else { return };
+            (g as usize, t.first().and_then(|v| v.as_i64()).unwrap_or(0) as i32, t.get(1).and_then(|v| v.as_i64()).unwrap_or(0) as i32)
+        };
+        if fi >= self.state.terrain_features.len() {
+            return;
+        }
+        let on_tile = |m: &Node, x: i32, y: i32| -> bool {
+            m.extra.get("grove").and_then(|v| v.as_u64()) == Some(fi as u64)
+                && m.extra.get("tile").and_then(|v| v.as_array()).map(|t| t.first().and_then(|v| v.as_i64()) == Some(x as i64) && t.get(1).and_then(|v| v.as_i64()) == Some(y as i64)).unwrap_or(false)
+        };
+        if self.state.nodes.iter().enumerate().any(|(i, m)| i != ni && on_tile(m, tx, ty) && m.remaining > 0.0) {
+            return;
+        }
+        let Some(at) = self.state.terrain_features[fi].tiles.iter().position(|t| t.x == tx && t.y == ty) else { return };
+        self.state.terrain_features[fi].tiles.remove(at);
+        let cell = self.state.terrain_features[fi].cell;
+        let mut map: Tiles = IndexMap::new();
+        for t in &self.state.terrain_features[fi].tiles {
+            map.insert((t.x, t.y), ());
+        }
+        self.state.terrain_features[fi].contours = if map.is_empty() { Vec::new() } else { trace_rock_contours(&map, cell) };
+        let count = self.state.terrain_features.len();
+        self.geo.reset_rock_cache(count);
+        self.state.nav_dirty = true;
+        for (dx, dy) in [(1, 0), (-1, 0), (0, 1), (0, -1)] {
+            let (nx, ny) = (tx + dx, ty + dy);
+            if !map.contains_key(&(nx, ny)) {
+                continue;
+            }
+            if self.state.nodes.iter().any(|m| on_tile(m, nx, ny) && m.remaining > 0.0) {
+                continue;
+            }
+            let jitter = (Self::grove_hash(nx, ny, 1) - 0.5) * 24.0;
+            let scale = 0.9 + Self::grove_hash(nx, ny, 2) * 0.3;
+            let tree = self.rim_tree(fi, nx, ny, -dx, -dy, jitter, scale);
+            if self.land_free(tree.x, tree.y, 52.0, false) {
+                self.state.nodes.push(tree);
             }
         }
     }
