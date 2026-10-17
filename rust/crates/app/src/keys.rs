@@ -234,7 +234,7 @@ pub fn building_key(b: &Building) -> String {
         jsn(b.wall_angle.unwrap_or(0.0)),
         (b.hp > 0.0).to_string(),
         "20".to_string(),
-        jsn(if b.hp <= 0.0 { (b.id % 3) as f64 } else { 0.0 }),
+        jsn(if b.hp <= 0.0 { (b.id % 3) as f64 + if matches!(b.kind, BKind::Greatengine | BKind::Colossus) { 20.0 } else { 0.0 } } else { 0.0 }),
     ];
     format!("building:{}", parts.join(":"))
 }

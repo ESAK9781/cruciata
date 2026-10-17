@@ -316,6 +316,30 @@ const fs = require("node:fs"),
                       0,
                     );
                 }
+        // Wrecked permanent engines (Colossus footprint scaled like the game's).
+        for (const [kind, w, h] of [
+          ["greatengine", 162, 140],
+          ["colossus", 320, 276],
+        ])
+          for (const team of [0, 1])
+            for (let id = 0; id < 3; id++)
+              A.structure(
+                g,
+                {
+                  id,
+                  kind,
+                  w,
+                  h,
+                  x: 0,
+                  y: 0,
+                  hp: 0,
+                  maxHp: 100,
+                  team,
+                  architecture: team === 1 ? "islamic" : "christian",
+                  progress: 1,
+                },
+                0,
+              );
         for (const [kind, w, h] of sizes)
           for (const team of [0, 1, 2, 3])
             for (const architecture of ["christian", "islamic"]) {

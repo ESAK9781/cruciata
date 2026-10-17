@@ -873,22 +873,67 @@
     m.paint();
   }
   function rubble(g, b) {
-    const m = model(g);
-    for (let i = 0; i < 26; i++) {
+    const m = model(g),
+      engine = b.kind === "greatengine" || b.kind === "colossus",
+      // Larger footprints get proportionally more, chunkier debris; curtains and
+      // gates (scale 1) keep their original heap.
+      scale = Math.max(1, Math.sqrt(b.w * b.h) / 70),
+      count = Math.round((engine ? 15 : 26) * scale * scale),
+      chunk = 1 + (scale - 1) * 0.55;
+    const reach = engine ? 0.36 : 0.46;
+    for (let i = 0; i < count; i++) {
       const a = i * 2.399 + (b.id || 0),
-        r = Math.sqrt((i + 1) / 27);
-      const x = Math.cos(a) * b.w * 0.46 * r,
-        y = (Math.sin(a) * b.h * 0.43 * r) / 0.72;
+        r = Math.sqrt((i + 1) / (count + 1)),
+        wobble = engine ? 0.75 + (((i * 7) % 5) / 5) * 0.5 : 1;
+      const x = Math.cos(a) * b.w * reach * r * wobble,
+        y = (Math.sin(a) * b.h * (reach - 0.03) * r * wobble) / 0.72;
       m.box(
         x,
         y,
-        0,
-        6 + (i % 5),
-        7 + (i % 4),
-        3 + (i % 7),
-        i % 4 ? (b.fortified ? P.bastion : P.stone) : P.wood,
+        engine ? (1 - r) * 9 * scale : 0,
+        (6 + (i % 5)) * chunk,
+        (7 + (i % 4)) * chunk,
+        (3 + (i % 7)) * (engine ? chunk * 0.8 : 1),
+        engine && i % 3 === 0
+          ? "#3a322b"
+          : i % 4
+            ? b.fortified
+              ? P.bastion
+              : P.stone
+            : P.wood,
       );
-      if (i % 6 === 0) m.beam([x - 10, y, 3], [x + 10, y + 5, 7], 3, "#594735");
+      if (i % 6 === 0)
+        m.beam(
+          [x - 10 * chunk, y, 3],
+          [x + 10 * chunk, y + 5 * chunk, 7],
+          3 * Math.min(chunk, 2),
+          "#594735",
+        );
+    }
+    if (engine) {
+      // The fallen throwing arm, a split hoop and a broken axle lie across the heap.
+      const w = b.w,
+        d = b.h / 0.72,
+        sway = ((b.id || 0) % 3) - 1;
+      m.beam(
+        [-w * 0.36, -d * 0.12, 5],
+        [w * 0.3, d * 0.16 + sway * 14, 9],
+        7 * Math.min(chunk, 2),
+        "#4f3b2a",
+      );
+      m.beam(
+        [-w * 0.2, d * 0.28, 4],
+        [w * 0.22, d * 0.1, 6],
+        5 * Math.min(chunk, 2),
+        "#594735",
+      );
+      m.beam(
+        [-w * 0.3, d * 0.2, 3],
+        [-w * 0.05, d * 0.36 - sway * 8, 4],
+        4 * Math.min(chunk, 2),
+        "#3f2f22",
+      );
+      m.box(w * 0.2, -d * 0.2, 0, 22 * chunk, 18 * chunk, 14 * chunk, P.stone);
     }
     m.paint();
   }
@@ -1294,7 +1339,10 @@
       b.wallAngle || 0,
       b.hp > 0,
       20,
-      b.hp <= 0 ? (b.id || 0) % 3 : 0,
+      b.hp <= 0
+        ? ((b.id || 0) % 3) +
+          (b.kind === "greatengine" || b.kind === "colossus" ? 20 : 0)
+        : 0,
     ].join(":");
     const width = Math.max(200, b.w + 120),
       height = Math.max(240, b.h + visualHeight(b) + 90),

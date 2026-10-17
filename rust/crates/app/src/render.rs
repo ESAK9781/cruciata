@@ -238,6 +238,17 @@ impl App {
                         }
                     }
                 }
+                "ruinengines" => {
+                    // Debug: a wrecked great engine and Colossus beside the town centre.
+                    if let Some(tc) = game.sim.state.buildings.iter().find(|b| b.kind == BKind::Towncenter && b.team == 0).map(|b| (b.x, b.y)) {
+                        for (i, kind) in [BKind::Greatengine, BKind::Colossus].into_iter().enumerate() {
+                            let mut b = game.sim.make_building(kind, 0, tc.0 + 420.0 + i as f64 * 380.0, tc.1 - 60.0, 1.0);
+                            b.hp = 0.0;
+                            game.sim.state.buildings.push(b);
+                        }
+                        focus = Some((tc.0 + 640.0, tc.1 - 60.0));
+                    }
+                }
                 "towerwall" => {
                     // Debug: turn the middle player wall into an attached guard tower.
                     let walls: Vec<usize> = game.sim.state.buildings.iter().enumerate().filter(|(_, b)| b.team == 0 && b.kind == BKind::Wall).map(|(i, _)| i).collect();
@@ -1062,6 +1073,15 @@ impl App {
                     if b.hp > 0.0 && b.progress < 1.0 {
                         draw_site(&mut batch, atlas, &view, b, draw_time, depth, None, white);
                     }
+                }
+                BKind::Greatengine | BKind::Colossus if b.hp <= 0.0 => {
+                    // Wrecked engine: the baked scorched heap with the fallen arm and hoop.
+                    let mut wb = (*b).clone();
+                    wb.links = None;
+                    wb.wall_angle = None;
+                    wb.rotation = None;
+                    let (width, _h, oy) = building_canvas(&wb);
+                    batch.frame(atlas, &view, &building_key(&wb), width / 2.0, oy, b.x, b.y, 1.0, depth, white);
                 }
                 BKind::Greatengine => {
                     let key = great_engine_key(b, time);
