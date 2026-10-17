@@ -22,7 +22,7 @@ pub struct Session {
 }
 
 pub fn computer_name() -> String {
-    for k in ["COMPUTERNAME", "HOSTNAME", "HOST", "USER", "USERNAME"] {
+    for k in ["CRUCIATA_NAME", "COMPUTERNAME", "HOSTNAME", "HOST", "USER", "USERNAME"] {
         if let Ok(v) = std::env::var(k) {
             if !v.is_empty() {
                 return v;

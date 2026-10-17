@@ -15,7 +15,8 @@ pub struct Announcer {
 }
 
 fn broadcast_targets(port: u16) -> Vec<SocketAddr> {
-    let mut out = vec![SocketAddr::new(IpAddr::V4(Ipv4Addr::BROADCAST), port)];
+    // Loopback lets a second copy on this computer find the host, even offline.
+    let mut out = vec![SocketAddr::new(IpAddr::V4(Ipv4Addr::BROADCAST), port), SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), port)];
     if let Ok(ifs) = if_addrs::get_if_addrs() {
         for i in ifs {
             if let if_addrs::IfAddr::V4(v4) = i.addr {

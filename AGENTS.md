@@ -247,3 +247,7 @@ When any finished building falls, its sprite is cut into about 70 jittered trian
 ## Research rules and warnings
 
 A research is blocked only by the same team's own queue (an enemy queue of the same tech used to lock the player out). Beginning Colossal engineering is announced to both sides: the opponent gets a warning toast and horn, the researcher a confirmation (`announceResearch` in JS, `announce_research` plus `Event::ToastFor(team, text)` in Rust so a LAN opponent only sees their own message). It fires for the AI's `techAI` too.
+
+## Testing LAN alone
+
+`scripts/lan-test.ps1` opens two native windows on one computer (player names from `CRUCIATA_NAME`, "Host" and "Guest"). Hosts also announce to loopback, so discovery works with no network. Only a window on the LAN screen binds the discovery port, and hosting releases it, so one host plus one joiner coexist.
