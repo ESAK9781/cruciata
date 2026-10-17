@@ -45,6 +45,9 @@
             Settings <small>Music, sound effects, and battle detail</small>
           </button>
         </div>
+        <a class="menu-install" href="install.html"
+          >Download the desktop version · LAN multiplayer</a
+        >
         <blockquote>
           “Beati pacifici, quoniam filii Dei vocabuntur.”<small
             >Blessed are the peacemakers · Matthew 5:9</small
@@ -164,6 +167,15 @@
               aria-label="Control groups: Ctrl plus a number assigns, Ctrl Shift adds, number selects"
             ></div>
             <div id="objective-panel">
+              <button
+                id="objective-toggle"
+                type="button"
+                aria-label="Minimize war orders"
+                aria-expanded="true"
+                title="Minimize war orders"
+              >
+                &minus;
+              </button>
               <div class="eyebrow">WAR ORDERS</div>
               <div id="objective-text"></div>
               <div id="objective-sub"></div>
@@ -368,6 +380,7 @@
     <script src="src/fog.js"></script>
     <script src="src/audio.js"></script>
     <script src="src/model-raster.js"></script>
+    <script src="src/orders-art.js"></script>
     <script src="src/siege-art.js"></script>
     <script src="src/artwork.js"></script>
     <script src="src/isometric-art.js"></script>

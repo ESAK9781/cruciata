@@ -201,17 +201,15 @@ test("enemy spends resources on an explored expansion and fortifies multiple bas
         buildQueue: [],
         fleeUntil: 0,
       }));
-      s.nodes = [
-        {
-          id: 99200,
-          kind: "gold",
-          x: base.x - 1900,
-          y: base.y + 100,
-          r: 23,
-          remaining: 10000,
-          max: 10000,
-        },
-      ];
+      s.nodes = [0, 1, 2].map((i) => ({
+        id: 99200 + i,
+        kind: "gold",
+        x: base.x - 1900 + i * 60,
+        y: base.y + 100,
+        r: 23,
+        remaining: 10000,
+        max: 10000,
+      }));
       s.time = 200;
       s.enemy.think = 0;
       s.enemy.resources = {
@@ -355,7 +353,7 @@ test("enemy launches successive invasion armies with shared routes", async ({
     return { first, second: cruciata.snapshot() };
   });
   expect(result.first.formations).toHaveLength(1);
-  expect(result.first.formations[0].members).toHaveLength(24);
+  expect(result.first.formations[0].members).toHaveLength(26);
   expect(result.first.formations[0].sharedRoute).toBe(true);
   expect(result.second.formations).toHaveLength(2);
   expect(result.second.formations.every((f) => f.sharedRoute)).toBe(true);

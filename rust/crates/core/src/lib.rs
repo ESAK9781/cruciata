@@ -1,0 +1,26 @@
+//! Deterministic core of the native Cruciata port.
+pub mod fdlibm;
+pub mod world;
+pub mod data;
+pub mod js;
+pub mod model;
+pub mod nav;
+pub mod sim;
+pub mod campaign;
+pub mod worldgen;
+pub mod names;
+pub mod update;
+pub mod ai;
+pub mod build;
+pub mod workers;
+pub mod combat;
+pub mod economy;
+pub mod unitmove;
+pub mod movement;
+pub mod fog;
+pub mod quadtree;
+pub mod commands;
+pub mod orders;
+pub mod lockstep;
+pub mod save;
+pub mod factions;

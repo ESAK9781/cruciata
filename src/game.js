@@ -307,7 +307,7 @@
     cost: { wood: 1200, stone: 650, gold: 500 },
     w: 203,
     h: 175,
-    hp: 6000,
+    hp: 1100,
     time: 180,
     range: 2200,
     minRange: 320,
@@ -319,11 +319,11 @@
   // map. Only one per side; it fires only where ordered.
   BUILDINGS.colossus = {
     name: "Colossal siege engine",
-    cost: { wood: 6000, stone: 3500, gold: 2500 },
+    cost: { wood: 10000, stone: 6000, gold: 4500 },
     w: 400,
     h: 345,
-    hp: 16000,
-    time: 2400,
+    hp: 1300,
+    time: 3600,
     damage: 650,
     reload: 18,
     description:
@@ -387,8 +387,8 @@
     unlock: "colossus",
     requires: "engineworks",
     producer: "siegeworkshop",
-    cost: { wood: 1000, stone: 800, gold: 1100 },
-    time: 150,
+    cost: { wood: 2200, stone: 1600, gold: 2400 },
+    time: 300,
     desc: "Requires Great engines. Unlocks the Colossal siege engine: unlimited range, one per side.",
   };
   const UNLOCKS = { greatengine: "engineworks", colossus: "colossal" };
@@ -752,8 +752,10 @@
       x: 0,
       y: 0,
     };
-    camera.x = clamp(camera.x, view.w / 2, W - view.w / 2);
-    camera.y = clamp(camera.y, view.h / 2, H - view.h / 2);
+    // The view may slide past the edge (shown black) to centre edge objects,
+    // but at least a fifth of it must still overlap the land.
+    camera.x = clamp(camera.x, -view.w * 0.3, W + view.w * 0.3);
+    camera.y = clamp(camera.y, -view.h * 0.3, H + view.h * 0.3);
     view.x = camera.x - view.w / 2;
     view.y = camera.y - view.h / 2;
   }
@@ -795,6 +797,10 @@
     if (b) {
       camera.x = b.x + 150;
       camera.y = b.y - 100;
+      updateView();
+      // Starting views stay on the land; only manual panning may slip past the edge.
+      camera.x = clamp(camera.x, view.w / 2, W - view.w / 2);
+      camera.y = clamp(camera.y, view.h / 2, H - view.h / 2);
       updateView();
     }
   }
@@ -1202,39 +1208,50 @@
     return mass;
   }
   // Trees along the outside of a forest are ordinary, harvestable wood
-  // deposits: one per exposed tile edge. The interior stays solid and unreachable.
+  // deposits: one per exposed tile edge. Cutting the last tree of a tile
+  // removes the tile (erodeGrove), exposing the trees behind it, so a forest
+  // thins from the outside in until none is left.
+  const GROVE_DIRS = [
+    [1, 0],
+    [-1, 0],
+    [0, 1],
+    [0, -1],
+  ];
+  function groveHash(x, y, k) {
+    return (
+      (Math.imul(
+        (x * 73856093) ^ (y * 19349663) ^ (k * 83492791),
+        2654435761,
+      ) >>>
+        0) /
+      4294967296
+    );
+  }
+  function rimTree(mass, t, dx, dy, jitter, scale) {
+    const cell = mass.cell;
+    return {
+      id: ++uid,
+      kind: "wood",
+      x: (t.x + 0.5) * cell + dx * (cell / 2 + 22) + (dy ? jitter : 0),
+      y: (t.y + 0.5) * cell + dy * (cell / 2 + 22) + (dx ? jitter : 0),
+      r: 23,
+      remaining: 660,
+      max: 660,
+      palm: !!mass.palm,
+      snow: !!mass.snow,
+      scale,
+      tile: [t.x, t.y],
+      grove: state.terrainFeatures.indexOf(mass),
+    };
+  }
   function forestRimNodes(mass, random) {
-    const cell = mass.cell,
-      has = new Set(mass.tiles.map((t) => t.x + "," + t.y)),
-      palm = !!mass.palm,
-      snow = !!mass.snow,
+    const has = new Set(mass.tiles.map((t) => t.x + "," + t.y)),
       out = [];
     for (const t of mass.tiles)
-      for (const [dx, dy] of [
-        [1, 0],
-        [-1, 0],
-        [0, 1],
-        [0, -1],
-      ]) {
+      for (const [dx, dy] of GROVE_DIRS) {
         if (has.has(t.x + dx + "," + (t.y + dy))) continue;
-        const n = {
-          id: ++uid,
-          kind: "wood",
-          x:
-            (t.x + 0.5) * cell +
-            dx * (cell / 2 + 22) +
-            (dy ? (random() - 0.5) * 24 : 0),
-          y:
-            (t.y + 0.5) * cell +
-            dy * (cell / 2 + 22) +
-            (dx ? (random() - 0.5) * 24 : 0),
-          r: 23,
-          remaining: 660,
-          max: 660,
-          palm,
-          snow,
-          scale: 0.9 + random() * 0.3,
-        };
+        const jitter = (random() - 0.5) * 24,
+          n = rimTree(mass, t, dx, dy, jitter, 0.9 + random() * 0.3);
         if (!landFree(n.x, n.y, 52, false) || !groundFree(n.x, n.y, 4))
           continue;
         if (state.buildings.some((b) => distance(b, n) < b.r + 45)) continue;
@@ -1243,8 +1260,71 @@
         out.push(n);
       }
     // Keep the rim loose enough to walk beside: skip neighbours closer than 40.
+    const covered = new Set();
     for (const n of out)
-      if (!state.nodes.some((m) => distance(m, n) < 40)) state.nodes.push(n);
+      if (!state.nodes.some((m) => distance(m, n) < 40)) {
+        state.nodes.push(n);
+        covered.add(n.tile[0] + "," + n.tile[1]);
+      }
+    // Every exposed tile keeps at least one tree, so none is unreachable.
+    for (const n of out)
+      if (!covered.has(n.tile[0] + "," + n.tile[1])) {
+        state.nodes.push(n);
+        covered.add(n.tile[0] + "," + n.tile[1]);
+      }
+  }
+  // The last tree of a tile is gone: remove the tile and expose its neighbours.
+  function erodeGrove(n) {
+    const mass = state.terrainFeatures?.[n.grove];
+    if (!mass || !n.tile || !mass.tiles) return;
+    const [tx, ty] = n.tile;
+    if (
+      state.nodes.some(
+        (m) =>
+          m !== n &&
+          m.grove === n.grove &&
+          m.tile &&
+          m.tile[0] === tx &&
+          m.tile[1] === ty &&
+          m.remaining > 0,
+      )
+    )
+      return;
+    const at = mass.tiles.findIndex((t) => t.x === tx && t.y === ty);
+    if (at < 0) return;
+    mass.tiles.splice(at, 1);
+    rockCollision.delete(mass);
+    mass.contours = mass.tiles.length
+      ? traceRockContours(
+          new Map(mass.tiles.map((p) => [p.x + "," + p.y, p])),
+          mass.cell,
+        )
+      : [];
+    state.navDirty = true;
+    for (const [dx, dy] of GROVE_DIRS) {
+      const t = mass.tiles.find((q) => q.x === tx + dx && q.y === ty + dy);
+      if (
+        !t ||
+        state.nodes.some(
+          (m) =>
+            m.grove === n.grove &&
+            m.tile &&
+            m.tile[0] === t.x &&
+            m.tile[1] === t.y &&
+            m.remaining > 0,
+        )
+      )
+        continue;
+      const tree = rimTree(
+        mass,
+        t,
+        -dx,
+        -dy,
+        (groveHash(t.x, t.y, 1) - 0.5) * 24,
+        0.9 + groveHash(t.x, t.y, 2) * 0.3,
+      );
+      if (landFree(tree.x, tree.y, 52, false)) state.nodes.push(tree);
+    }
   }
   function makeRockClusters(random) {
     const cell = 64,
@@ -1901,7 +1981,11 @@
         : null;
     obstacleIndex = null;
     objectIndex.clear();
-    const l = LEVELS[state.level],
+    const l = levelFor(
+        state.level,
+        state.mode === "quickmatch" ? state.config : null,
+        H,
+      ),
       random = seeded(state.seed);
     decorations = [];
     terrain = Art.terrain(
@@ -2907,12 +2991,14 @@
     if (state.waveTimer <= 0) state.waveTimer = rules.interval;
   }
   function startLevel(index, intro = true) {
+    shards = [];
+    shatterQueue = [];
     actionTurns.clear();
     formationRoutes.clear();
     sessionActive = true;
-    const l = LEVELS[index];
     W = quickConfig?.width || 12800;
     H = quickConfig?.height || 8800;
+    const l = levelFor(index, quickConfig, H);
     nav = new window.CruciataNavigation(W, H);
     uid = 0;
     selected.clear();
@@ -3153,9 +3239,10 @@
         );
       state.sites = [];
       state.buildings = state.buildings.slice(0, 5);
-      state.buildings[1] = makeBuilding("house", 1, W - 850, 800);
+      const enemyY = quickHeights(quickConfig.seed || 1888, H).enemy;
+      state.buildings[1] = makeBuilding("house", 1, W - 850, enemyY);
       state.buildings[1].x = W - 850;
-      state.buildings[1].y = 800;
+      state.buildings[1].y = enemyY;
       state.resources = {
         food: quickConfig.resources,
         wood: quickConfig.resources,
@@ -3501,6 +3588,57 @@
       );
     else hideOverlay();
     updateUI();
+  }
+  // War orders can be minimized so they never hide the battlefield.
+  (() => {
+    const panel = $("objective-panel"),
+      toggle = $("objective-toggle");
+    if (!panel || !toggle) return;
+    const apply = (collapsed) => {
+      panel.classList.toggle("collapsed", collapsed);
+      toggle.innerHTML = collapsed ? "+" : "&minus;";
+      toggle.title = collapsed ? "Show war orders" : "Minimize war orders";
+      toggle.setAttribute("aria-expanded", String(!collapsed));
+      toggle.setAttribute("aria-label", toggle.title);
+    };
+    let stored = false;
+    try {
+      stored = localStorage.getItem("cruciata-orders-collapsed") === "1";
+    } catch {}
+    apply(stored);
+    toggle.addEventListener("click", () => {
+      const collapsed = !panel.classList.contains("collapsed");
+      apply(collapsed);
+      try {
+        localStorage.setItem(
+          "cruciata-orders-collapsed",
+          collapsed ? "1" : "0",
+        );
+      } catch {}
+    });
+  })();
+  // Quick matches and LAN games put each side at its own seeded height along its edge of the
+  // map, so the opposing base is never in the same place twice (mirrored in worldgen.rs).
+  function quickHeights(seed, height) {
+    const mix = (salt) => {
+      let h = Math.imul((seed | 0) ^ salt, 0x85ebca6b);
+      h ^= h >>> 13;
+      h = Math.imul(h, 0xc2b2ae35);
+      h ^= h >>> 16;
+      return (h >>> 0) / 4294967296;
+    };
+    const lo = 1000,
+      span = height - 2000;
+    return {
+      player: Math.floor(lo + mix(0x9e3779b9) * span),
+      enemy: Math.floor(lo + mix(0x7f4a7c15) * span),
+    };
+  }
+  function levelFor(index, config, height) {
+    const base = LEVELS[index];
+    if (!config) return base;
+    const ys = quickHeights(config.seed || 1888, height);
+    return { ...base, camp: { x: base.camp.x, y: ys.player } };
   }
   function setMissionUI() {
     const l = LEVELS[state.level];
@@ -5161,7 +5299,9 @@
       !playable() ||
       state.techs[key] ||
       !techAvailable(key) ||
-      state.buildings.some((b) => b.queue.some((q) => q.tech === key))
+      state.buildings.some(
+        (b) => b.team === 0 && b.queue.some((q) => q.tech === key),
+      )
     )
       return false;
     const t = TECHS[key],
@@ -5184,6 +5324,7 @@
       duration: t.time,
       cost: { ...t.cost },
     });
+    announceResearch(0, key);
     updateUI();
     return true;
   }
@@ -5732,6 +5873,19 @@
       x: clamp(target.x + Math.cos(angle) * reach, 10, W - 10),
       y: clamp(target.y + Math.sin(angle) * reach, 10, H - 10),
     };
+  }
+  // Both sides hear the moment Colossal engineering is begun, so nobody is surprised.
+  function announceResearch(team, key) {
+    if (key !== "colossal") return;
+    if (team === 1) {
+      toast(
+        "WARNING: the enemy has begun researching Colossal engineering! Prepare to strike their siege workshop or to answer a Colossus.",
+      );
+      sound("horn");
+    } else if (team === 0)
+      toast(
+        "Colossal engineering begun. The enemy has been told and will prepare.",
+      );
   }
   function announceColossus(b) {
     b.announced = true;
@@ -6598,8 +6752,29 @@
               if (groundFree(p.x, p.y, 6)) candidates.push(p);
             }
           }
-          candidates.sort((a, c) => distance(u, a) - distance(u, c));
-          const point = candidates.find((p) => routePossible(u, p));
+          // Spread the crew evenly around the work: each builder takes its own
+          // share of the perimeter instead of all queueing at the nearest side.
+          const bearing = (q) => Math.atan2(q.y - b.y, q.x - b.x);
+          candidates.sort((a, c) => bearing(a) - bearing(c));
+          const crew = state.units
+              .filter(
+                (w) =>
+                  w.team === u.team &&
+                  w.hp > 0 &&
+                  w.job?.kind === job.kind &&
+                  w.job.target === b.id,
+              )
+              .sort((a, c) => a.id - c.id),
+            slot = Math.max(
+              0,
+              crew.findIndex((w) => w.id === u.id),
+            ),
+            first = Math.floor((slot * candidates.length) / (crew.length || 1));
+          let point = null;
+          for (let k = 0; k < candidates.length && !point; k++) {
+            const q = candidates[(first + k) % candidates.length];
+            if (routePossible(u, q)) point = q;
+          }
           contact = u.buildContact = point
             ? {
                 ...point,
@@ -6850,7 +7025,15 @@
       job.phase = "harvest";
       {
         target.remaining = Math.max(0, target.remaining - amount);
-        if (!target.remaining && target.kind !== "food") state.navDirty = true;
+        if (!target.remaining && target.reserve > 0) {
+          // Older saves: the rim deposit refills from the trees behind it.
+          const refill = Math.min(target.max || 660, target.reserve);
+          target.remaining = refill;
+          target.reserve -= refill;
+        } else if (!target.remaining && target.kind !== "food") {
+          if (target.grove !== undefined) erodeGrove(target);
+          state.navDirty = true;
+        }
       }
       if (u.carry >= capacity - 0.001 || target.remaining === 0) {
         job.phase = "deliver";
@@ -6962,6 +7145,9 @@
     if (u.type === "sword" && e.type === "knight") score -= 40;
     if (e.target === u.id) score -= 55;
     if (e.hp / e.maxHp < 0.3) score -= 25;
+    // Defenders go for the engines battering their walls before anything else.
+    if (u.team === 1 && ["ram", "ballista", "trebuchet"].includes(e.type))
+      score -= 260;
     return score;
   }
   function acquire(u, r = 310) {
@@ -7109,6 +7295,7 @@
       // Fallen masonry stops blocking at once (hp check); the route grid follows
       // within a third of a second so sieges do not rebuild it every shell.
       state.navCombat = true;
+      queueShatter(target);
       if (isCapital(target)) {
         finish(target.team !== 0);
         return;
@@ -7573,6 +7760,161 @@
       });
   }
   // Thrown masonry: cosmetic arcs with a ground shadow and one bounce.
+  // Shatter effect: when a building falls, its finished sprite is cut into
+  // jittered triangles. Each shard starts exactly where its pixels were, flies
+  // outward, bounces once, lies where it landed and then slowly fades. The
+  // wreck itself is the ordinary rubble sprite; shards are cosmetic and never
+  // saved. Snapshots queue in `damage` and are cut on the next rendered frame.
+  let shards = [],
+    shatterQueue = [];
+  function queueShatter(b) {
+    if (b.progress < 1 || shatterQueue.length > 60) return;
+    shatterQueue.push({ ...b });
+  }
+  function buildShards(snap) {
+    const vh = Art.visualHeight(snap),
+      w = Math.ceil(Math.max(200, snap.w + 120)),
+      h = Math.ceil(Math.max(240, snap.h + vh + 90)),
+      ox = w / 2,
+      oy = snap.h / 2 + vh + 55,
+      img = document.createElement("canvas");
+    img.width = w;
+    img.height = h;
+    const g = img.getContext("2d", { willReadFrequently: true });
+    g.translate(ox, oy);
+    Art.structure(
+      g,
+      { ...snap, x: 0, y: 0, hp: snap.maxHp || 1, progress: 1 },
+      state.time,
+    );
+    const data = g.getImageData(0, 0, w, h).data,
+      alpha = (x, y) =>
+        x < 0 || y < 0 || x >= w || y >= h
+          ? 0
+          : data[((y | 0) * w + (x | 0)) * 4 + 3];
+    let x0 = w,
+      y0 = h,
+      x1 = 0,
+      y1 = 0;
+    for (let y = 0; y < h; y += 2)
+      for (let x = 0; x < w; x += 2)
+        if (alpha(x, y) > 20) {
+          x0 = Math.min(x0, x);
+          y0 = Math.min(y0, y);
+          x1 = Math.max(x1, x);
+          y1 = Math.max(y1, y);
+        }
+    if (x1 <= x0 || y1 <= y0) return;
+    let seed = ((snap.id || 1) * 2654435761) >>> 0;
+    const rnd = () => {
+        seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0;
+        return (seed >>> 8) / 16777216;
+      },
+      bw = x1 - x0 + 2,
+      bh = y1 - y0 + 2,
+      cell = clamp(Math.sqrt((bw * bh) / 70), 10, 60),
+      cols = Math.max(1, Math.ceil(bw / cell)),
+      rows = Math.max(1, Math.ceil(bh / cell)),
+      grid = [];
+    for (let j = 0; j <= rows; j++) {
+      grid.push([]);
+      for (let i = 0; i <= cols; i++) {
+        const edge = i === 0 || j === 0 || i === cols || j === rows;
+        grid[j].push([
+          x0 + (i * bw) / cols + (edge ? 0 : (rnd() - 0.5) * cell * 0.62),
+          y0 + (j * bh) / rows + (edge ? 0 : (rnd() - 0.5) * cell * 0.62),
+        ]);
+      }
+    }
+    const tris = [];
+    for (let j = 0; j < rows; j++)
+      for (let i = 0; i < cols; i++) {
+        const a = grid[j][i],
+          b = grid[j][i + 1],
+          c = grid[j + 1][i],
+          d = grid[j + 1][i + 1];
+        if ((i + j) % 2) tris.push([a, b, c], [b, d, c]);
+        else tris.push([a, b, d], [a, d, c]);
+      }
+    for (const tri of tris) {
+      const cx = (tri[0][0] + tri[1][0] + tri[2][0]) / 3,
+        cy = (tri[0][1] + tri[1][1] + tri[2][1]) / 3;
+      if (!(
+        alpha(cx, cy) > 20 ||
+        tri.some((v) => alpha((v[0] + cx) / 2, (v[1] + cy) / 2) > 20)
+      ))
+        continue;
+      const lx = cx - ox,
+        ly = cy - oy,
+        up = ly < 0 ? -ly : 0;
+      shards.push({
+        img,
+        cx,
+        cy,
+        tri: tri.map((v) => [v[0] - cx, v[1] - cy]),
+        x: snap.x + lx,
+        y: snap.y + (ly > 0 ? ly : 0),
+        z: up,
+        vx: (lx / (snap.w / 2 + 1)) * (50 + rnd() * 130) + (rnd() - 0.5) * 60,
+        vy: (rnd() - 0.5) * 70 + (ly > 0 ? ly * 0.8 : 0),
+        vz: 60 + rnd() * 200 + up * 0.7,
+        rot: 0,
+        vr: (rnd() - 0.5) * 10,
+        delay: rnd() * 0.18,
+        age: 0,
+        bounced: false,
+        land: -1,
+        alpha: 1,
+      });
+    }
+    if (shards.length > 1400) shards.splice(0, shards.length - 1400);
+  }
+  function updateShards(dt) {
+    if (!shards.length) return;
+    for (const s of shards) {
+      s.age += dt;
+      if (s.age < s.delay) continue;
+      if (s.land < 0) {
+        s.vz -= 720 * dt;
+        s.z += s.vz * dt;
+        s.x += s.vx * dt;
+        s.y += s.vy * dt;
+        s.rot += s.vr * dt;
+        if (s.z <= 0) {
+          s.z = 0;
+          if (s.bounced) {
+            s.land = s.age;
+            s.vx = s.vy = s.vr = 0;
+          } else {
+            s.bounced = true;
+            s.vz *= -0.3;
+            s.vx *= 0.5;
+            s.vy *= 0.5;
+            s.vr *= 0.4;
+          }
+        }
+      } else s.alpha = 1 - (s.age - s.land - 1.4) / 3.2;
+    }
+    shards = shards.filter((s) => s.alpha > 0);
+  }
+  function drawShards() {
+    for (const s of shards) {
+      if (!onScreen(s, 90)) continue;
+      ctx.save();
+      ctx.globalAlpha = Math.min(1, s.alpha);
+      ctx.translate(s.x, s.y - s.z);
+      ctx.rotate(s.rot);
+      ctx.beginPath();
+      ctx.moveTo(s.tri[0][0], s.tri[0][1]);
+      ctx.lineTo(s.tri[1][0], s.tri[1][1]);
+      ctx.lineTo(s.tri[2][0], s.tri[2][1]);
+      ctx.closePath();
+      ctx.clip();
+      ctx.drawImage(s.img, -s.cx, -s.cy);
+      ctx.restore();
+    }
+    ctx.globalAlpha = 1;
+  }
   function spawnDebris(x, y, count, speed = 1) {
     if (!visualParticle({ x, y, r: 200 })) return;
     const debris = (state.debris ||= []);
@@ -7645,29 +7987,32 @@
     easy: {
       think: 10,
       workers: 10,
-      attack: 22,
+      attack: 16,
       retreat: 0.65,
-      reserve: 6,
+      reserve: 5,
       grace: 300,
     },
     normal: {
       think: 6,
       workers: 16,
-      attack: 24,
+      attack: 18,
       retreat: 0.55,
-      reserve: 6,
+      reserve: 4,
       grace: 240,
     },
     hard: {
       think: 4,
       workers: 24,
-      attack: 28,
+      attack: 20,
       retreat: 0.45,
-      reserve: 7,
+      reserve: 4,
       grace: 180,
     },
   };
-  function defensivePlots(base, radius = 640) {
+  // With `adaptive`, the ring follows the land: it swells to enclose nearby
+  // resource patches the enemy has seen, shrinks inland from water and rock,
+  // and leaves out stretches where the terrain already forms the barrier.
+  function defensivePlots(base, radius = 640, adaptive = false) {
     const plots = [],
       seen = new Set(),
       snap = (n) => Math.round(n / 32) * 32;
@@ -7681,6 +8026,33 @@
       const ring = Array.from({ length: 16 }, (_, i) => {
         const angle = (i * Math.PI) / 8 + phase,
           bulge = i % 4 === 0 ? 1.13 : i % 2 ? 0.94 : 1.04;
+        if (adaptive) {
+          const r0 = radius * scale * bulge;
+          let r = r0;
+          for (const n of state.nodes) {
+            if (!(n.remaining > 0) || !enemyFog.remembers(n)) continue;
+            const d = distance(base, n),
+              turn = Math.atan2(n.y - base.y, n.x - base.x) - angle;
+            if (
+              d > r0 * 0.7 &&
+              d < r0 * 1.45 &&
+              Math.abs(Math.atan2(Math.sin(turn), Math.cos(turn))) < 0.35
+            )
+              r = Math.max(r, Math.min(d + 150, r0 * 1.5));
+          }
+          const reach = (q) =>
+            landFree(
+              clamp(base.x + Math.cos(angle) * q, 128, W - 128),
+              clamp(base.y + Math.sin(angle) * q, 128, H - 128),
+              24,
+            );
+          while (r > r0 * 0.55 && !reach(r)) r -= 48;
+          return {
+            x: snap(clamp(base.x + Math.cos(angle) * r, 128, W - 128)),
+            y: snap(clamp(base.y + Math.sin(angle) * r, 128, H - 128)),
+            blocked: !reach(r),
+          };
+        }
         return {
           x: snap(
             clamp(
@@ -7710,8 +8082,9 @@
       });
       for (let edge = 0; edge < ring.length; edge++) {
         const a = ring[edge],
-          b = ring[(edge + 1) % ring.length],
-          points = wallLine(a, b),
+          b = ring[(edge + 1) % ring.length];
+        if (a.blocked && b.blocked) continue;
+        const points = wallLine(a, b),
           angle = Math.atan2(b.y - a.y, b.x - a.x),
           middle = Math.floor(points.length / 2);
         for (let i = 0; i < points.length; i++) {
@@ -7788,6 +8161,8 @@
         state.mode !== "quickmatch" && base.id === state.capitals?.enemy
           ? 896
           : 640,
+        // The starting fortress already stands; later bases follow the land.
+        base.id !== (state.capitals?.enemy ?? state.buildings[1]?.id),
       ),
     };
     const fortification = ai.fortifications[base.id];
@@ -7813,6 +8188,13 @@
       )
         continue;
       if (!afford(BUILDINGS[p.kind].cost, 1)) continue;
+      if (
+        ai.savingGoal &&
+        !Object.entries(BUILDINGS[p.kind].cost).every(
+          ([r, n]) => stock(1)[r] - n >= (ai.savingGoal[r] || 0),
+        )
+      )
+        continue;
       const spec = BUILDINGS[p.kind];
       if (
         !validSite(
@@ -7876,6 +8258,17 @@
       (b) => b.team === 0 && b.hp > 0,
     );
     ai.discovered = known.length > 0;
+    // The goal the treasury is being kept for (siege research, great engines,
+    // the Colossus); ordinary spending may only use what exceeds it.
+    let saving = null;
+    function spendable(cost) {
+      return (
+        !saving ||
+        Object.entries(cost || {}).every(
+          ([r, n]) => stock(1)[r] - n >= (saving[r] || 0),
+        )
+      );
+    }
     function train(type) {
       const b = completeBuildings(TYPES[type].producer, 1).sort(
         (a, b) => a.queue.length - b.queue.length,
@@ -7884,7 +8277,8 @@
         !b ||
         b.queue.length >= 3 ||
         pop.used + pop.queued >= pop.cap ||
-        !afford(TYPES[type].cost, 1)
+        !afford(TYPES[type].cost, 1) ||
+        (type !== "worker" && !spendable(TYPES[type].cost))
       )
         return false;
       pay(TYPES[type].cost, 1, 1);
@@ -7902,6 +8296,10 @@
     function build(kind, settlement = base) {
       if (
         !afford(BUILDINGS[kind].cost, 1) ||
+        (!["house", "farm", "lumbercamp", "miningcamp", "mill"].includes(
+          kind,
+        ) &&
+          !spendable(BUILDINGS[kind].cost)) ||
         state.buildings.some(
           (b) => b.team === 1 && b.kind === kind && b.progress < 1 && b.hp > 0,
         )
@@ -7998,38 +8396,50 @@
       front = known
         .filter((k) => !["wall", "gate"].includes(k.kind))
         .sort((a, b) => distance(a, base) - distance(b, base))[0];
+    // Expand whenever a seen resource patch lies beyond the reach of every
+    // town centre: richer clusters win, and the new base sits on their centre.
     if (
-      (state.time > 180 || (state.time > 100 && exhausted >= 3)) &&
-      completeBuildings("towncenter", 1).length < 4 &&
+      (state.time > 120 || (state.time > 70 && exhausted >= 3)) &&
+      completeBuildings("towncenter", 1).length < 6 &&
       !state.buildings.some(
         (b) => b.team === 1 && b.kind === "towncenter" && b.progress < 1,
       ) &&
       ws.length >= 8
     ) {
-      const resource = state.nodes
-        .filter(
-          (n) =>
-            n.remaining > 0 &&
-            enemyFog.remembers(n) &&
-            completeBuildings("towncenter", 1).every(
-              (b) => distance(b, n) > 1500,
-            ),
-        )
-        // Later expansions lean toward the enemy: a forward base shortens
-        // the march and gives the siege engines a safe place to stand.
-        .sort(
-          (a, b) =>
-            distance(a, base) +
-            (front && state.time > 420 ? distance(a, front) * 0.7 : 0) -
-            (distance(b, base) +
-              (front && state.time > 420 ? distance(b, front) * 0.7 : 0)),
-        )[0];
+      const seenNodes = state.nodes.filter(
+          (n) => n.remaining > 0 && enemyFog.remembers(n),
+        ),
+        patch = (n) => seenNodes.filter((m) => distance(m, n) < 450),
+        richness = (n) => Math.min(12, patch(n).length),
+        resource = seenNodes
+          .filter(
+            (n) =>
+              richness(n) >= 3 &&
+              completeBuildings("towncenter", 1).every(
+                (b) => distance(b, n) > 1100,
+              ),
+          )
+          // Later expansions lean toward the enemy: a forward base shortens
+          // the march and gives the siege engines a safe place to stand.
+          .sort((a, b) => {
+            const score = (n) =>
+              distance(n, base) -
+              90 * richness(n) +
+              (front && state.time > 420 ? distance(n, front) * 0.7 : 0);
+            return score(a) - score(b);
+          })[0];
       if (resource && afford(BUILDINGS.towncenter.cost, 1)) {
-        for (let i = 0; i < 32; i++) {
-          const p = {
-            x: resource.x + Math.cos(i * 2.399) * 300,
-            y: resource.y + Math.sin(i * 2.399) * 300,
+        const group = patch(resource),
+          centre = {
+            x: group.reduce((t, n) => t + n.x, 0) / group.length,
+            y: group.reduce((t, n) => t + n.y, 0) / group.length,
           };
+        for (let i = 0; i < 48; i++) {
+          const r = 140 + Math.floor(i / 8) * 45,
+            p = {
+              x: centre.x + Math.cos(i * 2.399) * r,
+              y: centre.y + Math.sin(i * 2.399) * r,
+            };
           if (!validSite("towncenter", p, 1)) continue;
           pay(BUILDINGS.towncenter.cost, 1, 1);
           const outpost = makeBuilding("towncenter", 1, p.x, p.y, 0);
@@ -8148,6 +8558,7 @@
           duration: t.time,
           cost: { ...t.cost },
         });
+        announceResearch(1, key);
         return;
       }
     }
@@ -8260,6 +8671,90 @@
           );
           return;
         }
+      // Nowhere explored ahead of the target: build beside one of its own
+      // towns instead, if that already puts a known structure in range.
+      for (const centre of completeBuildings("towncenter", 1))
+        for (const radius of [520, 720, 920])
+          for (let i = 0; i < 12; i++) {
+            const p = {
+              x: centre.x + Math.cos(i * 0.52 + radius) * radius,
+              y: centre.y + Math.sin(i * 0.52 + radius) * radius,
+            };
+            if (
+              !targets.some(
+                (t) =>
+                  distance(t, p) >= spec.minRange + 20 &&
+                  distance(t, p) <= spec.range - 30,
+              ) ||
+              !validSite("greatengine", p, 1)
+            )
+              continue;
+            pay(spec.cost, 1, 1);
+            const b = makeBuilding("greatengine", 1, p.x, p.y, 0);
+            state.buildings.push(b);
+            state.navDirty = true;
+            queueConstruction(
+              ws.filter((u) => u.job?.kind !== "build").slice(0, 6),
+              [b.id],
+              false,
+            );
+            return;
+          }
+    }
+    {
+      const hard = state.difficulty === "hard",
+        easy = state.difficulty === "easy",
+        queued = (key) =>
+          state.buildings.some(
+            (b) => b.team === 1 && b.queue.some((q) => q.tech === key),
+          ),
+        threatened = state.units.some(
+          (u) =>
+            u.team === 0 &&
+            u.hp > 0 &&
+            enemyFog.sees(u) &&
+            distance(u, base) < 900,
+        ),
+        scale = hard ? 0.8 : 1;
+      let goal = null;
+      if (
+        completeBuildings("siegeworkshop", 1).length &&
+        army.length >= (easy ? 20 : 30) &&
+        !threatened
+      ) {
+        if (
+          !hasTech("engineworks", 1) &&
+          !queued("engineworks") &&
+          state.time >= 300 * scale
+        )
+          goal = TECHS.engineworks.cost;
+        else if (
+          hasTech("engineworks", 1) &&
+          known.length &&
+          !state.buildings.some(
+            (b) => b.team === 1 && b.kind === "greatengine" && b.hp > 0,
+          ) &&
+          state.time >= 420
+        )
+          goal = BUILDINGS.greatengine.cost;
+        else if (
+          hasTech("engineworks", 1) &&
+          !easy &&
+          !hasTech("colossal", 1) &&
+          !queued("colossal") &&
+          state.time >= 600 * scale
+        )
+          goal = TECHS.colossal.cost;
+        else if (
+          hasTech("colossal", 1) &&
+          !colossusOf(1) &&
+          !easy &&
+          state.time >= 780
+        )
+          goal = BUILDINGS.colossus.cost;
+      }
+      saving = goal;
+      ai.savingGoal = goal ? { ...goal } : null;
     }
     techAI();
     batteryAI();
@@ -8345,7 +8840,11 @@
     const stockpile = state.enemy.resources,
       need = {};
     for (const r of ["food", "wood", "gold", "stone"])
-      need[r] = clamp(1 - (stockpile[r] || 0) / 900, 0.05, 1);
+      need[r] = clamp(
+        1 - (stockpile[r] || 0) / Math.max(900, (saving?.[r] || 0) * 1.1),
+        0.05,
+        1,
+      );
     const needTotal = Object.values(need).reduce((a, b) => a + b, 0),
       desired = {},
       assignments = { food: 0, wood: 0, gold: 0, stone: 0 };
@@ -8424,14 +8923,80 @@
     const fortCount = known.filter((k) =>
       ["wall", "gate", "tower", "watchtower", "fort"].includes(k.kind),
     ).length;
-    if (fortCount > 10 && army.length >= 8)
-      for (const type of ["trebuchet", "ram"])
-        if (
-          army.filter((u) => u.type === type).length <
-            Math.min(6, 2 + Math.floor(fortCount / 12)) &&
-          train(type)
-        )
+    // Walls the army cannot walk through call for engines in proportion, more
+    // after every failed assault.
+    const walled = fortCount > 5;
+    if (walled && army.length >= 6) {
+      const limit = Math.min(
+        8,
+        3 + Math.floor(fortCount / 8) + Math.min(2, ai.failures || 0),
+      );
+      for (const [type, cap] of [
+        ["ram", limit],
+        ["trebuchet", Math.min(limit, 4)],
+        ["ballista", Math.min(limit, 3)],
+      ])
+        if (army.filter((u) => u.type === type).length < cap && train(type))
           break;
+    }
+    // A failed push against walls earns a temporary forward post: two defense
+    // towers just beyond the enemy's reach where engines can gather.
+    const posts = state.buildings.filter(
+      (b) => b.team === 1 && b.forwardPost && b.hp > 0,
+    );
+    if (
+      walled &&
+      (ai.failures || 0) >= 1 &&
+      posts.length < 4 &&
+      state.time >= (ai.postAt || 0) &&
+      ws.length >= 8 &&
+      afford({ wood: 280, stone: 240 }, 1)
+    ) {
+      ai.postAt = state.time + 90;
+      const fort = known
+        .filter((k) => ["wall", "gate", "tower", "watchtower"].includes(k.kind))
+        .sort((a, c) => distance(a, base) - distance(c, base))[0];
+      if (fort) {
+        const back = Math.atan2(base.y - fort.y, base.x - fort.x);
+        post: for (const dist of [1100, 1250, 1400, 1550])
+          for (const lateral of [0, 240, -240, 480, -480]) {
+            const p = {
+                x:
+                  fort.x +
+                  Math.cos(back) * dist +
+                  Math.cos(back + Math.PI / 2) * lateral,
+                y:
+                  fort.y +
+                  Math.sin(back) * dist +
+                  Math.sin(back + Math.PI / 2) * lateral,
+              },
+              q = {
+                x: p.x + Math.cos(back + Math.PI / 2) * 90,
+                y: p.y + Math.sin(back + Math.PI / 2) * 90,
+              };
+            if (
+              !validSite("tower", p, 1) ||
+              !validSite("tower", q, 1) ||
+              known.some((k) => distance(k, p) < 700)
+            )
+              continue;
+            pay({ wood: 280, stone: 240 }, 1, 1);
+            const towers = [p, q].map((at) => {
+              const b = makeBuilding("tower", 1, at.x, at.y, 0);
+              b.forwardPost = true;
+              state.buildings.push(b);
+              return b;
+            });
+            state.navDirty = true;
+            queueConstruction(
+              ws.filter((u) => u.job?.kind !== "build").slice(0, 4),
+              towers.map((b) => b.id),
+              false,
+            );
+            break post;
+          }
+      }
+    }
     if (state.difficulty !== "easy" && state.time > 300) {
       for (const type of ["sword", "archer", "knight"]) {
         const t = TECHS[type + (rankFor(type, 1) + 1)],
@@ -8501,6 +9066,50 @@
           scout.pathTimer = 0;
         }
       }
+    // Siege engines at the walls are hunted down first.
+    const wallSides = state.buildings.filter(
+      (b) =>
+        b.team === 1 &&
+        b.hp > 0 &&
+        (b.kind === "wall" ||
+          b.kind === "gate" ||
+          b.kind === "bastiongate" ||
+          b.wallAttachment),
+    );
+    const raiding = state.units
+      .filter(
+        (u) =>
+          u.team === 0 &&
+          u.hp > 0 &&
+          ["ram", "ballista", "trebuchet"].includes(u.type) &&
+          enemyFog.sees(u) &&
+          wallSides.some((b) => distance(b, u) < 700),
+      )
+      .sort((a, b) => distance(a, base) - distance(b, base));
+    if (raiding.length && state.time >= (ai.sortieAt || 0)) {
+      ai.sortieAt = state.time + 4;
+      const engine = raiding[0];
+      const hunters = army
+        .filter(
+          (u) =>
+            !u.scout &&
+            !u.garrisonBase &&
+            !u.fixedDefense &&
+            !u.order?.formation &&
+            u.hp / u.maxHp > plan.retreat &&
+            distance(u, engine) < 1800,
+        )
+        .sort((a, b) => distance(a, engine) - distance(b, engine))
+        .slice(0, 16);
+      for (const u of hunters) {
+        u.target = engine.id;
+        u.order = { x: engine.x, y: engine.y, attack: true };
+        u.path = [];
+        u.pathGoal = null;
+        u.pathRequest = null;
+        u.home = null;
+      }
+    }
     const active = army.filter((u) => !u.scout),
       visibleThreats = state.units.filter(
         (u) =>
@@ -8725,7 +9334,7 @@
           plan.attack * (1 + Math.min(0.5, 0.15 * (ai.failures || 0))),
         ) &&
       state.time >= plan.grace &&
-      state.time - ai.attack > 65
+      state.time - ai.attack > 40
     ) {
       ai.attack = state.time;
       if (ai.faith >= 30 && state.difficulty !== "easy") {
@@ -9158,6 +9767,24 @@
     phases[key] = (phases[key] || 0) + (now - phaseClock);
     phaseClock = now;
   };
+  // Soldiers (not villagers, caravans or engines) standing on a ruined capital.
+  function holdsRuins(team, ruin) {
+    return state.units.some(
+      (u) =>
+        u.team === team &&
+        u.hp > 0 &&
+        ![
+          "worker",
+          "civilian",
+          "pilgrim",
+          "merchant",
+          "ram",
+          "ballista",
+          "trebuchet",
+        ].includes(u.type) &&
+        distance(u, ruin) < 110,
+    );
+  }
   function update(dt) {
     if (!playable()) return;
     if (TEST) phaseClock = performance.now();
@@ -9171,15 +9798,28 @@
       finish(false);
       return;
     }
-    if (
-      enemyCapital?.hp <= 0 ||
-      (state.mode !== "quickmatch" &&
-        !state.campaignRules &&
-        !state.buildings[1]?.outpost &&
-        state.buildings[1]?.hp <= 0)
-    ) {
-      finish(true);
-      return;
+    // A fallen capital is not enough: footsoldiers must stand on its ruins, so
+    // long-range engines alone can never end the game.
+    const fallen =
+      enemyCapital?.hp <= 0
+        ? enemyCapital
+        : state.mode !== "quickmatch" &&
+            !state.campaignRules &&
+            !state.buildings[1]?.outpost &&
+            state.buildings[1]?.hp <= 0
+          ? state.buildings[1]
+          : null;
+    if (fallen) {
+      if (!state.capitalFallen) {
+        state.capitalFallen = true;
+        toast(
+          "The enemy capital has fallen. Bring troops to its ruins to claim victory.",
+        );
+      }
+      if (holdsRuins(0, fallen)) {
+        finish(true);
+        return;
+      }
     }
     if (DEBUG_MODE && state.cheats?.instant) {
       for (const b of state.buildings)
@@ -9904,6 +10544,7 @@
       }
       state.debris = state.debris.filter((d) => !d.done);
     }
+    updateShards(dt);
     if (state.alerts?.length) {
       for (const a of state.alerts) a.t += dt;
       state.alerts = state.alerts.filter((a) => a.t < 8);
@@ -10739,7 +11380,9 @@
       $("research-" + k).disabled =
         !!state.techs[k] ||
         !techAvailable(k) ||
-        state.buildings.some((b) => b.queue.some((q) => q.tech === k)) ||
+        state.buildings.some(
+          (b) => b.team === 0 && b.queue.some((q) => q.tech === k),
+        ) ||
         !selectedStructures(
           (b) => b.kind === t.producer && b.progress >= 1 && b.queue.length < 8,
         ).length ||
@@ -11126,6 +11769,11 @@
         : LEVELS[state.level].terrain >= 3
           ? 2
           : LEVELS[state.level].terrain;
+    // Ground detail stays on the land; whatever lies beyond the edge is black.
+    ctx.save();
+    ctx.beginPath();
+    ctx.rect(0, 0, W, H);
+    ctx.clip();
     Art.terrainDetails(
       ctx,
       view,
@@ -11136,6 +11784,7 @@
       bridgeY(),
       state.mode !== "quickmatch" && LEVELS[state.level].terrain === 0,
     );
+    ctx.restore();
     ctx.save();
     Art.clipLand(
       ctx,
@@ -11759,6 +12408,14 @@
       }
     }
     Art.flushFrame();
+    while (shatterQueue.length) {
+      const snap = shatterQueue.shift();
+      if (
+        onScreen(snap, Math.max(120, Art.visualHeight(snap) + snap.h / 2)) &&
+        (snap.team === 0 || playerSees(snap))
+      )
+        buildShards(snap);
+    }
     // Smoke and sparks remain behind arrowheads and boulders in the canvas stack.
     for (const p of state.particles)
       if (onScreen(p, Math.max(20, p.r * (1 + (p.growth || 0))))) {
@@ -11766,6 +12423,7 @@
         Art.particle(ctx, p);
       }
     ctx.globalAlpha = 1;
+    drawShards();
     for (const d of state.debris || [])
       if (onScreen(d, 60)) {
         Art.ellipse(ctx, d.x, d.y, d.r * 0.9, d.r * 0.45, "#25332355");
@@ -12961,6 +13619,49 @@
         issueOrder(target.x, target.y, attack, false);
       }
     },
+    // Test-only command drivers (same code paths as the interface).
+    recruit: (type, buildingIds) => {
+      if (!TEST) return false;
+      selectedBuildings = new Set(buildingIds);
+      selectedBuilding = buildingIds[0] || null;
+      return recruit(type);
+    },
+    research: (key, buildingIds) => {
+      if (!TEST) return false;
+      selectedBuildings = new Set(buildingIds);
+      selectedBuilding = buildingIds[0] || null;
+      return research(key);
+    },
+    place: (kind, p, builderIds, rotation = 0) => {
+      if (!TEST) return false;
+      selected = new Set(builderIds);
+      placement = kind;
+      placementRotation = rotation;
+      return placeBuild(p, false);
+    },
+    upgradeWall: (kind, ids) => {
+      if (!TEST) return;
+      selectedBuildings = new Set(ids);
+      selectedBuilding = ids[0] || null;
+      queueWallUpgrade(kind);
+    },
+    demolish: (ids) => {
+      if (!TEST) return;
+      selectedBuildings = new Set(ids);
+      selectedBuilding = ids[0] || null;
+      destroySelectedBuilding();
+    },
+    scout: (ids) => {
+      if (!TEST) return;
+      selected = new Set(ids);
+      autoScout();
+    },
+    wallLine: (kind, a, b, ids) => {
+      if (!TEST) return;
+      selected = new Set(ids);
+      placement = kind;
+      placeWallLine(a, b, false);
+    },
     save: () => saveGame(true),
     phases: () => {
       const copy = { ...phases };
@@ -12983,6 +13684,11 @@
             renderStats,
             motionVisible,
             unitTree: () => unitTree,
+            uid: () => uid,
+            rebuildNavigation,
+            damage,
+            shards: () => shards,
+            shatterQueue: () => shatterQueue,
           }
         : null,
   };

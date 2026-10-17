@@ -899,7 +899,7 @@ test("enemy assault companies share formation anchors after discovering a target
       scout.hold = true;
     }),
   );
-  await page.evaluate(() => cruciata.step(360));
+  await page.evaluate(() => cruciata.step(540));
   const s = await snapshot(page);
   expect(s.enemy.discovered).toBe(true);
   expect(s.enemy.attack).toBeGreaterThan(0);

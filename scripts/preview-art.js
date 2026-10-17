@@ -13,6 +13,7 @@ const path = require("node:path");
     );
     for (const name of [
       "model-raster",
+      "orders-art",
       "siege-art",
       "artwork",
       "isometric-art",

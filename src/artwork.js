@@ -133,6 +133,10 @@
       }
   }
   function sigil(g, x, y, size, team, color = C.cream) {
+    if (window.CruciataOrders?.isOrder(team)) {
+      window.CruciataOrders.emblem(g, x, y, size * 1.25, team);
+      return;
+    }
     if (team === 3) {
       polygon(
         g,
@@ -417,13 +421,14 @@
     );
     ellipse(g, tip[0], tip[1] - 4, 2, 2, "#b9a578");
     const color =
-      u.team === 1
+      window.CruciataOrders?.field(u.team) ??
+      (u.team === 1
         ? C.green
         : u.team === 3
           ? "#b18b3b"
           : u.team === 2
             ? "#9a917e"
-            : C.red;
+            : C.red);
     for (let r = 0; r < 4; r++)
       for (let c = 0; c < 16; c++) {
         const nodes = [
@@ -532,13 +537,14 @@
     );
     ellipse(g, x, y - 11, 1.8, 1.8, "#b9a578");
     const color =
-      team === 3
+      window.CruciataOrders?.field(team) ??
+      (team === 3
         ? "#b18b3b"
         : team === 2
           ? "#9a917e"
           : team === 1
             ? C.green
-            : C.red;
+            : C.red);
     const gust =
       0.7 + Math.sin(time * 0.57) * 0.18 + Math.sin(time * 0.23) * 0.12;
     const wave = (t) =>
@@ -572,6 +578,8 @@
     }
     const cy = y + wave(0.5);
     if (team === 0) cross(g, x + 11, cy, 4, C.cream);
+    else if (window.CruciataOrders?.isOrder(team))
+      window.CruciataOrders.emblem(g, x + 11, cy, 5.2, team);
     else if (team === 3) sigil(g, x + 11, cy, 4, team, C.cream);
     else if (team === 1) {
       g.strokeStyle = C.cream;

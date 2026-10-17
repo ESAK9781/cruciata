@@ -1,0 +1,10 @@
+[package]
+name = "cruciata-core"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = { version = "1", features = ["float_roundtrip"] }
+libm = "0.2"
+indexmap = "2"

@@ -2,8 +2,14 @@
 (() => {
   "use strict";
   function draw(g, u, phase, angle, action = "idle") {
-    const team =
-        u.team === 1 ? "#2c795f" : u.team === 0 ? "#ad3c30" : "#a48c52",
+    const order = window.CruciataOrders?.style(u.team),
+      team = order
+        ? order.field
+        : u.team === 1
+          ? "#2c795f"
+          : u.team === 0
+            ? "#ad3c30"
+            : "#a48c52",
       islamic = u.team === 1,
       civilian = ["worker", "civilian"].includes(u.type),
       priest = u.type === "chaplain",
@@ -340,9 +346,10 @@
           [4, -13],
           [-4, -13],
         ],
-        u.rank > 0 && !islamic ? "#ddd5b9" : team,
+        u.rank > 0 && !islamic && !order ? "#ddd5b9" : team,
       );
-      if (!islamic) {
+      if (order) window.CruciataOrders.emblem(g, 0, -21, 3.7, u.team);
+      else if (!islamic) {
         line(
           [
             [0, -25],
@@ -546,6 +553,8 @@
         g.arc(-6.6, -23, 1, 0, Math.PI * 2);
         g.fill();
         g.restore();
+      } else if (order) {
+        window.CruciataOrders.emblem(g, -8, -22.5, 4.2, u.team);
       } else {
         line(
           [

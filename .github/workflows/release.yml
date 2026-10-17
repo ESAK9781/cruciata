@@ -1,0 +1,102 @@
+name: Desktop release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag to create or update (for example v0.1.0)"
+        required: true
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            label: windows
+          - os: macos-14
+            label: macos-arm64
+          - os: macos-15-intel
+            label: macos-x64
+          - os: ubuntu-22.04
+            label: linux
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Linux build dependencies
+        if: matrix.label == 'linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libasound2-dev libxkbcommon-dev libwayland-dev libgl1-mesa-dev libx11-dev
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: rust
+      - name: Simulation tests (identical results on every platform)
+        working-directory: rust
+        run: |
+          cargo test --release -p cruciata-core --test golden_hash --test determinism --test commands_parity --test commands2_parity --test worldgen_parity --test save_roundtrip
+          cargo test --release -p cruciata-net
+      - name: Build
+        working-directory: rust
+        run: cargo build --release -p cruciata
+      - name: Version
+        id: v
+        shell: bash
+        run: echo "version=$(grep -m1 '^version' rust/Cargo.toml | sed 's/.*"\(.*\)"/\1/')" >> "$GITHUB_OUTPUT"
+      - name: Install Inno Setup
+        if: matrix.label == 'windows'
+        shell: pwsh
+        run: choco install innosetup -y --no-progress
+      - name: Package (Windows)
+        if: matrix.label == 'windows'
+        shell: bash
+        working-directory: rust/packaging
+        run: |
+          bash ./stage.sh stage/cruciata ../target/release/cruciata.exe
+          "/c/Program Files (x86)/Inno Setup 6/ISCC.exe" -DVersion=${{ steps.v.outputs.version }} -DStage=stage/cruciata windows.iss
+          mkdir -p ../../out && mv Cruciata-Setup-windows-x64.exe ../../out/
+      - name: Package (macOS)
+        if: startsWith(matrix.label, 'macos')
+        shell: bash
+        run: |
+          arch="${{ matrix.label }}"; arch="${arch#macos-}"
+          bash ./rust/packaging/bundle-macos.sh "$arch" "${{ steps.v.outputs.version }}"
+          mkdir -p out && mv Cruciata-macOS-*.dmg out/
+      - name: Package (Linux)
+        if: matrix.label == 'linux'
+        shell: bash
+        run: |
+          bash ./rust/packaging/bundle-linux.sh "${{ steps.v.outputs.version }}"
+          mkdir -p out && mv Cruciata-linux-x64.tar.gz cruciata_amd64.deb out/
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.label }}
+          path: out/*
+          if-no-files-found: error
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: out
+          merge-multiple: true
+      - name: Publish release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ github.event.inputs.tag || github.ref_name }}
+        run: |
+          pre=""
+          case "$TAG" in *-*) pre="--prerelease" ;; esac
+          if ! gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release create "$TAG" $pre --repo "$GITHUB_REPOSITORY" --title "Cruciata $TAG"               --notes "Native desktop build with LAN multiplayer. Download the installer for your system; see the install page for details."
+          fi
+          gh release upload "$TAG" out/* --repo "$GITHUB_REPOSITORY" --clobber

@@ -82,7 +82,7 @@ test("the build menu states the colossus cost, warning and range rules", async (
   await page.locator("#settlement-tab").click();
   await expect(card).toBeVisible();
   await expect(card).toContainText("One per side");
-  await expect(card).toContainText("6000 wood");
+  await expect(card).toContainText("10000 wood");
   const title = await card.getAttribute("data-tip");
   expect(title).toContain("Unlimited range");
   expect(title).toContain("told");
@@ -93,7 +93,7 @@ test("only one colossus per side, even while it is a foundation", async ({
 }) => {
   await begin(page);
   await page.evaluate(() => {
-    cruciata.supply({ wood: 9000, stone: 9000, gold: 9000 });
+    cruciata.supply({ wood: 12000, stone: 12000, gold: 12000 });
     cruciata.scenario((s) => {
       const worker = s.units.find((u) => u.team === 0 && u.type === "worker");
       s.units = [{ ...worker, x: 1250, y: 2600, job: null, order: null }];
@@ -115,7 +115,7 @@ test("only one colossus per side, even while it is a foundation", async ({
     };
   });
   expect(after.colossi).toBe(1);
-  expect(after.wood).toBeLessThan(9000 - 5000);
+  expect(after.wood).toBeLessThan(12000 - 8000);
   expect(after.site).toBe(false);
   await expect(page.locator("#build-colossus")).toBeDisabled();
 });
@@ -334,10 +334,10 @@ test("the enemy announces its own colossus when it begins one, and builds and fi
           fleeUntil: 0,
         });
       s.enemy.resources = {
-        food: 9000,
-        wood: 9000,
-        stone: 9000,
-        gold: 9000,
+        food: 12000,
+        wood: 12000,
+        stone: 12000,
+        gold: 12000,
       };
       s.time = 900;
       s.enemy.think = 0;
@@ -558,7 +558,12 @@ test("the enemy researches great engines at its own siege workshop", async ({
     cruciata.scenario((s) => {
       s.enemy.techs = {};
       s.enemy.think = 0;
-      s.enemy.resources = { food: 9000, wood: 9000, stone: 9000, gold: 9000 };
+      s.enemy.resources = {
+        food: 12000,
+        wood: 12000,
+        stone: 12000,
+        gold: 12000,
+      };
       s.time = 700;
       const home = s.buildings.find(
         (b) => b.team === 1 && b.kind === "towncenter",

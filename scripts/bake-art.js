@@ -62,6 +62,12 @@ const fs = require("node:fs"),
           result[[b.kind, b.w, b.h].join(":")] = [b.kind, b.w, b.h];
         }
       }
+      // Camps may not exist in any starting scene but are always buildable.
+      for (const [kind, w, h] of [
+        ["lumbercamp", 61, 56],
+        ["miningcamp", 62, 59],
+      ])
+        result[[kind, w, h].join(":")] = [kind, w, h];
       return {
         sizes: Object.values(result),
         curtains: Object.values(curtains),
@@ -249,6 +255,91 @@ const fs = require("node:fs"),
                       );
                     }
             }
+        // Destroyed curtain sections stay as rubble heaps.
+        for (const fortified of [false, true])
+          for (const team of [0, 1, 2, 3])
+            for (const architecture of ["christian", "islamic"]) {
+              if ((team === 1) !== (architecture === "islamic") && team !== 0)
+                continue;
+              for (let id = 0; id < 3; id++)
+                A.structure(
+                  g,
+                  {
+                    id,
+                    kind: "wall",
+                    w: 32,
+                    h: 32,
+                    x: 0,
+                    y: 0,
+                    hp: 0,
+                    maxHp: 100,
+                    team,
+                    architecture,
+                    fortified,
+                    progress: 1,
+                  },
+                  0,
+                );
+            }
+        for (const kind of ["gate", "bastiongate"])
+          for (const [w, h] of [
+            [64, 64],
+            [32, 64],
+            [64, 32],
+            [74, 42],
+          ])
+            for (const fortified of [false, true])
+              for (const team of [0, 1, 2, 3])
+                for (const architecture of ["christian", "islamic"]) {
+                  if (
+                    (team === 1) !== (architecture === "islamic") &&
+                    team !== 0
+                  )
+                    continue;
+                  for (let id = 0; id < 3; id++)
+                    A.structure(
+                      g,
+                      {
+                        id,
+                        kind,
+                        w,
+                        h,
+                        x: 0,
+                        y: 0,
+                        hp: 0,
+                        maxHp: 100,
+                        team,
+                        architecture,
+                        fortified,
+                        progress: 1,
+                      },
+                      0,
+                    );
+                }
+        // Wrecked permanent engines (Colossus footprint scaled like the game's).
+        for (const [kind, w, h] of [
+          ["greatengine", 162, 140],
+          ["colossus", 320, 276],
+        ])
+          for (const team of [0, 1])
+            for (let id = 0; id < 3; id++)
+              A.structure(
+                g,
+                {
+                  id,
+                  kind,
+                  w,
+                  h,
+                  x: 0,
+                  y: 0,
+                  hp: 0,
+                  maxHp: 100,
+                  team,
+                  architecture: team === 1 ? "islamic" : "christian",
+                  progress: 1,
+                },
+                0,
+              );
         for (const [kind, w, h] of sizes)
           for (const team of [0, 1, 2, 3])
             for (const architecture of ["christian", "islamic"]) {
@@ -308,6 +399,37 @@ const fs = require("node:fs"),
                 );
             }
         for (const b of curtains) A.structure(g, b, 0);
+        // Build-card previews of the curtain and bastion walls (drawn live on the web).
+        for (const fortified of [false, true])
+          CruciataBakeSprite(
+            fortified ? "card:bastionwall" : "card:wall",
+            160,
+            160,
+            80,
+            80,
+            (q) => {
+              // Nested curtain sprites must draw into this card, not bake separately.
+              const hook = window.CruciataBakeSprite;
+              window.CruciataBakeSprite = undefined;
+              A.structure(
+                q,
+                {
+                  kind: "wall",
+                  w: 32,
+                  h: 32,
+                  x: 0,
+                  y: 0,
+                  hp: 100,
+                  maxHp: 100,
+                  progress: 1,
+                  team: 0,
+                  fortified,
+                },
+                0,
+              );
+              window.CruciataBakeSprite = hook;
+            },
+          );
         for (const kind of ["watchtower", "tower"])
           for (const team of [0, 1])
             for (const fortified of [false, true]) {
@@ -481,6 +603,11 @@ const fs = require("node:fs"),
     fs.writeFileSync(
       path.join(staging, "manifest.js"),
       "window.CruciataAtlasManifest = " + JSON.stringify(metadata) + ";\n",
+    );
+    // Plain JSON copy for the native client.
+    fs.writeFileSync(
+      path.join(staging, "manifest.json"),
+      JSON.stringify(metadata),
     );
     for (const name of fs.readdirSync(staging))
       if (/^page-\d+\.png$/.test(name) && !metadata.pages.includes(name))

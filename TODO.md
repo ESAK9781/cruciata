@@ -105,3 +105,12 @@ Verification: all 20 campaign-scale checks passed in Chromium and Firefox. Twelv
 - [x] Costs and descriptions live in one hover tooltip; selection text auto-fits its panel.
 - [x] `tests/selection-sites.spec.js`, updated colossus/group/revision/control-group specs.
 
+
+# Native Rust port and LAN multiplayer (branch `rust-native`)
+
+- [x] Deterministic core crate with JS parity fixtures (`rust/PORT.md`).
+- [x] Command layer, PvP mode, lockstep net crate, saves.
+- [x] Native client: atlas renderer, HUD, picking, orders, minimap, fog.
+- [x] Wire menus/store, LAN host/join flow, autosave, results.
+- [x] Terrain/walls/effects art, audio.
+- [ ] Installers, CI release matrix, GitHub releases, install page in the web version.
