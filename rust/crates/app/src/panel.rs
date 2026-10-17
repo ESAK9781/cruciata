@@ -635,7 +635,7 @@ fn research_cards(ui: &mut egui::Ui, f: &mut Frame) {
             if producers.is_empty() || !f.g.sim.tech_available(t.key, f.g.me) && !has {
                 continue;
             }
-            let queued = f.g.sim.state.buildings.iter().any(|b| b.queue.iter().any(|q| q.tech.as_deref() == Some(t.key)));
+            let queued = f.g.sim.state.buildings.iter().any(|b| b.team == f.g.me && b.queue.iter().any(|q| q.tech.as_deref() == Some(t.key)));
             let room = f.ui.selected_structures(f.g, &|b| b.kind == t.producer && b.progress >= 1.0 && b.queue.len() < 8);
             let enabled = !has && !queued && !room.is_empty() && f.g.sim.afford(&t.cost, f.g.me) && f.g.sim.state.result.is_none();
             let (ty, unlock) = (t.ty, t.unlock);

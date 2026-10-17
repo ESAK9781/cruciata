@@ -5271,7 +5271,9 @@
       !playable() ||
       state.techs[key] ||
       !techAvailable(key) ||
-      state.buildings.some((b) => b.queue.some((q) => q.tech === key))
+      state.buildings.some(
+        (b) => b.team === 0 && b.queue.some((q) => q.tech === key),
+      )
     )
       return false;
     const t = TECHS[key],
@@ -11335,7 +11337,9 @@
       $("research-" + k).disabled =
         !!state.techs[k] ||
         !techAvailable(k) ||
-        state.buildings.some((b) => b.queue.some((q) => q.tech === k)) ||
+        state.buildings.some(
+          (b) => b.team === 0 && b.queue.some((q) => q.tech === k),
+        ) ||
         !selectedStructures(
           (b) => b.kind === t.producer && b.progress >= 1 && b.queue.length < 8,
         ).length ||

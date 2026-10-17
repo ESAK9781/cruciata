@@ -100,7 +100,7 @@ impl Sim {
 
     fn cmd_research(&mut self, team: i32, key: &str, producer: u32) -> bool {
         let Some(t) = data().tech(key) else { return false };
-        if self.has_tech(key, team) || !self.tech_available(key, team) || self.state.buildings.iter().any(|b| b.queue.iter().any(|q| q.tech.as_deref() == Some(key))) {
+        if self.has_tech(key, team) || !self.tech_available(key, team) || self.state.buildings.iter().any(|b| b.team == team && b.queue.iter().any(|q| q.tech.as_deref() == Some(key))) {
             return false;
         }
         let ok = self.bidx(producer).filter(|&i| {

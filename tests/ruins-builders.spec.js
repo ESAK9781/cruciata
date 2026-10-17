@@ -172,3 +172,35 @@ test("a falling building shatters into shards that land and fade, leaving the ru
   expect(result.spawned).toBeGreaterThan(20);
   expect(result.left).toBe(0);
 });
+
+test("the enemy researching a tech does not block ours", async ({ page }) => {
+  await begin(page);
+  const result = await page.evaluate(() => {
+    cruciata.scenario((s) => {
+      s.resources = { food: 9000, wood: 9000, stone: 9000, gold: 9000 };
+      const enemy = s.buildings.find((b) => b.team === 1);
+      enemy.queue.push({
+        kind: "research",
+        tech: "engineworks",
+        time: 0,
+        duration: 90,
+      });
+      const own = s.buildings.find(
+        (b) => b.team === 0 && b.kind === "towncenter",
+      );
+      s.buildings.push({
+        ...JSON.parse(JSON.stringify(own)),
+        id: 99950,
+        kind: "siegeworkshop",
+        queue: [],
+        progress: 1,
+      });
+    });
+    const I = cruciata.internals();
+    const own = I.state.buildings.find((b) => b.id === 99950);
+    const started = cruciata.research("engineworks", [own.id]);
+    return { started, queued: own.queue.length };
+  });
+  expect(result.started).toBe(true);
+  expect(result.queued).toBe(1);
+});
