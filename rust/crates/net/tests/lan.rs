@@ -5,6 +5,7 @@ use cruciata_core::orders::OrderCmd;
 use cruciata_core::sim::Sim;
 use cruciata_net::discovery::Browser;
 use cruciata_net::link::mem_pair;
+use cruciata_net::lobby::Lobby;
 use cruciata_net::lockstep::Lockstep;
 use cruciata_net::session::{self, Host};
 use std::time::{Duration, Instant};
@@ -149,4 +150,101 @@ fn leaving_ends_the_match_for_the_other_side() {
     b.1.leave();
     a.1.advance(&mut a.0, 1.0 / 60.0);
     assert!(a.1.disconnected);
+}
+
+#[test]
+fn a_host_is_listed_once_however_many_addresses_it_broadcasts_from() {
+    let disc = 47991;
+    let host = Host::start_on("Once".into(), "Map".into(), serde_json::Value::Null, 0, disc).unwrap();
+    let mut browser = Browser::on_port(disc).unwrap();
+    let start = Instant::now();
+    let mut seen = Vec::new();
+    while start.elapsed() < Duration::from_millis(3500) {
+        seen = browser.poll();
+        std::thread::sleep(Duration::from_millis(50));
+    }
+    if seen.is_empty() {
+        eprintln!("discovery broadcast not delivered on this machine; nothing to check");
+        return;
+    }
+    assert_eq!(seen.len(), 1, "one game, listed once: {seen:?}");
+    host.set_label("Changed".into());
+    let start = Instant::now();
+    while start.elapsed() < Duration::from_secs(3) {
+        seen = browser.poll();
+        if seen.first().map(|h| h.map == "Changed").unwrap_or(false) {
+            return;
+        }
+        std::thread::sleep(Duration::from_millis(50));
+    }
+    panic!("the new map line never arrived: {seen:?}");
+}
+
+fn pump(a: &mut Lobby, b: &mut Lobby) {
+    for _ in 0..40 {
+        a.poll();
+        b.poll();
+        std::thread::sleep(Duration::from_millis(10));
+    }
+}
+
+#[test]
+fn the_lobby_enforces_distinct_factions_ready_and_chat() {
+    use cruciata_core::factions::*;
+    use cruciata_net::protocol::LobbyState;
+    let mut host = Host::start_on("Host".into(), "Map".into(), serde_json::Value::Null, 0, 47992).unwrap();
+    let addr = std::net::SocketAddr::new("127.0.0.1".parse().unwrap(), host.port);
+    let guest_session = session::join(addr, "Guest").unwrap();
+    let host_session = loop {
+        if let Some(s) = host.poll() {
+            break s;
+        }
+        std::thread::sleep(Duration::from_millis(20));
+    };
+    let cfg = config();
+    let state = LobbyState { config: cfg.clone(), host_name: "Host".into(), guest_name: "Guest".into(), host_faction: TEMPLAR, guest_faction: MUSLIM, host_ready: false, guest_ready: false };
+    let mut h = Lobby::host(host_session, state);
+    let mut g = Lobby::guest(guest_session, "Guest".into());
+    pump(&mut h, &mut g);
+    assert_eq!(g.state.config, cfg, "the guest sees every setting");
+    assert_eq!((g.my_faction(), g.peer_faction()), (MUSLIM, TEMPLAR));
+    // Taking the other player's faction is refused on both sides.
+    assert!(!g.pick(TEMPLAR));
+    assert!(!h.pick(MUSLIM));
+    // The guest changes faction; the host sees it.
+    assert!(g.pick(HOSPITALLER));
+    pump(&mut h, &mut g);
+    assert_eq!(h.state.guest_faction, HOSPITALLER);
+    // The host cannot now take it, but may take the freed Muslim host.
+    assert!(!h.pick(HOSPITALLER));
+    assert!(h.pick(MUSLIM));
+    pump(&mut h, &mut g);
+    assert_eq!(g.peer_faction(), MUSLIM);
+    // A setting change clears ready flags.
+    g.set_ready(true);
+    pump(&mut h, &mut g);
+    assert!(h.peer_ready());
+    let mut changed = cfg.clone();
+    changed["seed"] = serde_json::json!(5);
+    h.set_config(changed.clone());
+    pump(&mut h, &mut g);
+    assert!(!h.peer_ready() && !g.my_ready() && g.state.config == changed);
+    // Chat both ways.
+    h.say("hello".into());
+    g.say("hi there".into());
+    pump(&mut h, &mut g);
+    assert_eq!(g.chat.iter().filter(|c| !c.mine).map(|c| c.text.as_str()).collect::<Vec<_>>(), ["hello"]);
+    assert_eq!(h.chat.iter().filter(|c| !c.mine).map(|c| c.text.as_str()).collect::<Vec<_>>(), ["hi there"]);
+    // Both ready: the host starts with the factions inside the configuration.
+    g.set_ready(true);
+    h.set_ready(true);
+    pump(&mut h, &mut g);
+    let a = h.started.clone().expect("host started");
+    let b = g.started.clone().expect("guest told to start");
+    assert_eq!(a, b);
+    assert_eq!(a["factions"], serde_json::json!([MUSLIM, HOSPITALLER]));
+    // Leaving closes the other side.
+    g.leave();
+    pump(&mut h, &mut g);
+    assert!(h.closed);
 }

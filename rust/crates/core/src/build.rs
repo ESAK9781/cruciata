@@ -75,6 +75,23 @@ impl Sim {
         }
     }
 
+    /// Art slot (see `factions`) a player team plays, when the match assigns factions.
+    pub fn faction_of(&self, team: i32) -> Option<i32> {
+        if !(0..2).contains(&team) {
+            return None;
+        }
+        self.state.config.as_ref()?.get("factions")?.get(team as usize)?.as_i64().map(|v| v as i32)
+    }
+
+    fn arch_for(&self, team: i32) -> Option<String> {
+        match self.faction_of(team) {
+            Some(crate::factions::MUSLIM) => Some("islamic".into()),
+            Some(_) => Some("christian".into()),
+            None if team == 1 => Some("islamic".into()),
+            None => None,
+        }
+    }
+
     pub fn make_building(&mut self, kind: BKind, team: i32, x: f64, y: f64, progress: f64) -> Building {
         let base = data().bld(kind);
         let rotated_gate = false;
@@ -85,7 +102,7 @@ impl Sim {
             id,
             kind: real,
             fortified: kind == BKind::Bastionwall,
-            architecture: if team == 1 { Some("islamic".into()) } else { None },
+            architecture: self.arch_for(team),
             team,
             x,
             y,

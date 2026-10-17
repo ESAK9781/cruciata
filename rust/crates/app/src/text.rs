@@ -37,7 +37,7 @@ fn variants(t: UType, enemy: bool) -> Option<[&'static str; 3]> {
 
 /// `unitName(u)`.
 pub fn unit_name(t: UType, team: i32, rank: f64) -> String {
-    if let Some(v) = variants(t, team == 1) {
+    if let Some(v) = variants(t, crate::keys::is_muslim(team)) {
         return v[(rank as usize).min(2)].to_string();
     }
     cruciata_core::data::data().ty(t).name.to_string()

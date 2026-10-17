@@ -37,7 +37,7 @@ pub struct Host {
     stop: Arc<AtomicBool>,
     rx: Receiver<Session>,
     handle: Option<JoinHandle<()>>,
-    _announcer: Announcer,
+    announcer: Announcer,
 }
 
 impl Host {
@@ -80,7 +80,12 @@ impl Host {
             }
         });
         let announcer = Announcer::start(name, map_label, port, discovery_port);
-        Ok(Host { port, stop, rx, handle: Some(handle), _announcer: announcer })
+        Ok(Host { port, stop, rx, handle: Some(handle), announcer })
+    }
+
+    /// Update the map line shown in the game list.
+    pub fn set_label(&self, label: String) {
+        self.announcer.set_map(label);
     }
 
     /// A guest has connected.

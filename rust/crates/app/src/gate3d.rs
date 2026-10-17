@@ -161,7 +161,10 @@ pub fn build(b: &Building) -> Model {
     let angle = b.gate_angle.unwrap_or(if b.rotation == Some(90.0) { std::f64::consts::FRAC_PI_2 } else { 0.0 });
     let rise = if b.progress < 1.0 { 0.2 + 0.8 * b.progress } else { 1.0 };
     let strong = b.kind == cruciata_core::model::BKind::Bastiongate || b.bastion_gate == Some(true) || b.gate_segments.as_ref().map(|s| s.iter().any(|p| p.fortified == Some(true))).unwrap_or(false);
-    let islamic = b.architecture.as_deref() == Some("islamic") || b.team == 1;
+    let islamic = match b.architecture.as_deref() {
+        Some(a) => a == "islamic",
+        None => crate::keys::is_muslim(b.team),
+    };
     let stone = if b.fortified || strong { BASTION } else { STONE };
     let h = if strong { 62.0 } else { 43.0 };
     let mut q = M { m: Model::default(), ca: angle.cos(), sa: angle.sin(), rise };

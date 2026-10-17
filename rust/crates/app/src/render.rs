@@ -106,7 +106,16 @@ fn make_shadow(ctx: &egui::Context) -> TextureHandle {
 
 fn start_sim(args: &Args) -> Sim {
     let mut sim = match args.quick {
-        Some(seed) => Sim::start_level(0, Some(serde_json::json!({ "seed": seed, "width": 6400, "height": 4400, "biome": 0 })), "normal", false),
+        Some(seed) => {
+            // Debug: CRUCIATA_FACTIONS=4,1 plays the Templars against the Muslim host.
+            let f: Vec<i32> = std::env::var("CRUCIATA_FACTIONS").ok().map(|v| v.split(',').filter_map(|x| x.parse().ok()).collect()).unwrap_or_default();
+            let mut cfg = serde_json::json!({ "seed": seed, "width": 6400, "height": 4400, "biome": 0 });
+            if f.len() == 2 {
+                cfg["factions"] = serde_json::json!(f);
+                crate::keys::set_slots(f[0], f[1]);
+            }
+            Sim::start_level(0, Some(cfg), "normal", false)
+        }
         None => Sim::start_level(args.level, None, "normal", false),
     };
     sim.state.paused = false;
@@ -318,6 +327,8 @@ impl App {
             Some("slots") => menu0.screen = Screen::Slots,
             Some("creation") => menu0.screen = Screen::Creation(0),
             Some("lan") => menu0.open_lan_hub(),
+            Some("lobby") => menu0.debug_lobby(false),
+            Some("lobby-guest") => menu0.debug_lobby(true),
             _ => {}
         }
         let shot_state = if args.shot.is_some() { ShotState::Waiting(0) } else { ShotState::Off };
@@ -384,6 +395,7 @@ impl App {
 
     fn install(&mut self, g: Game) {
         self.fx.clear();
+        crate::keys::set_slots(g.sim.faction_of(0).unwrap_or(0), g.sim.faction_of(1).unwrap_or(1));
         let rect = self.view.rect;
         self.view = View::new(g.sim.geo.w, g.sim.geo.h);
         self.view.rect = rect;
@@ -475,13 +487,15 @@ impl App {
             }
             Out::ResumeQuick(i) => self.resume(Some(i)),
             Out::HostLan => {
-                let cfg = self.menu.lan_form.config();
                 let label = self.menu.lan_form.label();
-                match cruciata_net::session::Host::start(self.player_name(), label, cfg) {
+                let name = self.player_name();
+                // The settings travel in the lobby, not the handshake.
+                match cruciata_net::session::Host::start(name.clone(), label, serde_json::Value::Null) {
                     Ok(h) => {
                         self.menu.lan.browser = None;
                         self.menu.lan.host = Some(h);
-                        self.menu.screen = Screen::LanHost;
+                        self.menu.lan.my_name = name;
+                        self.menu.screen = Screen::LanLobby;
                     }
                     Err(e) => self.menu.lan.error = Some(format!("Could not start hosting: {e}")),
                 }
@@ -489,10 +503,19 @@ impl App {
             Out::JoinLan(addr) => {
                 let name = self.player_name();
                 self.menu.lan.browser = None;
-                self.begin_load("Joining the game...", move || {
-                    let s = cruciata_net::session::join(addr, &name)?;
-                    lan_game(s)
+                self.menu.lan.my_name = name.clone();
+                let (tx, rx) = channel();
+                std::thread::spawn(move || {
+                    let _ = tx.send(cruciata_net::session::join(addr, &name));
                 });
+                self.menu.lan.connecting = Some(rx);
+                self.menu.screen = Screen::Loading("Joining the game...".into());
+            }
+            Out::StartLan(cfg) => {
+                if let Some(lobby) = self.menu.lan.lobby.take() {
+                    let session = lobby.into_session(cfg);
+                    self.begin_load("Raising the standards...", move || lan_game(session));
+                }
             }
             Out::Settings => self.ui.show_settings = true,
             Out::Resume => {
@@ -1745,11 +1768,6 @@ impl eframe::App for App {
                     Err(e) => self.menu.screen = Screen::LanMessage(e),
                 }
             }
-        }
-        let guest = self.menu.lan.host.as_mut().and_then(|h| h.poll());
-        if let Some(s) = guest {
-            self.menu.lan.host = None;
-            self.begin_load("A friend has joined...", move || lan_game(s));
         }
         if self.ui.show_menu {
             // A LAN match never pauses: keep trading turns so the opponent is not held up.

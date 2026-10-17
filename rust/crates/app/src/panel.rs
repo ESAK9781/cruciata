@@ -60,7 +60,7 @@ fn describe(f: &Frame) -> Selection {
             st.cities.iter().find(|c| Some(c.id) == b.city).map(|c| c.name.clone()).unwrap_or_else(|| "City center".into())
         } else if b.outpost == Some(true) {
             st.sites.iter().find(|x| Some(x.id) == b.site).map(|x| x.name.clone()).unwrap_or_else(|| "Outpost".into())
-        } else if b.kind == BKind::Chapel && b.team == 1 {
+        } else if b.kind == BKind::Chapel && crate::keys::is_muslim(b.team) {
             "Prayer house".into()
         } else if b.kind == BKind::Wall && b.fortified {
             data().bld(BKind::Bastionwall).name.into()

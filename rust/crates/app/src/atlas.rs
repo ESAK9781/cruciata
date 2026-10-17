@@ -56,9 +56,11 @@ impl Atlas {
             let n = |i: usize| a.get(i).and_then(|x| x.as_f64()).unwrap_or(0.0) as f32;
             frames.insert(k.clone(), Frame { page: n(0) as u16, x: n(1), y: n(2), w: n(3), h: n(4), dx: n(5), dy: n(6), res: scale });
         }
-        // The Colossus has its own small atlas (the web game draws it at runtime).
+        // Extra native-only atlases: the Colossus (the web game draws it at runtime) and the
+        // crusader-order liveries.
         let mut pages = pages;
-        if let Ok(text) = std::fs::read_to_string(dir.join("atlas").join("colossus.json")) {
+        for file in ["colossus.json", "orders.json"] {
+            let Ok(text) = std::fs::read_to_string(dir.join("atlas").join(file)) else { continue };
             if let Ok(extra) = serde_json::from_str::<serde_json::Value>(&text) {
                 let offset = pages.len() as f32;
                 let res = extra["scale"].as_f64().unwrap_or(1.5) as f32;
@@ -137,18 +139,40 @@ impl Atlas {
         }
     }
 
+    /// The key to draw: itself, or (for crusader-order art slots 4-6 without livery art)
+    /// the same sprite in the plain crusader slot 0.
+    fn resolve<'a>(&self, key: &'a str, owned: &'a mut String) -> &'a str {
+        if self.frames.contains_key(key) {
+            return key;
+        }
+        if let Some(base) = base_key(key) {
+            if self.frames.contains_key(&base) {
+                *owned = base;
+                return owned.as_str();
+            }
+        }
+        key
+    }
+
     pub fn has(&self, key: &str) -> bool {
-        self.frames.contains_key(key)
+        let mut o = String::new();
+        let k = self.resolve(key, &mut o);
+        self.frames.contains_key(k)
     }
 
     pub fn frame(&self, key: &str) -> Option<Frame> {
-        self.frames.get(key).copied()
+        let mut o = String::new();
+        let k = self.resolve(key, &mut o);
+        self.frames.get(k).copied()
     }
 
     /// Frame plus the texture of its page (when decoded). Requests the page otherwise.
     /// While a page is still loading (or was evicted) the nearest resident frame of
     /// the same animation is used instead, so moving machines never blink out.
     pub fn lookup(&mut self, key: &str) -> Option<(Frame, Option<TextureId>)> {
+        let mut owned = String::new();
+        let key = self.resolve(key, &mut owned).to_string();
+        let key = key.as_str();
         let f = *self.frames.get(key)?;
         if let Some(r) = self.resident.get_mut(&f.page) {
             r.used = self.tick;
@@ -193,4 +217,23 @@ impl Atlas {
     pub fn pending_pages(&self) -> usize {
         self.requested.len()
     }
+}
+
+/// The slot-0 twin of a key whose art slot is a crusader order (4-6), if it names one.
+fn base_key(key: &str) -> Option<String> {
+    let mut parts: Vec<&str> = key.split(':').collect();
+    let at = match *parts.first()? {
+        "person" => 2,
+        "standard2" | "caravan" => 1,
+        "building" | "buildingMotion" => 4,
+        "siege" if parts.get(1) == Some(&"machine") => 3,
+        "siege" if parts.get(1) == Some(&"colossus") => 2,
+        "siege" => 1,
+        _ => return None,
+    };
+    if !parts.get(at)?.parse::<i32>().map(|n| n >= 4).unwrap_or(false) {
+        return None;
+    }
+    parts[at] = "0";
+    Some(parts.join(":"))
 }

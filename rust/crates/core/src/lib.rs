@@ -23,3 +23,4 @@ pub mod commands;
 pub mod orders;
 pub mod lockstep;
 pub mod save;
+pub mod factions;

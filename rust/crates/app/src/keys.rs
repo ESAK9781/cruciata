@@ -4,6 +4,27 @@
 use cruciata_core::js::{atan2, cos, round, sin};
 use cruciata_core::model::*;
 use std::f64::consts::PI;
+use std::sync::atomic::{AtomicI32, Ordering};
+
+/// Art slot of each team: 0 crusader, 1 muslim, 4-6 the crusader orders (`src/orders-art.js`).
+/// Set when a match starts; every sprite key below names the slot, never the team index.
+static SLOTS: [AtomicI32; 2] = [AtomicI32::new(0), AtomicI32::new(1)];
+
+pub fn set_slots(host: i32, guest: i32) {
+    SLOTS[0].store(host, Ordering::Relaxed);
+    SLOTS[1].store(guest, Ordering::Relaxed);
+}
+
+pub fn slot(team: i32) -> i32 {
+    match team {
+        0 | 1 => SLOTS[team as usize].load(Ordering::Relaxed),
+        t => t,
+    }
+}
+
+pub fn is_muslim(team: i32) -> bool {
+    slot(team) == 1
+}
 
 /// `String(number)` as JavaScript prints it.
 pub fn jsn(v: f64) -> String {
@@ -100,16 +121,16 @@ pub fn person_key(u: &Unit, angle: f64) -> String {
         (1.0 - u.strike) * PI * 2.0
     };
     let frame = if action == "idle" { 0 } else { ((clock / (PI * 2.0)) * 12.0).floor() as i64 % 12 };
-    let sprite_type = if u.team == 1 && u.ty == UType::Knight {
+    let sprite_type = if is_muslim(u.team) && u.ty == UType::Knight {
         "knight6"
     } else if u.ty == UType::Knight {
         "knight5"
-    } else if u.team == 1 && u.ty == UType::Sword {
+    } else if is_muslim(u.team) && u.ty == UType::Sword {
         "sword2"
     } else {
         type_name(u.ty)
     };
-    format!("person:{}:{}:{}:{}:{}:{}:{}", sprite_type, u.team, jsn(rank), jsn(heading), action, frame, u.carry > 0.0)
+    format!("person:{}:{}:{}:{}:{}:{}:{}", sprite_type, slot(u.team), jsn(rank), jsn(heading), action, frame, u.carry > 0.0)
 }
 
 pub fn tree_key(palm: bool, snow: bool) -> String {
@@ -123,13 +144,13 @@ pub fn resource_key(n: &Node) -> String {
 pub fn caravan_key(u: &Unit, angle: f64) -> String {
     let heading = heading16(angle);
     let frame = if u.moving { 0 } else { 0 };
-    format!("caravan:{}:{}:{}:{}", u.team, jsn(heading), u.moving, frame)
+    format!("caravan:{}:{}:{}:{}", slot(u.team), jsn(heading), u.moving, frame)
 }
 
 pub fn caravan_frame(u: &Unit, time: f64, angle: f64) -> String {
     let heading = heading16(angle);
     let frame = if u.moving { (time * 12.0).floor() as i64 % 12 } else { 0 };
-    format!("caravan:{}:{}:{}:{}", u.team, jsn(heading), u.moving, frame)
+    format!("caravan:{}:{}:{}:{}", slot(u.team), jsn(heading), u.moving, frame)
 }
 
 /// `siegeMachine` key (rams, ballistas, trebuchets).
@@ -156,7 +177,7 @@ pub fn siege_machine_key(u: &Unit, time: f64, angle: f64) -> String {
     } else {
         0
     };
-    format!("siege:machine:{}:{}:{}:{}:{}", type_name(u.ty), u.team, jsn(round((a * 180.0) / PI)), track, frame)
+    format!("siege:machine:{}:{}:{}:{}:{}", type_name(u.ty), slot(u.team), jsn(round((a * 180.0) / PI)), track, frame)
 }
 
 pub fn visual_height(b: &Building) -> f64 {
@@ -205,7 +226,7 @@ pub fn bkind_name(k: BKind) -> &'static str {
 }
 
 fn arch(b: &Building) -> String {
-    b.architecture.clone().unwrap_or_else(|| if b.team == 1 { "islamic".into() } else { "christian".into() })
+    b.architecture.clone().unwrap_or_else(|| if is_muslim(b.team) { "islamic".into() } else { "christian".into() })
 }
 
 fn link_text(b: &Building) -> String {
@@ -222,7 +243,7 @@ pub fn building_key(b: &Building) -> String {
         bkind_name(b.kind).to_string(),
         jsn(b.w),
         jsn(b.h),
-        b.team.to_string(),
+        slot(b.team).to_string(),
         arch(b),
         b.fortified.to_string(),
         b.bastion_gate.unwrap_or(false).to_string(),
@@ -241,7 +262,7 @@ pub fn building_key(b: &Building) -> String {
 
 pub fn building_motion_key(b: &Building, frame: i64) -> String {
     let attached = if b.wall_attachment.is_some() { "attached6" } else { "false" };
-    format!("buildingMotion:{}:{}:{}:{}:{}:{}:{}:{}", bkind_name(b.kind), jsn(b.w), jsn(b.h), b.team, arch(b), attached, b.fortified, frame)
+    format!("buildingMotion:{}:{}:{}:{}:{}:{}:{}:{}", bkind_name(b.kind), jsn(b.w), jsn(b.h), slot(b.team), arch(b), attached, b.fortified, frame)
 }
 
 /// Sprite canvas for a building: (width, height, origin y).
@@ -274,7 +295,7 @@ pub fn great_engine_key(b: &Building, time: f64) -> String {
     } else {
         "ready".to_string()
     };
-    format!("siege:{}{}:{}:{}", if big { "colossus:" } else { "" }, b.team, jsn(round((aim * 180.0) / PI)), pose)
+    format!("siege:{}{}:{}:{}", if big { "colossus:" } else { "" }, slot(b.team), jsn(round((aim * 180.0) / PI)), pose)
 }
 
 /// Key of the baked Colossus frame closest to the pose it is in. The native atlas keeps
@@ -296,5 +317,5 @@ pub fn colossus_key(b: &Building, time: f64) -> String {
 
 pub fn standard_key(u: &Unit, pose: i64, moving: bool) -> String {
     let heading = round((atan2(sin(u.angle), cos(u.angle)) * 4.0) / PI);
-    format!("standard2:{}:{}:{}:{}", u.team, jsn(heading), if moving { "move" } else { "rest" }, pose)
+    format!("standard2:{}:{}:{}:{}", slot(u.team), jsn(heading), if moving { "move" } else { "rest" }, pose)
 }

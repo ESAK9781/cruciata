@@ -19,6 +19,8 @@ mod site;
 mod terrain;
 mod mapatlas;
 mod menu;
+mod emblem;
+mod lobby_ui;
 mod store;
 mod game;
 mod hud;

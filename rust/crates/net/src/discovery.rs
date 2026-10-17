@@ -5,12 +5,13 @@ use crate::protocol::{Announce, DISCOVERY_PORT, MAGIC, PROTOCOL};
 use std::collections::HashMap;
 use std::net::{IpAddr, Ipv4Addr, SocketAddr, UdpSocket};
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
 
 pub struct Announcer {
     stop: Arc<AtomicBool>,
+    map: Arc<Mutex<String>>,
     handle: Option<JoinHandle<()>>,
 }
 
@@ -43,11 +44,15 @@ impl Announcer {
     pub fn start(name: String, map: String, game_port: u16, discovery_port: u16) -> Announcer {
         let stop = Arc::new(AtomicBool::new(false));
         let flag = stop.clone();
+        let label = Arc::new(Mutex::new(map));
+        let shared = label.clone();
+        let id = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_nanos() as u64).unwrap_or(1) ^ ((game_port as u64) << 48) | 1;
         let handle = thread::spawn(move || {
             let Ok(sock) = UdpSocket::bind("0.0.0.0:0") else { return };
             let _ = sock.set_broadcast(true);
-            let msg = serde_json::to_vec(&Announce { magic: MAGIC.into(), protocol: PROTOCOL, name, port: game_port, map }).unwrap();
             while !flag.load(Ordering::Relaxed) {
+                let map = shared.lock().map(|m| m.clone()).unwrap_or_default();
+                let msg = serde_json::to_vec(&Announce { magic: MAGIC.into(), protocol: PROTOCOL, name: name.clone(), port: game_port, map, id }).unwrap();
                 for t in broadcast_targets(discovery_port) {
                     let _ = sock.send_to(&msg, t);
                 }
@@ -59,7 +64,14 @@ impl Announcer {
                 }
             }
         });
-        Announcer { stop, handle: Some(handle) }
+        Announcer { stop, map: label, handle: Some(handle) }
+    }
+
+    /// Change the map line shown in other players' game lists.
+    pub fn set_map(&self, map: String) {
+        if let Ok(mut m) = self.map.lock() {
+            *m = map;
+        }
     }
 }
 
@@ -81,7 +93,9 @@ pub struct HostInfo {
 
 pub struct Browser {
     sock: UdpSocket,
-    seen: HashMap<SocketAddr, (HostInfo, Instant)>,
+    /// One entry per host: its broadcast reaches us from every address it owns (and from
+    /// loopback), which used to list the same game several times.
+    seen: HashMap<u64, (HostInfo, Instant)>,
 }
 
 impl Browser {
@@ -102,7 +116,14 @@ impl Browser {
             if let Ok(a) = serde_json::from_slice::<Announce>(&buf[..n]) {
                 if a.magic == MAGIC && a.protocol == PROTOCOL {
                     let addr = SocketAddr::new(from.ip(), a.port);
-                    self.seen.insert(addr, (HostInfo { name: a.name, addr, map: a.map }, Instant::now()));
+                    // Old builds sent no id: fall back to the sender.
+                    let id = if a.id != 0 { a.id } else { ((u32::from(match from.ip() { IpAddr::V4(v) => v, _ => Ipv4Addr::UNSPECIFIED }) as u64) << 16) | a.port as u64 };
+                    let keep = match self.seen.get(&id) {
+                        // Prefer a real network address over loopback once both are known.
+                        Some((old, _)) if addr.ip().is_loopback() && !old.addr.ip().is_loopback() => old.addr,
+                        _ => addr,
+                    };
+                    self.seen.insert(id, (HostInfo { name: a.name, addr: keep, map: a.map }, Instant::now()));
                 }
             }
         }

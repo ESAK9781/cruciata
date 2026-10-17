@@ -359,7 +359,14 @@
     g.drawImage(c, -ox, -oy, w, h);
   }
   const faction = (team) =>
-    team === 1 ? P.green : team === 3 ? P.gold : team === 2 ? "#ac9265" : P.red;
+    window.CruciataOrders?.field(team) ??
+    (team === 1
+      ? P.green
+      : team === 3
+        ? P.gold
+        : team === 2
+          ? "#ac9265"
+          : P.red);
   function shadow(g, rx, ry) {
     A.ellipse(g, 7, 7, rx, ry, "#25332330");
   }

@@ -5,6 +5,7 @@ use crate::paint::col;
 use crate::store::{self, Progress};
 use cruciata_core::data::data;
 use cruciata_net::discovery::{Browser, HostInfo};
+use cruciata_net::lobby::Lobby;
 use cruciata_net::session::{self, Host};
 use crate::style::*;
 use eframe::egui::{self, Align2, Color32, Id, Pos2, Rect, RichText, Sense, Stroke, Vec2};
@@ -65,12 +66,29 @@ impl QuickForm {
         })
     }
 
+    /// Inverse of `config`: what a guest displays of the host's settings.
+    pub fn from_config(c: &serde_json::Value) -> QuickForm {
+        let mut f = QuickForm::new();
+        let near = |v: f64, items: &[f64]| items.iter().position(|x| (x - v).abs() < 1e-6).unwrap_or(0);
+        f.size = near(c["width"].as_f64().unwrap_or(12800.0), &SIZES.map(|s| s.1));
+        f.frequency = near(c["frequency"].as_f64().unwrap_or(0.65), &FREQ.map(|s| s.1));
+        f.resources = c["resources"].as_f64().unwrap_or(500.0);
+        f.units = c["units"].as_f64().unwrap_or(8.0);
+        f.workers = c["workers"].as_f64().unwrap_or(6.0);
+        f.seed = c["seed"].as_u64().unwrap_or(1);
+        f.biome = c["biome"].as_u64().unwrap_or(0).min(3) as usize;
+        f.structures = STRUCT.iter().position(|s| Some(s.1) == c["structures"].as_str()).unwrap_or(0);
+        f.composition = COMP.iter().position(|s| Some(s.1) == c["composition"].as_str()).unwrap_or(0);
+        f.difficulty = DIFF.iter().position(|s| Some(s.1) == c["difficulty"].as_str()).unwrap_or(1);
+        f
+    }
+
     pub fn label(&self) -> String {
         format!("{} \u{b7} seed {}", BIOME[self.biome], self.seed)
     }
 
     /// The two-column form of the web (`#quick-form`): a label above each dark field.
-    fn ui(&mut self, ui: &mut egui::Ui) {
+    pub(crate) fn ui(&mut self, ui: &mut egui::Ui, pvp: bool) {
         let origin = ui.cursor().min;
         let width = ui.available_width().min(740.0);
         let col_w = (width - 16.0) / 2.0;
@@ -87,13 +105,22 @@ impl QuickForm {
         field_combo(ui, at(0, 2), "Army composition", &mut self.composition, &comp_names);
         field_number(ui, at(1, 2), "Starting villagers per settlement", &mut self.workers, 4.0..=24.0, 1.0);
         field_combo(ui, at(0, 3), "Starting structures", &mut self.structures, &struct_names);
-        field_combo(ui, at(1, 3), "AI difficulty", &mut self.difficulty, &diff_names);
+        if pvp {
+            field_static(ui, at(1, 3), "Match", "Player versus player");
+        } else {
+            field_combo(ui, at(1, 3), "AI difficulty", &mut self.difficulty, &diff_names);
+        }
         field_combo(ui, at(0, 4), "Biome", &mut self.biome, &BIOME);
         let mut seed = self.seed as f64;
         field_number(ui, at(1, 4), "Generation seed", &mut seed, 1.0..=2147483647.0, 1.0);
         self.seed = seed.max(1.0) as u64;
         ui.allocate_space(Vec2::new(width, 5.0 * 82.0 - 10.0));
     }
+}
+
+fn field_static(ui: &egui::Ui, rect: Rect, label: &str, value: &str) {
+    let field = field_label(ui, rect, label);
+    ui.painter().text(field.left_center() + Vec2::new(10.0, 0.0), Align2::LEFT_CENTER, value, sans(14.0), col("#9d957d"));
 }
 
 fn field_label(ui: &egui::Ui, rect: Rect, label: &str) -> Rect {
@@ -162,7 +189,7 @@ pub enum Screen {
     Slots,
     Creation(usize),
     LanHub,
-    LanHost,
+    LanLobby,
     Loading(String),
     LanMessage(String),
     Playing,
@@ -174,6 +201,16 @@ pub struct LanState {
     pub host: Option<Host>,
     pub error: Option<String>,
     pub connecting: Option<Receiver<Result<session::Session, String>>>,
+    /// The pre-match lobby once two players are connected.
+    pub lobby: Option<Lobby>,
+    pub my_name: String,
+    /// The host's faction (art slot) before anyone has joined.
+    pub pending_faction: i32,
+    pub chat_input: String,
+    /// The guest left: host again with the same settings.
+    pub rehost: bool,
+    /// Debug only: the other end of a demo lobby.
+    pub debug_peer: Option<Lobby>,
 }
 
 pub struct Menu {
@@ -199,6 +236,8 @@ pub enum Out {
     ResumeQuick(usize),
     HostLan,
     JoinLan(std::net::SocketAddr),
+    /// Both players are ready: start the LAN match with this configuration.
+    StartLan(serde_json::Value),
     Settings,
     Resume,
     Leave,
@@ -211,7 +250,7 @@ impl Menu {
             screen: Screen::Main,
             form: QuickForm::new(),
             lan_form: QuickForm::new(),
-            lan: LanState { browser: None, hosts: vec![], host: None, error: None, connecting: None },
+            lan: LanState { browser: None, hosts: vec![], host: None, error: None, connecting: None, lobby: None, my_name: String::new(), pending_faction: cruciata_core::factions::TEMPLAR, chat_input: String::new(), rehost: false, debug_peer: None },
             campaign_difficulty: 1,
             atlas: crate::mapatlas::CampaignMap::new(),
             active_level: None,
@@ -238,12 +277,8 @@ impl Menu {
         self.lan.browser = None;
         self.lan.host = None;
         self.lan.connecting = None;
-    }
-
-    pub fn poll_lan(&mut self) {
-        if let Some(b) = &mut self.lan.browser {
-            self.lan.hosts = b.poll();
-        }
+        self.lan.lobby = None;
+        self.lan.rehost = false;
     }
 
     pub fn show(&mut self, ctx: &egui::Context, progress: &Progress, in_game: bool, in_lan: bool, can_resume_campaign: bool, icons: &Icons, banner: Option<egui::TextureId>) -> Out {
@@ -273,7 +308,7 @@ impl Menu {
                 Screen::Campaign => ("ITINERARIUM \u{b7} 1097\u{2013}1099".into(), "The pilgrim's chronicle".into()),
                 Screen::Slots => ("TRES CHRONICAE \u{b7} THREE LOCAL SESSIONS".into(), "Quickmatch".into()),
                 Screen::Creation(s) => (format!("QUICKMATCH \u{b7} SESSION {}", s + 1), "Shape the battlefield".into()),
-                Screen::LanHub | Screen::LanHost | Screen::LanMessage(_) => ("PLAYER VERSUS PLAYER \u{b7} SAME NETWORK".into(), "LAN multiplayer".into()),
+                Screen::LanHub | Screen::LanLobby | Screen::LanMessage(_) => ("PLAYER VERSUS PLAYER \u{b7} SAME NETWORK".into(), "LAN multiplayer".into()),
                 Screen::Loading(_) => ("PLEASE WAIT".into(), "Raising the standards".into()),
                 Screen::Playing => (String::new(), String::new()),
             };
@@ -331,7 +366,7 @@ impl Menu {
                 let mut child = ui.child_ui(Rect::from_min_size(Pos2::new(x0, content_top + 50.0), Vec2::new(200.0, 60.0)), egui::Layout::left_to_right(egui::Align::Min), None);
                 child.add(egui::Spinner::new().size(34.0));
             } else {
-                let wide = if campaign_screen || matches!(self.screen, Screen::Slots | Screen::Creation(_)) { 1150.0 } else { 820.0 };
+                let wide = if campaign_screen || matches!(self.screen, Screen::Slots | Screen::Creation(_) | Screen::LanLobby) { 1150.0 } else { 820.0 };
                 let area = Rect::from_min_max(Pos2::new(x0, content_top), Pos2::new((x0 + wide).min(r.max.x - 20.0), r.max.y - 60.0));
                 let mut child = ui.child_ui(area, egui::Layout::top_down(egui::Align::Min), None);
                 child.set_clip_rect(area);
@@ -345,7 +380,7 @@ impl Menu {
                             out = self.creation(ui, slot);
                         }
                         Screen::LanHub => out = self.lan_hub(ui),
-                        Screen::LanHost => out = self.lan_host(ui),
+                        Screen::LanLobby => out = self.lan_lobby(ui),
                         Screen::LanMessage(m) => {
                             let m = m.clone();
                             ui.label(RichText::new(m).size(16.0).color(col("#e4cda2")));
@@ -493,7 +528,7 @@ impl Menu {
         let fw = (total - left - 30.0).min(740.0);
         let mut form_ui = ui.child_ui(Rect::from_min_size(Pos2::new(fx, origin.y), Vec2::new(fw, 5.0 * 82.0)), egui::Layout::top_down(egui::Align::Min), None);
         let mut f = self.form.clone();
-        f.ui(&mut form_ui);
+        f.ui(&mut form_ui, false);
         self.form = f;
         let y = origin.y + 5.0 * 82.0 + 6.0;
         painter.line_segment([Pos2::new(fx, y), Pos2::new(fx + fw, y)], Stroke::new(1.0, col("#4d4a38")));
@@ -508,65 +543,6 @@ impl Menu {
         }
         ui.allocate_space(Vec2::new(total, by + 56.0 - origin.y + 10.0));
         out
-    }
-
-    fn lan_hub(&mut self, ui: &mut egui::Ui) -> Out {
-        let mut out = Out::None;
-        self.poll_lan();
-        ui.label(RichText::new("Games on your network appear here by themselves. Nothing to type, no addresses, no ports.").size(11.5).color(col(INK)));
-        if let Some(e) = &self.lan.error {
-            ui.colored_label(col("#d9604a"), e);
-        }
-        ui.add_space(10.0);
-        eyebrow(ui, "GAMES FOUND");
-        egui::Frame::none().fill(col("#2a2d24")).stroke(Stroke::new(1.0, col("#655039"))).inner_margin(egui::Margin::same(10.0)).show(ui, |ui| {
-            ui.set_width(520.0);
-            ui.set_min_height(90.0);
-            if self.lan.hosts.is_empty() {
-                ui.label(RichText::new("Looking for games\u{2026}  Ask your friend to choose \u{201c}Host a game\u{201d}.").color(col(MUTED)));
-                ui.add(egui::Spinner::new());
-            }
-            for h in self.lan.hosts.clone() {
-                ui.horizontal(|ui| {
-                    ui.label(RichText::new(&h.name).size(15.0).color(col("#e4cda2")));
-                    ui.label(RichText::new(&h.map).size(10.5).color(col(MUTED)));
-                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        if ui.button(RichText::new("Join").size(14.0)).clicked() {
-                            out = Out::JoinLan(h.addr);
-                        }
-                    });
-                });
-            }
-        });
-        ui.add_space(14.0);
-        eyebrow(ui, "OR START ONE");
-        let mut f = self.lan_form.clone();
-        f.ui(ui);
-        self.lan_form = f;
-        ui.horizontal(|ui| {
-            if ui.button(RichText::new("Host a game").size(15.0)).clicked() {
-                out = Out::HostLan;
-            }
-            if ui.button("Back to main menu").clicked() {
-                self.close_lan();
-                self.screen = Screen::Main;
-            }
-        });
-        out
-    }
-
-    fn lan_host(&mut self, ui: &mut egui::Ui) -> Out {
-        ui.label(RichText::new("Waiting for a friend to join\u{2026}").size(22.0).color(col("#e4cda2")));
-        ui.label(RichText::new(format!("Your game is visible on this network as \u{201c}{}\u{201d}. Your friend only needs to open LAN multiplayer and press Join.", session::computer_name())).size(12.0).color(col(INK)));
-        ui.add_space(10.0);
-        ui.add(egui::Spinner::new().size(34.0));
-        ui.add_space(14.0);
-        if ui.button("Cancel").clicked() {
-            self.close_lan();
-            self.screen = Screen::LanHub;
-            self.open_lan_hub();
-        }
-        Out::None
     }
 }
 
@@ -599,7 +575,7 @@ fn menu_button(ui: &mut egui::Ui, rect: Rect, title: &str, sub: &str, enabled: b
     enabled && resp.clicked()
 }
 
-fn menu_button_plain(ui: &mut egui::Ui, rect: Rect, title: &str) -> bool {
+pub(crate) fn menu_button_plain(ui: &mut egui::Ui, rect: Rect, title: &str) -> bool {
     let resp = ui.interact(rect, Id::new(("menu-plain", title)), Sense::click());
     let p = ui.painter();
     let (l, r) = if resp.hovered() { (col("#4d4836"), col("#2a3631")) } else { (col("#3c382b"), col("#202927")) };
@@ -610,7 +586,7 @@ fn menu_button_plain(ui: &mut egui::Ui, rect: Rect, title: &str) -> bool {
 }
 
 /// A full-size menu button: gradient plate and a 20px serif label.
-fn big_button(ui: &mut egui::Ui, rect: Rect, title: &str, id: (&str, usize)) -> bool {
+pub(crate) fn big_button(ui: &mut egui::Ui, rect: Rect, title: &str, id: (&str, usize)) -> bool {
     let resp = ui.interact(rect, Id::new(("big-btn", id.0, id.1)), Sense::click());
     let p = ui.painter();
     let (l, r) = if resp.hovered() { (col("#4d4836"), col("#2a3631")) } else { (col("#3c382b"), col("#202927")) };

@@ -22,7 +22,8 @@
     const A = window.CruciataArt,
       w = b.w,
       d = b.h / 0.72,
-      islamic = b.architecture === "islamic" || b.team === 1;
+      islamic = b.architecture === "islamic" || b.team === 1,
+      order = window.CruciataOrders?.style(b.team);
     const fortified = !!(b.fortified || b.wallAttachment?.fortified),
       stone = fortified ? P.bastion : P.limestone;
     const progress = b.progress < 1 ? 0.3 + 0.7 * b.progress : 1,
@@ -181,7 +182,7 @@
       m.box(x, y + 0.6, z - 1, sw + 4, 2, 2, stone);
     }
     function tiles(x, y, z, sw, sd, h = 13) {
-      m.roof(x, y, z, sw, sd, h, P.tile);
+      m.roof(x, y, z, sw, sd, h, order ? order.roof : P.tile);
       for (let row = -sd / 2 + 3; row < sd / 2; row += 6)
         for (let col = 1; col < 6; col++) {
           const a = col / 6,
@@ -753,6 +754,14 @@
       sack(-w * 0.34, d * 0.35, 2, 3);
       m.dome(-w * 0.34, d * 0.35, 8, 3, 3, "#638454", 20);
     }
+    // Orders fly their own pennants at the front corners.
+    if (
+      order &&
+      b.progress >= 1 &&
+      !["farm", "lumbercamp", "miningcamp"].includes(b.kind)
+    )
+      for (const x of [-w / 2 + 12, w / 2 - 12])
+        window.CruciataOrders.pennant(m, x, d * 0.5, b.team, 52);
     if (b.progress < 1) {
       for (const x of [-w * 0.49, w * 0.49])
         for (const y of [-d * 0.48, d * 0.48])

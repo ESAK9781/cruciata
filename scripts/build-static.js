@@ -13,7 +13,7 @@ for (const directory of ["src", "assets", "docs"])
     recursive: true,
     // The native client's Colossus pages and JSON manifests are not used by the web game.
     filter: (source) =>
-      !/[\\/]assets[\\/]atlas[\\/](colossus[^\\/]*|manifest\.json)$/.test(
+      !/[\\/]assets[\\/]atlas[\\/](colossus[^\\/]*|orders[^\\/]*|manifest\.json)$/.test(
         source,
       ),
   });
