@@ -16,4 +16,4 @@ fn golden_state_hash() {
     assert_eq!(h, GOLDEN, "simulation hash changed (or differs on this platform): {h:#x}");
 }
 
-const GOLDEN: u64 = 0x8ede1bda1e3729de;
+const GOLDEN: u64 = 0x5d6ef0d14a4a1e1c;

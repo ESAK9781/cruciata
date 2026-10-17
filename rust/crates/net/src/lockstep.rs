@@ -9,7 +9,8 @@ use cruciata_core::sim::{Sim, STEP};
 use std::collections::BTreeMap;
 
 pub const TURN_STEPS: u32 = 2;
-pub const DELAY: u32 = 2;
+/// Three turns (about 100 ms) of slack: a slow frame on either machine no longer stalls both.
+pub const DELAY: u32 = 3;
 const TURN_DT: f64 = STEP * TURN_STEPS as f64;
 const HASH_EVERY: u32 = 15;
 

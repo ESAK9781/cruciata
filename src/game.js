@@ -1981,7 +1981,11 @@
         : null;
     obstacleIndex = null;
     objectIndex.clear();
-    const l = LEVELS[state.level],
+    const l = levelFor(
+        state.level,
+        state.mode === "quickmatch" ? state.config : null,
+        H,
+      ),
       random = seeded(state.seed);
     decorations = [];
     terrain = Art.terrain(
@@ -2992,9 +2996,9 @@
     actionTurns.clear();
     formationRoutes.clear();
     sessionActive = true;
-    const l = LEVELS[index];
     W = quickConfig?.width || 12800;
     H = quickConfig?.height || 8800;
+    const l = levelFor(index, quickConfig, H);
     nav = new window.CruciataNavigation(W, H);
     uid = 0;
     selected.clear();
@@ -3235,9 +3239,10 @@
         );
       state.sites = [];
       state.buildings = state.buildings.slice(0, 5);
-      state.buildings[1] = makeBuilding("house", 1, W - 850, 800);
+      const enemyY = quickHeights(quickConfig.seed || 1888, H).enemy;
+      state.buildings[1] = makeBuilding("house", 1, W - 850, enemyY);
       state.buildings[1].x = W - 850;
-      state.buildings[1].y = 800;
+      state.buildings[1].y = enemyY;
       state.resources = {
         food: quickConfig.resources,
         wood: quickConfig.resources,
@@ -3612,6 +3617,29 @@
       } catch {}
     });
   })();
+  // Quick matches and LAN games put each side at its own seeded height along its edge of the
+  // map, so the opposing base is never in the same place twice (mirrored in worldgen.rs).
+  function quickHeights(seed, height) {
+    const mix = (salt) => {
+      let h = Math.imul((seed | 0) ^ salt, 0x85ebca6b);
+      h ^= h >>> 13;
+      h = Math.imul(h, 0xc2b2ae35);
+      h ^= h >>> 16;
+      return (h >>> 0) / 4294967296;
+    };
+    const lo = 1000,
+      span = height - 2000;
+    return {
+      player: Math.floor(lo + mix(0x9e3779b9) * span),
+      enemy: Math.floor(lo + mix(0x7f4a7c15) * span),
+    };
+  }
+  function levelFor(index, config, height) {
+    const base = LEVELS[index];
+    if (!config) return base;
+    const ys = quickHeights(config.seed || 1888, height);
+    return { ...base, camp: { x: base.camp.x, y: ys.player } };
+  }
   function setMissionUI() {
     const l = LEVELS[state.level];
     $("chapter-label").textContent = `CHAPTER ${l.roman} · ${l.sub}`;

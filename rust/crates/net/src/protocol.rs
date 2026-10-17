@@ -2,7 +2,7 @@ use cruciata_core::lockstep::PlayerCommand;
 use serde::{Deserialize, Serialize};
 
 /// Bumped whenever simulation rules or the wire format change.
-pub const PROTOCOL: u32 = 2;
+pub const PROTOCOL: u32 = 3;
 pub const GAME_PORT: u16 = 47814;
 pub const DISCOVERY_PORT: u16 = 47813;
 pub const MAGIC: &str = "CRUCIATA-LAN";

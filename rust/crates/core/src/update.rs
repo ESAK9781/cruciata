@@ -116,6 +116,9 @@ impl Sim {
     }
 
     pub fn update_scouting(&mut self, dt: f64) {
+        if self.state.scouting_groups.get_or_insert_with(Vec::new).is_empty() {
+            return;
+        }
         let d = data();
         let groups_exist = {
             let ids: Vec<ScoutGroup> = self.state.scouting_groups.clone().unwrap_or_default();
@@ -137,6 +140,12 @@ impl Sim {
                 }
                 gg.think = 0.6;
             }
+            if members.is_empty() {
+                continue;
+            }
+            // The company belongs to whoever owns its soldiers (the LAN guest is team 1).
+            let team = self.state.units[members[0]].team;
+            let foe = 1 - team;
             let n = members.len() as f64;
             let mut center = Pt::new(0.0, 0.0);
             for &m in &members {
@@ -148,7 +157,7 @@ impl Sim {
                 .units
                 .iter()
                 .enumerate()
-                .filter(|(_, u)| u.team == 1 && u.hp > 0.0 && d.ty(u.ty).damage > 0.0 && self.fog.sees(u.x, u.y) && members.iter().any(|&m| dist(self.unit_pt(m), Pt::new(u.x, u.y)) < 240.0))
+                .filter(|(_, u)| u.team == foe && u.hp > 0.0 && d.ty(u.ty).damage > 0.0 && self.observer_sees(team, u.x, u.y) && members.iter().any(|&m| dist(self.unit_pt(m), Pt::new(u.x, u.y)) < 240.0))
                 .map(|(i, _)| i)
                 .collect();
             threats.sort_by(|&a, &b| cmp(dist(self.unit_pt(a), center), dist(self.unit_pt(b), center)));
@@ -165,7 +174,10 @@ impl Sim {
                 };
                 let a = match attacker {
                     Some(p) => atan2(center.y - p.y, center.x - p.x),
-                    None => atan2(self.state.buildings[0].y - center.y, self.state.buildings[0].x - center.x),
+                    None => {
+                        let home = self.state.buildings.iter().find(|b| b.team == team && b.kind == BKind::Towncenter).unwrap_or(&self.state.buildings[0]);
+                        atan2(home.y - center.y, home.x - center.x)
+                    }
                 };
                 let goal = self.find_free(Pt::new(center.x + cos(a) * 600.0, center.y + sin(a) * 600.0));
                 self.scout_company(gi, &members, goal);
@@ -194,7 +206,7 @@ impl Sim {
                 let mut x = 240.0;
                 while x < w - 120.0 {
                     let p = Pt::new(x, y);
-                    if self.fog.remembers(x, y) || dist(center, p) < 180.0 || !self.ground_free(x, y, 24.0) {
+                    if (if team == 0 { self.fog.remembers(x, y) } else { self.enemy_fog.remembers(x, y) }) || dist(center, p) < 180.0 || !self.ground_free(x, y, 24.0) {
                         x += 240.0;
                         continue;
                     }

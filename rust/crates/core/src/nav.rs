@@ -140,6 +140,9 @@ pub struct Nav {
     pair_cache: HashMap<u64, bool, std::hash::BuildHasherDefault<crate::world::BucketHasher>>,
     corridors: IndexMap<String, IndexSet<usize>>,
     path_cache: IndexMap<String, Vec<Pt>>,
+    /// Searches that found nothing, by coarse start/goal cell -> sim time; a unit creeping a few
+    /// units per step must not repeat a 40 ms failing search every step.
+    failed: HashMap<(i32, i32, i32, i32), f64>,
     pub pending: IndexMap<String, Job>,
     pub jobs: Vec<String>,
     owner_keys: HashMap<u32, String>,
@@ -193,6 +196,7 @@ impl Nav {
             pair_cache: HashMap::default(),
             corridors: IndexMap::new(),
             path_cache: IndexMap::new(),
+            failed: HashMap::new(),
             pending: IndexMap::new(),
             jobs: Vec::new(),
             owner_keys: HashMap::new(),
@@ -296,6 +300,7 @@ impl Nav {
             }
         }
         self.path_cache.clear();
+        self.failed.clear();
         let mut unique: IndexMap<(u64, u64), Pt> = IndexMap::new();
         for p in waypoints {
             if test(p.x, p.y) {
@@ -1128,6 +1133,12 @@ impl Nav {
         if let Some(c) = self.path_cache.get(&key) {
             return Some(c.clone());
         }
+        let coarse = ((start.x / 48.0) as i32, (start.y / 48.0) as i32, (destination.x / 48.0) as i32, (destination.y / 48.0) as i32);
+        if let Some(&at) = self.failed.get(&coarse) {
+            if now - at < 3.0 {
+                return Some(Vec::new());
+            }
+        }
         let existing = self.pending.contains_key(&key);
         let existing_priority = self.pending.get(&key).map(|j| j.priority).unwrap_or(0);
         let reprioritize = !existing || priority > existing_priority;
@@ -1211,11 +1222,18 @@ impl Nav {
             let calls = std::cell::Cell::new(0u64);
             let counted = |x: f64, y: f64| { calls.set(calls.get() + 1); phys(x, y) };
             let path = self.find_route(job.start, job.destination, false, &counted);
-            if std::env::var_os("NAV_TRACE").is_some() && t0.elapsed().as_millis() > 20 {
+            if t0.elapsed().as_millis() > 20 && std::env::var_os("NAV_TRACE").is_some() {
                 eprintln!("slow route {:.0}ms {:?}->{:?} len {} pending {}", t0.elapsed().as_secs_f64() * 1000.0, job.start, job.destination, path.len(), self.jobs.len());
             }
-            if std::env::var_os("NAV_TRACE").is_some() && t0.elapsed().as_millis() > 20 {
+            if t0.elapsed().as_millis() > 20 && std::env::var_os("NAV_TRACE").is_some() {
                 eprintln!("  phys calls {}", calls.get());
+            }
+            if job.revision == self.revision && path.is_empty() {
+                let c = &job;
+                self.failed.insert(((c.start.x / 48.0) as i32, (c.start.y / 48.0) as i32, (c.destination.x / 48.0) as i32, (c.destination.y / 48.0) as i32), now);
+                if self.failed.len() > 2048 {
+                    self.failed.clear();
+                }
             }
             if job.revision == self.revision {
                 if self.path_cache.len() >= 512 {

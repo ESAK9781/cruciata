@@ -3,7 +3,7 @@
 //! (`startLevel` and everything it calls).
 
 use crate::build::Plot;
-use crate::data::data;
+use crate::data::{data, Level};
 use crate::js::{clamp, cos, hypot, round, sin, Seeded};
 use crate::model::*;
 use crate::movement::dist;
@@ -162,12 +162,35 @@ fn biome_terrain_art(state: &State) -> f64 {
     }
 }
 
+/// Quick matches and LAN games put each side at its own seeded height along its edge of the
+/// map (mirrors `quickHeights` in `src/game.js`): returns (player y, enemy y).
+pub fn quick_heights(seed: f64, height: f64) -> (f64, f64) {
+    let mix = |salt: i32| -> f64 {
+        let mut h = ((seed as i64 as i32) ^ salt).wrapping_mul(0x85ebca6bu32 as i32);
+        h ^= ((h as u32) >> 13) as i32;
+        h = h.wrapping_mul(0xc2b2ae35u32 as i32);
+        h ^= ((h as u32) >> 16) as i32;
+        (h as u32) as f64 / 4294967296.0
+    };
+    let span = height - 2000.0;
+    ((1000.0 + mix(0x9e3779b9u32 as i32) * span).floor(), (1000.0 + mix(0x7f4a7c15u32 as i32) * span).floor())
+}
+
+/// The level record, with the player's camp moved to its seeded height in quick matches.
+fn level_for(index: usize, config: Option<&QuickConfig>, height: f64) -> Level {
+    let mut l = data().levels[index].clone();
+    if let Some(q) = config {
+        l.camp.1 = quick_heights(q.seed, height).0;
+    }
+    l
+}
+
 impl Sim {
     /// Build a new game (`startLevel`). `config` is a quick-match configuration.
     pub fn start_level(index: usize, config: Option<Value>, difficulty: &str, paused: bool) -> Sim {
         let d = data();
-        let l = d.levels[index].clone();
         let quick = config.as_ref().map(QuickConfig::parse);
+        let l = level_for(index, quick.as_ref(), quick.as_ref().map(|q| q.height).unwrap_or(0.0));
         let mut state = State::default();
         state.version = 3.0;
         state.mode = if quick.is_some() { "quickmatch".into() } else { "campaign".into() };
@@ -299,10 +322,11 @@ impl Sim {
             }
             sim.state.sites.clear();
             sim.state.buildings.truncate(5);
-            let house = sim.make_building(BKind::House, 1, w - 850.0, 800.0, 1.0);
+            let enemy_y = quick_heights(q.seed, h).1;
+            let house = sim.make_building(BKind::House, 1, w - 850.0, enemy_y, 1.0);
             sim.state.buildings[1] = house;
             sim.state.buildings[1].x = w - 850.0;
-            sim.state.buildings[1].y = 800.0;
+            sim.state.buildings[1].y = enemy_y;
             let r = q.resources;
             sim.state.resources = Resources { food: r, wood: r, gold: r, stone: r };
             sim.state.enemy.resources = sim.state.resources;
@@ -961,7 +985,8 @@ impl Sim {
         let (w, h) = (self.geo.w, self.geo.h);
         self.geo.index = None;
         self.object_index.clear();
-        let l = d.levels[self.state.level].clone();
+        let quick = if self.state.mode == "quickmatch" { self.state.config.as_ref().map(QuickConfig::parse) } else { None };
+        let l = level_for(self.state.level, quick.as_ref(), h);
         let mut random = Seeded::new(self.state.seed);
         self.geo.decorations.clear();
         self.decor_gen += 1;
