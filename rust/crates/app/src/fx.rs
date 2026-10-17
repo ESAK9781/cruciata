@@ -74,6 +74,25 @@ struct Debris {
     done: bool,
 }
 
+/// A triangular piece of a building sprite that flew apart when it fell.
+struct Shard {
+    tex: egui::TextureId,
+    uv: [Pos2; 3],
+    v: [(f64, f64); 3],
+    x: f64,
+    y: f64,
+    z: f64,
+    vx: f64,
+    vy: f64,
+    vz: f64,
+    rot: f64,
+    vr: f64,
+    delay: f64,
+    age: f64,
+    bounced: bool,
+    land: f64,
+}
+
 struct Ring {
     x: f64,
     y: f64,
@@ -111,6 +130,8 @@ impl Look<'_> {
 pub struct Fx {
     parts: Vec<P>,
     debris: Vec<Debris>,
+    shards: Vec<Shard>,
+    fallen_ids: Vec<u32>,
     rings: Vec<Ring>,
     sprites: Vec<TextureHandle>,
     units: HashMap<u32, UnitSeen>,
@@ -351,8 +372,9 @@ impl Fx {
                 }
             }
         }
-        let fallen: Vec<(f64, f64, BKind)> = self.buildings.iter().filter(|(id, _)| !now.contains_key(id)).map(|(_, v)| *v).collect();
-        for (x, y, _) in fallen {
+        let fallen: Vec<(u32, (f64, f64, BKind))> = self.buildings.iter().filter(|(id, _)| !now.contains_key(id)).map(|(id, v)| (*id, *v)).collect();
+        for (id, (x, y, _)) in fallen {
+            self.fallen_ids.push(id);
             if !(look.sees)(x, y) {
                 continue;
             }
@@ -444,6 +466,35 @@ impl Fx {
             }
         }
         self.debris.retain(|d| !d.done);
+        for s in &mut self.shards {
+            s.age += dt;
+            if s.age < s.delay {
+                continue;
+            }
+            if s.land < 0.0 {
+                s.vz -= 720.0 * dt;
+                s.z += s.vz * dt;
+                s.x += s.vx * dt;
+                s.y += s.vy * dt;
+                s.rot += s.vr * dt;
+                if s.z <= 0.0 {
+                    s.z = 0.0;
+                    if s.bounced {
+                        s.land = s.age;
+                        s.vx = 0.0;
+                        s.vy = 0.0;
+                        s.vr = 0.0;
+                    } else {
+                        s.bounced = true;
+                        s.vz *= -0.3;
+                        s.vx *= 0.5;
+                        s.vy *= 0.5;
+                        s.vr *= 0.4;
+                    }
+                }
+            }
+        }
+        self.shards.retain(|s| s.land < 0.0 || 1.0 - (s.age - s.land - 1.4) / 3.2 > 0.0);
         for r in &mut self.rings {
             r.t += dt;
         }
@@ -476,6 +527,7 @@ impl Fx {
     pub fn clear(&mut self) {
         self.parts.clear();
         self.debris.clear();
+        self.shards.clear();
         self.rings.clear();
         self.units.clear();
         self.buildings.clear();
@@ -483,7 +535,115 @@ impl Fx {
         self.fire_at.clear();
     }
 
+    /// Ids of buildings that fell since the last call.
+    pub fn take_fallen(&mut self) -> Vec<u32> {
+        std::mem::take(&mut self.fallen_ids)
+    }
+
+    /// Cut the frames a building was drawn with into jittered triangles that start
+    /// exactly where their pixels were (web `buildShards`).
+    pub fn shatter(&mut self, frames: &[crate::paint::Drawn], atlas: &mut crate::atlas::Atlas) {
+        let mut alpha_pages: HashMap<u16, Vec<u8>> = HashMap::new();
+        for d in frames {
+            let Some((f, Some(tex))) = atlas.lookup(&d.key) else { continue };
+            let Some(alpha) = (match alpha_pages.get(&f.page) {
+                Some(a) => Some(a),
+                None => {
+                    if let Some(a) = atlas.page_alpha(f.page) {
+                        alpha_pages.insert(f.page, a);
+                    }
+                    alpha_pages.get(&f.page)
+                }
+            }) else { continue };
+            let page = crate::atlas::PAGE;
+            let (res, scale) = (f.res as f64, d.scale);
+            let (lx0, ly0) = ((f.dx as f64 - d.ox) * scale, (f.dy as f64 - d.oy) * scale);
+            let (ww, wh) = (f.w as f64 / res * scale, f.h as f64 / res * scale);
+            let cell_w = (((ww * wh) / 70.0).sqrt()).clamp(10.0, 60.0);
+            let cell = cell_w * res / scale;
+            let (bw, bh) = (f.w as f64, f.h as f64);
+            let cols = ((bw / cell).ceil() as usize).max(1);
+            let rows = ((bh / cell).ceil() as usize).max(1);
+            let mut seed = (self.rnd() * 4294967295.0) as u32;
+            let mut rnd = move || {
+                seed = seed.wrapping_mul(1664525).wrapping_add(1013904223);
+                (seed >> 8) as f64 / 16777216.0
+            };
+            let mut grid: Vec<Vec<(f64, f64)>> = Vec::new();
+            for j in 0..=rows {
+                let mut row = Vec::new();
+                for i in 0..=cols {
+                    let edge = i == 0 || j == 0 || i == cols || j == rows;
+                    let jx = if edge { 0.0 } else { (rnd() - 0.5) * cell * 0.62 };
+                    let jy = if edge { 0.0 } else { (rnd() - 0.5) * cell * 0.62 };
+                    row.push((i as f64 * bw / cols as f64 + jx, j as f64 * bh / rows as f64 + jy));
+                }
+                grid.push(row);
+            }
+            let opaque = |x: f64, y: f64| -> bool {
+                let (px, py) = ((f.x as f64 + x) as i64, (f.y as f64 + y) as i64);
+                px >= 0 && py >= 0 && px < page as i64 && py < page as i64 && alpha[(py * page as i64 + px) as usize] > 20
+            };
+            for j in 0..rows {
+                for i in 0..cols {
+                    let (a, b, c, e) = (grid[j][i], grid[j][i + 1], grid[j + 1][i], grid[j + 1][i + 1]);
+                    let tris = if (i + j) % 2 == 1 { [[a, b, c], [b, e, c]] } else { [[a, b, e], [a, e, c]] };
+                    for tri in tris {
+                        let (cx, cy) = ((tri[0].0 + tri[1].0 + tri[2].0) / 3.0, (tri[0].1 + tri[1].1 + tri[2].1) / 3.0);
+                        if !(opaque(cx, cy) || tri.iter().any(|v| opaque((v.0 + cx) / 2.0, (v.1 + cy) / 2.0))) {
+                            continue;
+                        }
+                        let (lx, ly) = (lx0 + cx / res * scale, ly0 + cy / res * scale);
+                        let up = if ly < 0.0 { -ly } else { 0.0 };
+                        let uv = |v: (f64, f64)| Pos2::new((f.x + v.0 as f32) / page, (f.y + v.1 as f32) / page);
+                        let loc = |v: (f64, f64)| ((v.0 - cx) / res * scale, (v.1 - cy) / res * scale);
+                        let (r1, r2, r3, r4, r5, r6) = (self.rnd(), self.rnd(), self.rnd(), self.rnd(), self.rnd(), self.rnd());
+                        self.shards.push(Shard {
+                            tex,
+                            uv: [uv(tri[0]), uv(tri[1]), uv(tri[2])],
+                            v: [loc(tri[0]), loc(tri[1]), loc(tri[2])],
+                            x: d.wx + lx,
+                            y: d.wy + if ly > 0.0 { ly } else { 0.0 },
+                            z: up,
+                            vx: (lx / (ww / 2.0 + 1.0)) * (50.0 + r1 * 130.0) + (r2 - 0.5) * 60.0,
+                            vy: (r3 - 0.5) * 70.0 + if ly > 0.0 { ly * 0.8 } else { 0.0 },
+                            vz: 60.0 + r4 * 200.0 + up * 0.7,
+                            rot: 0.0,
+                            vr: (r5 - 0.5) * 10.0,
+                            delay: r6 * 0.18,
+                            age: 0.0,
+                            bounced: false,
+                            land: -1.0,
+                        });
+                    }
+                }
+            }
+        }
+        if self.shards.len() > 1400 {
+            let cut = self.shards.len() - 1400;
+            self.shards.drain(0..cut);
+        }
+    }
+
     pub fn draw(&self, cv: &Canvas) {
+        for s in &self.shards {
+            if !cv.view.on_screen(s.x, s.y - s.z, 90.0) {
+                continue;
+            }
+            let alpha = if s.land < 0.0 { 1.0 } else { (1.0 - (s.age - s.land - 1.4) / 3.2).clamp(0.0, 1.0) };
+            let tint = rgba(255, 255, 255, (alpha * 255.0) as u8);
+            let c = cv.p(s.x, s.y - s.z);
+            let (sin, cos) = s.rot.sin_cos();
+            let z = cv.view.zoom;
+            let mut mesh = Mesh::with_texture(s.tex);
+            for k in 0..3 {
+                let (vx, vy) = s.v[k];
+                let pos = Pos2::new(c.x + ((vx * cos - vy * sin) * z) as f32, c.y + ((vx * sin + vy * cos) * z) as f32);
+                mesh.vertices.push(egui::epaint::Vertex { pos, uv: s.uv[k], color: tint });
+            }
+            mesh.add_triangle(0, 1, 2);
+            cv.painter.add(Shape::mesh(mesh));
+        }
         for p in &self.parts {
             let radius = p.r * (1.0 + p.growth * p.t / p.life);
             if !cv.view.on_screen(p.x, p.y, radius.max(20.0)) {

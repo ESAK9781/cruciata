@@ -144,3 +144,31 @@ test("cutting a forest's edge trees removes their tile and exposes the ones behi
   expect(result.gone).toBe(true);
   expect(result.after).toBe(result.before - 1);
 });
+
+test("a falling building shatters into shards that land and fade, leaving the rubble", async ({
+  page,
+}) => {
+  await begin(page);
+  const result = await page.evaluate(async () => {
+    const I = cruciata.internals();
+    const b = I.state.buildings.find(
+      (x) => x.team === 0 && x.kind === "barracks" && x.progress >= 1,
+    );
+    cruciata.camera(b.x, b.y);
+    cruciata.liveFrame(2);
+    I.damage(b, 1e9, { id: -1, team: 1 }, true);
+    for (let i = 0; i < 3; i++)
+      await new Promise((r) => requestAnimationFrame(r));
+    const spawned = I.shards().length;
+    const start = I.shards()[0] && { z: I.shards()[0].z, x: I.shards()[0].x };
+    cruciata.step(1.2);
+    const midAir = I.shards().some((s) => s.land < 0);
+    cruciata.step(8);
+    const landedAll = I.shards().every((s) => s.land >= 0);
+    cruciata.step(8);
+    return { spawned, midAir, landedAll, left: I.shards().length, hp: b.hp };
+  });
+  expect(result.hp).toBe(0);
+  expect(result.spawned).toBeGreaterThan(20);
+  expect(result.left).toBe(0);
+});

@@ -2987,6 +2987,8 @@
     if (state.waveTimer <= 0) state.waveTimer = rules.interval;
   }
   function startLevel(index, intro = true) {
+    shards = [];
+    shatterQueue = [];
     actionTurns.clear();
     formationRoutes.clear();
     sessionActive = true;
@@ -7249,6 +7251,7 @@
       // Fallen masonry stops blocking at once (hp check); the route grid follows
       // within a third of a second so sieges do not rebuild it every shell.
       state.navCombat = true;
+      queueShatter(target);
       if (isCapital(target)) {
         finish(target.team !== 0);
         return;
@@ -7713,6 +7716,161 @@
       });
   }
   // Thrown masonry: cosmetic arcs with a ground shadow and one bounce.
+  // Shatter effect: when a building falls, its finished sprite is cut into
+  // jittered triangles. Each shard starts exactly where its pixels were, flies
+  // outward, bounces once, lies where it landed and then slowly fades. The
+  // wreck itself is the ordinary rubble sprite; shards are cosmetic and never
+  // saved. Snapshots queue in `damage` and are cut on the next rendered frame.
+  let shards = [],
+    shatterQueue = [];
+  function queueShatter(b) {
+    if (b.progress < 1 || shatterQueue.length > 60) return;
+    shatterQueue.push({ ...b });
+  }
+  function buildShards(snap) {
+    const vh = Art.visualHeight(snap),
+      w = Math.ceil(Math.max(200, snap.w + 120)),
+      h = Math.ceil(Math.max(240, snap.h + vh + 90)),
+      ox = w / 2,
+      oy = snap.h / 2 + vh + 55,
+      img = document.createElement("canvas");
+    img.width = w;
+    img.height = h;
+    const g = img.getContext("2d", { willReadFrequently: true });
+    g.translate(ox, oy);
+    Art.structure(
+      g,
+      { ...snap, x: 0, y: 0, hp: snap.maxHp || 1, progress: 1 },
+      state.time,
+    );
+    const data = g.getImageData(0, 0, w, h).data,
+      alpha = (x, y) =>
+        x < 0 || y < 0 || x >= w || y >= h
+          ? 0
+          : data[((y | 0) * w + (x | 0)) * 4 + 3];
+    let x0 = w,
+      y0 = h,
+      x1 = 0,
+      y1 = 0;
+    for (let y = 0; y < h; y += 2)
+      for (let x = 0; x < w; x += 2)
+        if (alpha(x, y) > 20) {
+          x0 = Math.min(x0, x);
+          y0 = Math.min(y0, y);
+          x1 = Math.max(x1, x);
+          y1 = Math.max(y1, y);
+        }
+    if (x1 <= x0 || y1 <= y0) return;
+    let seed = ((snap.id || 1) * 2654435761) >>> 0;
+    const rnd = () => {
+        seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0;
+        return (seed >>> 8) / 16777216;
+      },
+      bw = x1 - x0 + 2,
+      bh = y1 - y0 + 2,
+      cell = clamp(Math.sqrt((bw * bh) / 70), 10, 60),
+      cols = Math.max(1, Math.ceil(bw / cell)),
+      rows = Math.max(1, Math.ceil(bh / cell)),
+      grid = [];
+    for (let j = 0; j <= rows; j++) {
+      grid.push([]);
+      for (let i = 0; i <= cols; i++) {
+        const edge = i === 0 || j === 0 || i === cols || j === rows;
+        grid[j].push([
+          x0 + (i * bw) / cols + (edge ? 0 : (rnd() - 0.5) * cell * 0.62),
+          y0 + (j * bh) / rows + (edge ? 0 : (rnd() - 0.5) * cell * 0.62),
+        ]);
+      }
+    }
+    const tris = [];
+    for (let j = 0; j < rows; j++)
+      for (let i = 0; i < cols; i++) {
+        const a = grid[j][i],
+          b = grid[j][i + 1],
+          c = grid[j + 1][i],
+          d = grid[j + 1][i + 1];
+        if ((i + j) % 2) tris.push([a, b, c], [b, d, c]);
+        else tris.push([a, b, d], [a, d, c]);
+      }
+    for (const tri of tris) {
+      const cx = (tri[0][0] + tri[1][0] + tri[2][0]) / 3,
+        cy = (tri[0][1] + tri[1][1] + tri[2][1]) / 3;
+      if (!(
+        alpha(cx, cy) > 20 ||
+        tri.some((v) => alpha((v[0] + cx) / 2, (v[1] + cy) / 2) > 20)
+      ))
+        continue;
+      const lx = cx - ox,
+        ly = cy - oy,
+        up = ly < 0 ? -ly : 0;
+      shards.push({
+        img,
+        cx,
+        cy,
+        tri: tri.map((v) => [v[0] - cx, v[1] - cy]),
+        x: snap.x + lx,
+        y: snap.y + (ly > 0 ? ly : 0),
+        z: up,
+        vx: (lx / (snap.w / 2 + 1)) * (50 + rnd() * 130) + (rnd() - 0.5) * 60,
+        vy: (rnd() - 0.5) * 70 + (ly > 0 ? ly * 0.8 : 0),
+        vz: 60 + rnd() * 200 + up * 0.7,
+        rot: 0,
+        vr: (rnd() - 0.5) * 10,
+        delay: rnd() * 0.18,
+        age: 0,
+        bounced: false,
+        land: -1,
+        alpha: 1,
+      });
+    }
+    if (shards.length > 1400) shards.splice(0, shards.length - 1400);
+  }
+  function updateShards(dt) {
+    if (!shards.length) return;
+    for (const s of shards) {
+      s.age += dt;
+      if (s.age < s.delay) continue;
+      if (s.land < 0) {
+        s.vz -= 720 * dt;
+        s.z += s.vz * dt;
+        s.x += s.vx * dt;
+        s.y += s.vy * dt;
+        s.rot += s.vr * dt;
+        if (s.z <= 0) {
+          s.z = 0;
+          if (s.bounced) {
+            s.land = s.age;
+            s.vx = s.vy = s.vr = 0;
+          } else {
+            s.bounced = true;
+            s.vz *= -0.3;
+            s.vx *= 0.5;
+            s.vy *= 0.5;
+            s.vr *= 0.4;
+          }
+        }
+      } else s.alpha = 1 - (s.age - s.land - 1.4) / 3.2;
+    }
+    shards = shards.filter((s) => s.alpha > 0);
+  }
+  function drawShards() {
+    for (const s of shards) {
+      if (!onScreen(s, 90)) continue;
+      ctx.save();
+      ctx.globalAlpha = Math.min(1, s.alpha);
+      ctx.translate(s.x, s.y - s.z);
+      ctx.rotate(s.rot);
+      ctx.beginPath();
+      ctx.moveTo(s.tri[0][0], s.tri[0][1]);
+      ctx.lineTo(s.tri[1][0], s.tri[1][1]);
+      ctx.lineTo(s.tri[2][0], s.tri[2][1]);
+      ctx.closePath();
+      ctx.clip();
+      ctx.drawImage(s.img, -s.cx, -s.cy);
+      ctx.restore();
+    }
+    ctx.globalAlpha = 1;
+  }
   function spawnDebris(x, y, count, speed = 1) {
     if (!visualParticle({ x, y, r: 200 })) return;
     const debris = (state.debris ||= []);
@@ -10341,6 +10499,7 @@
       }
       state.debris = state.debris.filter((d) => !d.done);
     }
+    updateShards(dt);
     if (state.alerts?.length) {
       for (const a of state.alerts) a.t += dt;
       state.alerts = state.alerts.filter((a) => a.t < 8);
@@ -12202,6 +12361,14 @@
       }
     }
     Art.flushFrame();
+    while (shatterQueue.length) {
+      const snap = shatterQueue.shift();
+      if (
+        onScreen(snap, Math.max(120, Art.visualHeight(snap) + snap.h / 2)) &&
+        (snap.team === 0 || playerSees(snap))
+      )
+        buildShards(snap);
+    }
     // Smoke and sparks remain behind arrowheads and boulders in the canvas stack.
     for (const p of state.particles)
       if (onScreen(p, Math.max(20, p.r * (1 + (p.growth || 0))))) {
@@ -12209,6 +12376,7 @@
         Art.particle(ctx, p);
       }
     ctx.globalAlpha = 1;
+    drawShards();
     for (const d of state.debris || [])
       if (onScreen(d, 60)) {
         Art.ellipse(ctx, d.x, d.y, d.r * 0.9, d.r * 0.45, "#25332355");
@@ -13471,6 +13639,9 @@
             unitTree: () => unitTree,
             uid: () => uid,
             rebuildNavigation,
+            damage,
+            shards: () => shards,
+            shatterQueue: () => shatterQueue,
           }
         : null,
   };

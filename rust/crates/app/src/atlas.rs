@@ -102,6 +102,13 @@ impl Atlas {
         &self.dir
     }
 
+    /// Alpha plane (1024 x 1024) of a page, decoded from disk (used when a building shatters).
+    pub fn page_alpha(&self, page: u16) -> Option<Vec<u8>> {
+        let name = self.pages.get(page as usize)?;
+        let img = image::open(self.dir.join("atlas").join(name)).ok()?.to_rgba8();
+        Some(img.pixels().map(|p| p[3]).collect())
+    }
+
     pub fn page_count(&self) -> usize {
         self.pages.len()
     }

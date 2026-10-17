@@ -39,14 +39,27 @@ enum Item {
     Shape(Shape),
 }
 
+/// One atlas frame that was queued (kept so a falling building can be cut into shards).
+#[derive(Clone)]
+pub struct Drawn {
+    pub key: String,
+    pub ox: f64,
+    pub oy: f64,
+    pub wx: f64,
+    pub wy: f64,
+    pub scale: f64,
+}
+
 /// Collects drawables with a depth (world y) and flushes them in order.
 pub struct Batch {
     items: Vec<(f32, u32, Item)>,
+    pub record: bool,
+    pub drawn: Vec<Drawn>,
 }
 
 impl Batch {
     pub fn new() -> Batch {
-        Batch { items: Vec::with_capacity(4096) }
+        Batch { items: Vec::with_capacity(4096), record: false, drawn: Vec::new() }
     }
 
     pub fn len(&self) -> usize {
@@ -58,6 +71,9 @@ impl Batch {
     pub fn frame(&mut self, atlas: &mut Atlas, view: &View, key: &str, ox: f64, oy: f64, wx: f64, wy: f64, scale: f64, depth: f64, tint: Color32) -> bool {
         let Some((f, tex)) = atlas.lookup(key) else { return false };
         let Some(tex) = tex else { return true };
+        if self.record {
+            self.drawn.push(Drawn { key: key.to_string(), ox, oy, wx, wy, scale });
+        }
         let s = f.res as f64;
         let tl = view.to_screen(wx + (f.dx as f64 - ox) * scale, wy + (f.dy as f64 - oy) * scale);
         let size = egui::vec2((f.w as f64 / s * scale * view.zoom) as f32, (f.h as f64 / s * scale * view.zoom) as f32);

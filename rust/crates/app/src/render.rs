@@ -61,6 +61,7 @@ pub struct App {
     colossus_flags: Vec<TextureHandle>,
     cover: Vec<crate::extras::Patch>,
     fx: crate::fx::Fx,
+    shard_src: HashMap<u32, Vec<crate::paint::Drawn>>,
     water: Option<TextureHandle>,
     tile: Option<TextureHandle>,
     walls: crate::wall3d::WallCache,
@@ -68,6 +69,7 @@ pub struct App {
     gates: crate::gate3d::GateCache,
     desync_warned: bool,
     demo_at: Option<u8>,
+    shatter_demo: u8,
     fps_mark: Option<(std::time::Instant, u32)>,
     /// Per-phase milliseconds since the last report (`CRUCIATA_FPS`): sim, fx, fog, world, minimap.
     prof: [f64; 6],
@@ -352,6 +354,7 @@ impl App {
             colossus_flags: Vec::new(),
             cover: Vec::new(),
             fx: Default::default(),
+            shard_src: HashMap::new(),
             water: None,
             tile: None,
             walls: Default::default(),
@@ -359,6 +362,7 @@ impl App {
             gates: Default::default(),
             desync_warned: false,
             demo_at: None,
+            shatter_demo: 0,
             fps_mark: None,
             prof: [0.0; 6],
             slow_frames: 0,
@@ -1046,9 +1050,22 @@ impl App {
         }
         // ---- structures ----
         let known: Vec<&Building> = sim.state.buildings.iter().filter_map(|b| if b.team == me || g.sees(b.x, b.y) { Some(b) } else { g.fog().known.get(&b.id) }).collect();
+        // The frames each finished building was last drawn with, so a falling one can shatter.
+        let mut shard_src = std::mem::take(&mut self.shard_src);
+        let mut shard_prev: Option<u32> = None;
+        batch.record = true;
         for b in &known {
+            if let Some(id) = shard_prev.take() {
+                if !batch.drawn.is_empty() {
+                    shard_src.insert(id, std::mem::take(&mut batch.drawn));
+                }
+            }
+            batch.drawn.clear();
             if !view.on_screen(b.x, b.y, 120f64.max(visual_height(b) + b.h / 2.0)) {
                 continue;
+            }
+            if b.hp > 0.0 && b.progress >= 1.0 {
+                shard_prev = Some(b.id);
             }
             let depth = b.y + b.h * 0.3 + if b.wall_attachment.is_some() { 40.0 } else { 0.0 };
             match b.kind {
@@ -1194,6 +1211,17 @@ impl App {
                 }
             }
         }
+        if let Some(id) = shard_prev.take() {
+            if !batch.drawn.is_empty() {
+                shard_src.insert(id, std::mem::take(&mut batch.drawn));
+            }
+        }
+        batch.record = false;
+        batch.drawn.clear();
+        if shard_src.len() > 900 {
+            shard_src.clear();
+        }
+        self.shard_src = shard_src;
         for (d, s) in batch2.drain(..) {
             batch.shape(d, s);
         }
@@ -1777,6 +1805,27 @@ impl eframe::App for App {
         }
         self.ui.rings.retain(|r| r.t < 1.0);
         self.ui.impacts.retain(|i| self.ui.clock - i.2 < 1.3);
+        if self.args.run.iter().any(|c| c == "shatterdemo") && !self.ui.show_menu {
+            // Debug: one visible building falls every five seconds, starting at two.
+            let due = ((self.ui.clock - 2.0) / 5.0).floor();
+            if due >= 0.0 && (due as u32) >= self.shatter_demo as u32 {
+                let (cx, cy) = (self.view.cx, self.view.cy);
+                let pick = self
+                    .game
+                    .sim
+                    .state
+                    .buildings
+                    .iter()
+                    .enumerate()
+                    .filter(|(_, b)| b.team == 0 && b.hp > 0.0 && b.progress >= 1.0 && b.kind != BKind::Towncenter && b.kind != BKind::Farm && self.view.on_screen(b.x, b.y, -40.0))
+                    .min_by(|(_, a), (_, b)| ((a.x - cx).powi(2) + (a.y - cy).powi(2)).partial_cmp(&((b.x - cx).powi(2) + (b.y - cy).powi(2))).unwrap_or(std::cmp::Ordering::Equal))
+                    .map(|(i, _)| i);
+                if let Some(i) = pick {
+                    self.game.sim.state.buildings[i].hp = 0.0;
+                    self.shatter_demo = self.shatter_demo.saturating_add(1);
+                }
+            }
+        }
         let t0 = std::time::Instant::now();
         {
             let g = &self.game;
@@ -1792,6 +1841,11 @@ impl eframe::App for App {
                 }
             }
             self.fx.update(&g.sim, if g.paused() || self.ui.show_menu && !g.is_lan() || self.ui.show_debug { 0.0 } else { dt }, &look);
+        }
+        for id in self.fx.take_fallen() {
+            if let Some(frames) = self.shard_src.remove(&id) {
+                self.fx.shatter(&frames, &mut self.atlas);
+            }
         }
         self.prof[1] += t0.elapsed().as_secs_f64() * 1000.0;
         self.ui.shake = (self.ui.shake - dt * 16.0).max(0.0);
