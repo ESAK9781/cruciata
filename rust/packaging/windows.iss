@@ -1,6 +1,6 @@
 ; Inno Setup script. Build with: iscc /DVersion=1.2.3 /DStage=stage\cruciata windows.iss
 #ifndef Version
-#define Version "0.1.0"
+#define Version "0.2.0"
 #endif
 #ifndef Stage
 #define Stage "stage\cruciata"

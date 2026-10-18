@@ -114,6 +114,9 @@
       a {
         color: #e4c281;
       }
+      [hidden] {
+        display: none !important;
+      }
     </style>
   </head>
   <body>
@@ -125,6 +128,22 @@
         browser), keeps every campaign chapter and quickmatch option, and adds
         head-to-head play against a friend on the same network.
       </p>
+      <section class="card recommended" id="hero" hidden>
+        <span class="badge">Recommended for your computer</span>
+        <h2 id="hero-title">Download</h2>
+        <small id="hero-note"></small>
+        <a class="button" id="hero-button" href="#downloads">Download</a>
+      </section>
+      <h2
+        style="
+          font:
+            22px Georgia,
+            serif;
+          color: #e4cda2;
+        "
+      >
+        All downloads
+      </h2>
       <div class="grid" id="downloads">
         <section class="card" data-os="windows">
           <h2>Windows</h2>
@@ -159,6 +178,11 @@
             href="https://github.com/ESAK9781/cruciata/releases/latest/download/cruciata_amd64.deb"
             >Download the installer (.deb)</a
           >
+          <a
+            class="button"
+            href="https://github.com/ESAK9781/cruciata/releases/latest/download/Cruciata-linux-x64.tar.gz"
+            >Portable archive (.tar.gz)</a
+          >
         </section>
       </div>
       <h2
@@ -173,8 +197,8 @@
       </h2>
       <ul>
         <li>
-          Both of you install the same version and open
-          <strong>LAN multiplayer</strong>.
+          Both of you install the <em>same version</em> (always the latest) and
+          open <strong>LAN multiplayer</strong>.
         </li>
         <li>
           One chooses <strong>Host a game</strong>. The other sees it appear in
@@ -196,28 +220,82 @@
       <p><a href="index.html">← Back to the browser version</a></p>
     </main>
     <script>
-      (() => {
-        const ua = (
-          navigator.userAgentData?.platform ||
-          navigator.platform ||
+      (async () => {
+        const base =
+          "https://github.com/ESAK9781/cruciata/releases/latest/download/";
+        const nav = navigator;
+        const plat = (
+          nav.userAgentData?.platform ||
+          nav.platform ||
+          nav.userAgent ||
           ""
         ).toLowerCase();
-        const os = /win/.test(ua)
+        const os = /win/.test(plat)
           ? "windows"
-          : /mac/.test(ua)
-            ? "mac"
-            : /linux|x11/.test(ua)
-              ? "linux"
-              : "";
-        const mine =
-          document.querySelector(`[data-os="${os}"]`) ||
-          document.querySelector('[data-os="windows"]');
-        mine.classList.add("recommended");
-        mine.parentElement.prepend(mine);
-        mine.insertAdjacentHTML(
-          "afterbegin",
-          '<span class="badge">Recommended for your computer</span>',
-        );
+          : /iphone|ipad|android/.test(nav.userAgent.toLowerCase())
+            ? ""
+            : /mac/.test(plat)
+              ? "mac"
+              : /linux|x11/.test(plat)
+                ? "linux"
+                : "";
+        const card = document.querySelector(`[data-os="${os}"]`);
+        if (!card) {
+          document.getElementById("hero-note").textContent = "";
+          return;
+        }
+        let arch = "x64";
+        if (os === "mac") {
+          // Safari hides the CPU; Apple silicon reports an Apple GPU through WebGL.
+          try {
+            const he = await nav.userAgentData?.getHighEntropyValues([
+              "architecture",
+            ]);
+            if (he?.architecture)
+              arch = he.architecture === "arm" ? "arm" : "x64";
+            else {
+              const gl = document.createElement("canvas").getContext("webgl");
+              const ext = gl?.getExtension("WEBGL_debug_renderer_info");
+              const r = ext ? gl.getParameter(ext.UNMASKED_RENDERER_WEBGL) : "";
+              arch =
+                /apple m|apple gpu/i.test(r) && !/intel/i.test(r)
+                  ? "arm"
+                  : "x64";
+            }
+          } catch (e) {}
+        }
+        const hero = {
+          windows: [
+            "Windows",
+            "Windows 10 or 11 · 64-bit",
+            "Cruciata-Setup-windows-x64.exe",
+            "Download for Windows",
+          ],
+          mac: [
+            arch === "arm" ? "macOS · Apple silicon" : "macOS · Intel",
+            arch === "arm"
+              ? "M1, M2, M3 or newer. If this is wrong, pick the other build below."
+              : "Intel Mac. On an Apple silicon Mac pick the other build below.",
+            arch === "arm"
+              ? "Cruciata-macOS-arm64.dmg"
+              : "Cruciata-macOS-x64.dmg",
+            "Download for macOS",
+          ],
+          linux: [
+            "Linux",
+            "Debian, Ubuntu and derivatives · 64-bit (.deb)",
+            "cruciata_amd64.deb",
+            "Download for Linux",
+          ],
+        }[os];
+        document.getElementById("hero-title").textContent = hero[0];
+        document.getElementById("hero-note").textContent = hero[1];
+        const btn = document.getElementById("hero-button");
+        btn.href = base + hero[2];
+        btn.textContent = hero[3];
+        document.getElementById("hero").hidden = false;
+        card.classList.add("recommended");
+        card.parentElement.prepend(card);
       })();
     </script>
   </body>
