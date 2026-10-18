@@ -2886,11 +2886,30 @@ main {
 }
 
 .menu-install {
-  display: inline-block;
-  margin: 12px 0 0;
-  color: #e4c281;
-  font-size: 12px;
-  text-decoration: underline;
+  display: block;
+  box-sizing: border-box;
+  max-width: 780px;
+  margin: 14px 0 0;
+  border: 1px solid #887042;
+  background: linear-gradient(110deg, #3c382b, #202927);
+  color: #f3e1b8;
+  padding: 16px 20px;
+  font: 20px Georgia;
+  text-decoration: none;
+  transition:
+    border-color 0.2s,
+    background 0.2s;
+}
+.menu-install:hover,
+.menu-install:focus-visible {
+  border-color: #f0c978;
+  background: #414536;
+}
+.menu-install small {
+  display: block;
+  font: 12px/1.5 system-ui;
+  color: #b6bbaa;
+  margin-top: 6px;
 }
 
 #objective-toggle {
