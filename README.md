@@ -8,6 +8,10 @@ Run `node scripts/preview-art.js` for the complete asset board in `artifacts/iso
 
 With the local server running, `npm run art:bake` rebuilds the trimmed PNG sprite pages from editable artwork masters. `node scripts/audit-world-art.js` captures a live gallery of both architectural styles, all campaigns, harvesting, wall joins, construction, damage, troops and siege poses. `node scripts/profile-render.js` measures stationary, animated and off-camera rendering.
 
+## Download the desktop version
+
+Native installers (with LAN multiplayer): [Windows installer](https://github.com/ESAK9781/cruciata/releases/latest/download/Cruciata-Setup-windows-x64.exe), [macOS Apple silicon](https://github.com/ESAK9781/cruciata/releases/latest/download/Cruciata-macOS-arm64.dmg), [macOS Intel](https://github.com/ESAK9781/cruciata/releases/latest/download/Cruciata-macOS-x64.dmg), [Linux .deb](https://github.com/ESAK9781/cruciata/releases/latest/download/cruciata_amd64.deb). All releases: [github.com/ESAK9781/cruciata/releases](https://github.com/ESAK9781/cruciata/releases). Install page: [install.html](https://esak9781.github.io/cruciata/install.html).
+
 ## Run and deploy
 
 Play at [esak9781.github.io/cruciata](https://esak9781.github.io/cruciata/). Source: [ESAK9781/cruciata](https://github.com/ESAK9781/cruciata).
